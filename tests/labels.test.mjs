@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { draftToLabels, labelsToDraft } from "../lib/labels.ts";
+import { draftFromModel, draftToLabels, labelsToDraft } from "../lib/labels.ts";
 
 const entities = [
   { name: "currency", format: "currency", description: "" },
@@ -86,4 +86,25 @@ test("a round trip through the draft preserves the labels", () => {
   const { labels } = draftToLabels(labelsToDraft(original, entities), entities);
 
   assert.deepEqual(labels, original);
+});
+
+test("a model draft prefills the values it proposed", () => {
+  const draft = draftFromModel({ currency: "EUR", total_amount: 125.31 }, entities);
+
+  assert.deepEqual(draft.currency, { mode: "value", text: "EUR" });
+  assert.deepEqual(draft.total_amount, { mode: "value", text: "125.31" });
+});
+
+test("a null proposed by the model is left unlabelled, not asserted as absent", () => {
+  // "Absent in document" is a claim about the document. The model returning
+  // nothing is not evidence of that, so the reviewer has to say so explicitly.
+  const draft = draftFromModel({ supplier_name: null }, entities);
+
+  assert.equal(draft.supplier_name.mode, "skip");
+});
+
+test("an entity the model never mentioned stays unlabelled", () => {
+  const draft = draftFromModel({ currency: "EUR" }, entities);
+
+  assert.equal(draft.supplier_name.mode, "skip");
 });

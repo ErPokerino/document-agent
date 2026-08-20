@@ -29,7 +29,6 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
-  Workflow,
   X,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
@@ -489,8 +488,6 @@ export default function Home() {
           <button className={`nav-item ${view === "lab" ? "active" : ""}`} onClick={() => setView("lab")}>
             <FlaskConical size={17} /> Prompt Lab
           </button>
-          <button className="nav-item disabled" aria-disabled="true"><FileText size={17} /> Documents <small>Soon</small></button>
-          <button className="nav-item disabled" aria-disabled="true"><Workflow size={17} /> Pipeline <small>Soon</small></button>
         </nav>
 
         <div className="sidebar-bottom">

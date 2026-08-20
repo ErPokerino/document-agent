@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Database,
+  FilterX,
   FlaskConical,
   History,
   LoaderCircle,
@@ -17,12 +18,26 @@ import {
   Tag,
   Trash2,
   UploadCloud,
+  Wand2,
   X,
 } from "lucide-react";
-import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
-import { draftToLabels, labelsToDraft, type LabelDraft, type LabelMode } from "../lib/labels";
+import {
+  draftFromModel,
+  draftToLabels,
+  labelsToDraft,
+  type LabelDraft,
+  type LabelMode,
+} from "../lib/labels";
+import {
+  distinctModels,
+  emptyFilters,
+  filterEvaluations,
+  hasActiveFilters,
+  type EvaluationFilters,
+} from "../lib/run-filters";
 import type {
   AppSettings,
   Dataset,
@@ -62,9 +77,12 @@ function accuracyClass(accuracy: number | null | undefined) {
   return "poor";
 }
 
+function seconds(ms: number | null | undefined) {
+  return ms === null || ms === undefined ? "—" : `${(ms / 1000).toFixed(1)} s`;
+}
+
 function describeValue(value: unknown) {
-  if (value === null || value === undefined) return "—";
-  return String(value);
+  return value === null || value === undefined ? "—" : String(value);
 }
 
 type Props = {
@@ -91,28 +109,38 @@ export function PromptLab({
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [documents, setDocuments] = useState<DatasetDocument[]>([]);
   const [newDatasetName, setNewDatasetName] = useState("");
+  const [dragging, setDragging] = useState(false);
   const [labelling, setLabelling] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState<Record<string, LabelDraft>>({});
+  const [labelHints, setLabelHints] = useState<Record<string, string>>({});
+  const [drafting, setDrafting] = useState<string | null>(null);
   const [validatedRuns, setValidatedRuns] = useState<ExtractionRun[]>([]);
+  const [pickedRuns, setPickedRuns] = useState<Set<number>>(new Set());
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [openEvaluation, setOpenEvaluation] = useState<EvaluationDetail | null>(null);
+  const [filters, setFilters] = useState<EvaluationFilters>(emptyFilters);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
+  const visibleEvaluations = filterEvaluations(evaluations, filters);
 
-  const refreshDatasets = useCallback(async () => {
+  async function refreshDatasets() {
     setDatasets(await api.datasets());
-  }, []);
+  }
 
-  const refreshDocuments = useCallback(async (dataset: string) => {
+  async function refreshDocuments(dataset: string) {
     setDocuments(await api.datasetDocuments(dataset));
-  }, []);
+  }
 
-  const refreshEvaluations = useCallback(async () => {
+  async function refreshEvaluations() {
     setEvaluations(await api.evaluations());
-  }, []);
+  }
+
+  async function refreshValidatedRuns() {
+    setValidatedRuns(await api.runs(true));
+  }
 
   useEffect(() => {
     let active = true;
@@ -158,14 +186,16 @@ export function PromptLab({
   // A test run is many model calls; poll while one is in flight.
   useEffect(() => {
     if (!running) return;
+    const runningId = running.id;
+    const openId = openEvaluation?.id;
     const timer = window.setInterval(() => {
-      void refreshEvaluations().catch(() => undefined);
-      if (openEvaluation?.id === running.id) {
-        void api.evaluation(running.id).then(setOpenEvaluation).catch(() => undefined);
+      void api.evaluations().then(setEvaluations).catch(() => undefined);
+      if (openId === runningId) {
+        void api.evaluation(runningId).then(setOpenEvaluation).catch(() => undefined);
       }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [running, openEvaluation?.id, refreshEvaluations]);
+  }, [running, openEvaluation?.id]);
 
   async function guard(action: () => Promise<void>) {
     setBusy(true);
@@ -218,21 +248,36 @@ export function PromptLab({
     setDraftSettings({ ...draftSettings, prompts: { ...draftSettings.prompts, [key]: value } });
   }
 
-  async function openLabels(document: string) {
-    await guard(async () => {
+  function openLabels(document: string) {
+    void guard(async () => {
       const current = await api.documentLabels(selectedDataset!, document);
       setLabelDraft(labelsToDraft(current.labels, savedEntities));
+      setLabelHints({});
       setLabelling(document);
     });
   }
 
-  async function saveLabels() {
+  function draftWithModel(document: string) {
+    setDrafting(document);
+    void guard(async () => {
+      try {
+        const proposal = await api.draftLabels(selectedDataset!, document);
+        setLabelDraft(draftFromModel(proposal.labels, savedEntities));
+        setLabelHints(proposal.confidence);
+        setLabelling(document);
+      } finally {
+        setDrafting(null);
+      }
+    });
+  }
+
+  function saveLabels() {
     const { labels, errors } = draftToLabels(labelDraft, savedEntities);
     if (errors.length) {
       setError(errors.join(" "));
       return;
     }
-    await guard(async () => {
+    void guard(async () => {
       await api.saveDocumentLabels(selectedDataset!, labelling!, labels);
       await refreshDocuments(selectedDataset!);
       await refreshDatasets();
@@ -240,15 +285,47 @@ export function PromptLab({
     });
   }
 
-  function handleUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !selectedDataset) return;
+  function uploadFiles(files: FileList | File[]) {
+    const pdfs = [...files].filter((file) => file.name.toLowerCase().endsWith(".pdf"));
+    if (!selectedDataset || pdfs.length === 0) {
+      if (pdfs.length === 0) setError("Only PDF documents can be added to a dataset.");
+      return;
+    }
     void guard(async () => {
-      await api.addDatasetDocument(selectedDataset, file);
+      for (const file of pdfs) await api.addDatasetDocument(selectedDataset, file);
       await refreshDocuments(selectedDataset);
       await refreshDatasets();
     });
+  }
+
+  function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) uploadFiles(event.target.files);
     event.target.value = "";
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragging(false);
+    uploadFiles(event.dataTransfer.files);
+  }
+
+  function togglePicked(runId: number) {
+    setPickedRuns((current) => {
+      const next = new Set(current);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  }
+
+  function promotePicked() {
+    if (!selectedDataset || pickedRuns.size === 0) return;
+    void guard(async () => {
+      await api.promoteRuns(selectedDataset, [...pickedRuns]);
+      await refreshDocuments(selectedDataset);
+      await refreshDatasets();
+      setPickedRuns(new Set());
+    });
   }
 
   const promptsTab = (
@@ -313,11 +390,32 @@ export function PromptLab({
         ) : (
           <div className="dataset-list">
             {datasets.map((dataset) => (
-              <button key={dataset.name} className={`dataset-option ${selectedDataset === dataset.name ? "selected" : ""}`} onClick={() => { setSelectedDataset(dataset.name); setLabelling(null); }}>
-                <span className="radio">{selectedDataset === dataset.name && <span />}</span>
-                <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
-                <span className="model-specs">{dataset.labelled_count === 0 && <em className="warn">No ground truth</em>}</span>
-              </button>
+              <div key={dataset.name} className={`dataset-option ${selectedDataset === dataset.name ? "selected" : ""}`}>
+                <button className="dataset-pick" onClick={() => { setSelectedDataset(dataset.name); setLabelling(null); setPickedRuns(new Set()); }}>
+                  <span className="radio">{selectedDataset === dataset.name && <span />}</span>
+                  <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
+                </button>
+                {dataset.labelled_count === 0 && <em className="warn">No ground truth</em>}
+                <button
+                  className="icon-button"
+                  aria-label={`Delete dataset ${dataset.name}`}
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm(`Delete the dataset "${dataset.name}" and all its documents and labels?`)) return;
+                    void guard(async () => {
+                      await api.deleteDataset(dataset.name);
+                      if (selectedDataset === dataset.name) {
+                        setSelectedDataset(null);
+                        setDocuments([]);
+                        setLabelling(null);
+                      }
+                      await refreshDatasets();
+                    });
+                  }}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -328,18 +426,45 @@ export function PromptLab({
           <div className="settings-card-heading">
             <span className="settings-card-icon"><Tag size={18} /></span>
             <div><h3>{selectedDataset}</h3><p>A document is only scored on the entities you labelled.</p></div>
-            <button className="add-entity-button" onClick={() => uploadInput.current?.click()}><UploadCloud size={14} /> Add PDF</button>
           </div>
-          <input ref={uploadInput} type="file" accept="application/pdf,.pdf" onChange={handleUpload} hidden />
+
+          <div
+            className={`dataset-drop ${dragging ? "dragging" : ""}`}
+            onDragEnter={() => setDragging(true)}
+            onDragLeave={() => setDragging(false)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+          >
+            <UploadCloud size={20} />
+            <div>
+              <strong>Drop PDFs here</strong>
+              <small>Several at once is fine</small>
+            </div>
+            <button className="secondary-button small" onClick={() => uploadInput.current?.click()}>Browse</button>
+          </div>
+          <input ref={uploadInput} type="file" accept="application/pdf,.pdf" multiple onChange={handleUpload} hidden />
 
           {validatedRuns.length > 0 && (
-            <div className="promote-row">
-              <History size={15} />
-              <span>Reuse a document you already reviewed:</span>
-              <select defaultValue="" onChange={(event) => { const runId = Number(event.target.value); event.target.value = ""; if (runId) void guard(async () => { await api.promoteRun(selectedDataset, runId); await refreshDocuments(selectedDataset); await refreshDatasets(); }); }}>
-                <option value="">Choose a validated run…</option>
-                {validatedRuns.map((run) => <option key={run.id} value={run.id}>{run.filename} · {run.created_at.slice(0, 10)}</option>)}
-              </select>
+            <div className="promote-panel">
+              <div className="promote-head">
+                <History size={15} />
+                <span>Reuse documents you already reviewed</span>
+                <button className="link-button" onClick={() => setPickedRuns(pickedRuns.size === validatedRuns.length ? new Set() : new Set(validatedRuns.map((run) => run.id)))}>
+                  {pickedRuns.size === validatedRuns.length ? "Clear all" : "Select all"}
+                </button>
+              </div>
+              <div className="promote-list">
+                {validatedRuns.map((run) => (
+                  <label className="promote-item" key={run.id}>
+                    <input type="checkbox" checked={pickedRuns.has(run.id)} onChange={() => togglePicked(run.id)} />
+                    <span className="promote-name">{run.filename}</span>
+                    <small>{run.created_at.replace("T", " ").slice(0, 16)} · {run.model}</small>
+                  </label>
+                ))}
+              </div>
+              <button className="secondary-button" disabled={pickedRuns.size === 0 || busy} onClick={promotePicked}>
+                <Plus size={14} /> Add {pickedRuns.size || ""} {pickedRuns.size === 1 ? "document" : "documents"}
+              </button>
             </div>
           )}
 
@@ -357,7 +482,10 @@ export function PromptLab({
                     </small>
                   </div>
                   <span className={`label-pill ${document.labelled ? "ok" : "missing"}`}>{document.labelled ? <Check size={11} /> : <AlertCircle size={11} />}</span>
-                  <button className="secondary-button small" onClick={() => openLabels(document.name)}>{document.labelled ? "Edit labels" : "Add labels"}</button>
+                  <button className="secondary-button small" disabled={!isModelReady || busy} title={isModelReady ? "Extract with the active model, then review the result" : "Load and warm up the model in Settings first"} onClick={() => draftWithModel(document.name)}>
+                    {drafting === document.name ? <LoaderCircle className="spin" size={13} /> : <Wand2 size={13} />} Draft
+                  </button>
+                  <button className="secondary-button small" onClick={() => openLabels(document.name)}>{document.labelled ? "Edit" : "Label"}</button>
                   <button className="icon-button" aria-label={`Remove ${document.name}`} onClick={() => guard(async () => { await api.removeDatasetDocument(selectedDataset, document.name); await refreshDocuments(selectedDataset); await refreshDatasets(); })}><Trash2 size={15} /></button>
                 </div>
               ))}
@@ -370,15 +498,25 @@ export function PromptLab({
                 <strong>Ground truth · {labelling}</strong>
                 <button className="icon-button" aria-label="Close" onClick={() => setLabelling(null)}><X size={15} /></button>
               </div>
+              {Object.keys(labelHints).length > 0 && (
+                <p className="field-help draft-note">
+                  <Wand2 size={12} /> Prefilled by the model. Check every value: the confidence beside each field is the model&apos;s own guess, not a guarantee.
+                </p>
+              )}
               {savedEntities.map((entity) => {
                 const entry = labelDraft[entity.name] ?? { mode: "skip" as LabelMode, text: "" };
+                const hint = labelHints[entity.name];
                 return (
                   <div className="label-row" key={entity.name}>
-                    <div className="label-name"><span>{entity.name}</span><small>{formatLabels[entity.format]}</small></div>
+                    <div className="label-name">
+                      <span>{entity.name}</span>
+                      <small>{formatLabels[entity.format]}</small>
+                    </div>
                     <select value={entry.mode} onChange={(event) => setLabelDraft({ ...labelDraft, [entity.name]: { ...entry, mode: event.target.value as LabelMode } })}>
                       {Object.entries(labelModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
                     <input disabled={entry.mode !== "value"} placeholder={entry.mode === "value" ? "Correct value" : "—"} value={entry.text} onChange={(event) => setLabelDraft({ ...labelDraft, [entity.name]: { mode: "value", text: event.target.value } })} />
+                    {hint ? <span className={`confidence-pill ${hint}`}><i /> {hint}</span> : <span />}
                   </div>
                 );
               })}
@@ -427,7 +565,7 @@ export function PromptLab({
               <Square size={14} /> Cancel
             </button>
           ) : (
-            <button className="primary-button" disabled={!selectedDataset || busy || !isModelReady} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!); await refreshEvaluations(); })}>
+            <button className="primary-button" disabled={!selectedDataset || busy || !isModelReady} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!); await refreshEvaluations(); await refreshValidatedRuns(); })}>
               <Play size={14} /> Run test
             </button>
           )}
@@ -446,19 +584,67 @@ export function PromptLab({
       <div className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><History size={18} /></span>
-          <div><h3>Past runs</h3><p>Each run remembers the prompts it used, so two runs are comparable.</p></div>
+          <div><h3>Past runs</h3><p>Each run remembers the prompts, the model and the page limit it used.</p></div>
         </div>
+
+        <div className="run-filters">
+          <label><span>Model</span>
+            <select value={filters.model} onChange={(event) => setFilters({ ...filters, model: event.target.value })}>
+              <option value="">Any</option>
+              {distinctModels(evaluations).map((model) => <option key={model} value={model}>{model}</option>)}
+            </select>
+          </label>
+          <label><span>From</span>
+            <input type="date" value={filters.since} onChange={(event) => setFilters({ ...filters, since: event.target.value })} />
+          </label>
+          <label><span>Min accuracy %</span>
+            <input type="number" min="0" max="100" placeholder="Any" value={filters.minAccuracy} onChange={(event) => setFilters({ ...filters, minAccuracy: event.target.value })} />
+          </label>
+          <label><span>Min documents</span>
+            <input type="number" min="0" placeholder="Any" value={filters.minDocuments} onChange={(event) => setFilters({ ...filters, minDocuments: event.target.value })} />
+          </label>
+          <button className="secondary-button small" disabled={!hasActiveFilters(filters)} onClick={() => setFilters(emptyFilters)}>
+            <FilterX size={13} /> Clear
+          </button>
+        </div>
+
         {evaluations.length === 0 ? (
           <div className="models-empty"><AlertCircle size={18} /><span>No test has been run yet.</span></div>
+        ) : visibleEvaluations.length === 0 ? (
+          <div className="models-empty"><AlertCircle size={18} /><span>No run matches these filters. {evaluations.length} hidden.</span></div>
         ) : (
           <div className="evaluation-list">
-            {evaluations.map((evaluation) => (
-              <button key={evaluation.id} className={`evaluation-row ${openEvaluation?.id === evaluation.id ? "selected" : ""}`} onClick={() => guard(async () => setOpenEvaluation(await api.evaluation(evaluation.id)))}>
-                <span className={`status-tag ${evaluation.status}`}>{evaluation.status}</span>
-                <span className="evaluation-meta"><strong>{evaluation.dataset}</strong><small>{evaluation.created_at.replace("T", " ").slice(0, 16)} · {evaluation.model}</small></span>
-                <span className={`evaluation-score ${accuracyClass(evaluation.metrics.accuracy)}`}>{percent(evaluation.metrics.accuracy)}</span>
-                <small>{evaluation.metrics.matched}/{evaluation.metrics.total} fields</small>
-              </button>
+            {visibleEvaluations.map((evaluation) => (
+              <div key={evaluation.id} className={`evaluation-row ${openEvaluation?.id === evaluation.id ? "selected" : ""}`}>
+                <button className="evaluation-open" onClick={() => guard(async () => setOpenEvaluation(await api.evaluation(evaluation.id)))}>
+                  <span className={`status-tag ${evaluation.status}`}>{evaluation.status}</span>
+                  <span className="evaluation-meta">
+                    <strong>{evaluation.dataset}</strong>
+                    <small>{evaluation.created_at.replace("T", " ").slice(0, 16)} · {evaluation.total_documents} docs · {seconds(evaluation.total_elapsed_ms)} total · {seconds(evaluation.average_elapsed_ms)} avg</small>
+                  </span>
+                  <span className="tag-row">
+                    <span className="model-tag">{evaluation.model}</span>
+                    <span className="pages-tag">{evaluation.max_pages || "?"} pg</span>
+                  </span>
+                  <span className={`evaluation-score ${accuracyClass(evaluation.metrics.accuracy)}`}>{percent(evaluation.metrics.accuracy)}</span>
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Delete run ${evaluation.id}`}
+                  disabled={evaluation.status === "running" || busy}
+                  title={evaluation.status === "running" ? "Cancel the run before deleting it" : "Delete this run"}
+                  onClick={() => {
+                    if (!window.confirm(`Delete run #${evaluation.id} and its results?`)) return;
+                    void guard(async () => {
+                      await api.deleteEvaluation(evaluation.id);
+                      if (openEvaluation?.id === evaluation.id) setOpenEvaluation(null);
+                      await refreshEvaluations();
+                    });
+                  }}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -468,8 +654,17 @@ export function PromptLab({
         <div className="settings-card">
           <div className="settings-card-heading">
             <span className="settings-card-icon"><CheckCircle2 size={18} /></span>
-            <div><h3>Run #{openEvaluation.id} · {openEvaluation.dataset}</h3><p>{openEvaluation.model} · {openEvaluation.completed_documents} of {openEvaluation.total_documents} documents</p></div>
+            <div>
+              <h3>Run #{openEvaluation.id} · {openEvaluation.dataset}</h3>
+              <p>{openEvaluation.completed_documents} of {openEvaluation.total_documents} documents · {seconds(openEvaluation.total_elapsed_ms)} in total · {seconds(openEvaluation.average_elapsed_ms)} per document</p>
+            </div>
             <button className="icon-button" aria-label="Close" onClick={() => setOpenEvaluation(null)}><X size={15} /></button>
+          </div>
+
+          <div className="run-tags">
+            <span className="model-tag">{openEvaluation.model}</span>
+            <span className="pages-tag">{openEvaluation.max_pages || "?"} pages per extraction</span>
+            <span className="pages-tag">{openEvaluation.prompts.entities.length} entities</span>
           </div>
 
           {openEvaluation.error && <div className="alert error-alert"><AlertCircle size={17} /><span>{openEvaluation.error}</span></div>}
@@ -486,7 +681,7 @@ export function PromptLab({
                   <strong>{document.name}</strong>
                   {document.status === "failed"
                     ? <span className="status-tag failed">failed</span>
-                    : <small>{document.items.filter((item) => item.matched).length}/{document.items.length} correct{document.elapsed_ms ? ` · ${(document.elapsed_ms / 1000).toFixed(1)} s` : ""}</small>}
+                    : <small>{document.items.filter((item) => item.matched).length}/{document.items.length} correct{document.elapsed_ms ? ` · ${seconds(document.elapsed_ms)}` : ""}</small>}
                 </div>
                 {document.error && <p className="field-warning"><AlertCircle size={11} /> {document.error}</p>}
                 {document.items.filter((item) => !item.matched).map((item) => (

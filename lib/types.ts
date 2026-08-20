@@ -48,6 +48,13 @@ export type DocumentLabels = {
   updated_at: string | null;
 };
 
+export type DraftLabels = {
+  document: string;
+  labels: Record<string, unknown>;
+  confidence: Record<string, string>;
+  elapsed_ms: number;
+};
+
 export type EntityDefinition = {
   name: string;
   format: EntityFormat;
@@ -64,6 +71,9 @@ export type Evaluation = {
   total_documents: number;
   completed_documents: number;
   error: string | null;
+  max_pages: number;
+  total_elapsed_ms: number;
+  average_elapsed_ms: number | null;
   metrics: Metrics;
 };
 
@@ -77,6 +87,9 @@ export type EvaluationDetail = {
   total_documents: number;
   completed_documents: number;
   error: string | null;
+  max_pages: number;
+  total_elapsed_ms: number;
+  average_elapsed_ms: number | null;
   metrics: Metrics;
   prompts: PromptConfiguration;
   documents: EvaluationDocumentResult[];
@@ -218,7 +231,7 @@ export type ProcessingInfo = {
 };
 
 export type PromoteRunRequest = {
-  run_id: number;
+  run_ids: number[];
 };
 
 export type PromptConfiguration = {

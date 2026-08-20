@@ -146,3 +146,55 @@ def test_a_stale_running_evaluation_is_marked_interrupted(store) -> None:
     EvaluationStore(store.path).mark_interrupted()
 
     assert store.get_evaluation(evaluation_id).status == "failed"
+
+
+def test_the_page_limit_of_the_run_is_remembered(store) -> None:
+    evaluation_id = store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        max_pages=3,
+    )
+
+    assert store.get_evaluation(evaluation_id).max_pages == 3
+
+
+def test_timing_is_reported_in_total_and_on_average(store) -> None:
+    evaluation_id = start(store)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1000)
+    store.record_document(evaluation_id, "b.pdf", outcomes("EUR", 125.31), elapsed_ms=3000)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.total_elapsed_ms == 4000
+    assert detail.average_elapsed_ms == 2000
+
+
+def test_a_failed_document_does_not_skew_the_average(store) -> None:
+    evaluation_id = start(store)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=2000)
+    store.record_document_failure(evaluation_id, "b.pdf", "boom")
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.total_elapsed_ms == 2000
+    assert detail.average_elapsed_ms == 2000
+
+
+def test_an_evaluation_with_no_timings_reports_none(store) -> None:
+    detail = store.get_evaluation(start(store))
+
+    assert detail.total_elapsed_ms == 0
+    assert detail.average_elapsed_ms is None
+
+
+def test_an_evaluation_can_be_deleted_with_its_results(store) -> None:
+    evaluation_id = start(store)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1000)
+
+    assert store.delete(evaluation_id) is True
+    assert store.get_evaluation(evaluation_id) is None
+    assert store.list_evaluations() == []
+
+
+def test_deleting_an_unknown_evaluation_reports_it(store) -> None:
+    assert store.delete(999) is False

@@ -211,7 +211,7 @@ class DocumentLabels(BaseModel):
 class PromoteRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run_id: int
+    run_ids: Annotated[list[int], Field(min_length=1, max_length=200)]
 
 
 class ExtractionRun(BaseModel):
@@ -237,6 +237,13 @@ class CorrectionsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     corrections: dict[str, Any]
+
+
+class DraftLabels(BaseModel):
+    document: str
+    labels: dict[str, Any]
+    confidence: dict[str, str]
+    elapsed_ms: int
 
 
 class MetricTally(BaseModel):
@@ -269,6 +276,9 @@ class Evaluation(BaseModel):
     total_documents: int
     completed_documents: int
     error: str | None = None
+    max_pages: int
+    total_elapsed_ms: int
+    average_elapsed_ms: int | None = None
     metrics: Metrics
 
 

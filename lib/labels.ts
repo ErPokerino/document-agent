@@ -61,3 +61,24 @@ export function draftToLabels(
 
   return { labels, errors };
 }
+
+/**
+ * Turn a model-proposed extraction into a labelling draft.
+ *
+ * Differs from `labelsToDraft` on nulls. In stored ground truth a null means
+ * "the document says nothing here", which is a claim. A model returning nothing
+ * is not evidence for that claim, so it starts unlabelled and the reviewer
+ * decides.
+ */
+export function draftFromModel(
+  proposed: Record<string, unknown>,
+  entities: EntityDefinition[],
+): Record<string, LabelDraft> {
+  return Object.fromEntries(
+    entities.map((entity) => {
+      const value = proposed[entity.name];
+      if (value === null || value === undefined) return [entity.name, { mode: "skip", text: "" }];
+      return [entity.name, { mode: "value", text: String(value) }];
+    }),
+  );
+}

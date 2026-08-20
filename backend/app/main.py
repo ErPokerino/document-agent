@@ -15,6 +15,7 @@ from app.domain.models import (
     DatasetCreateRequest,
     DatasetDocument,
     DocumentLabels,
+    DraftLabels,
     Evaluation,
     EvaluationDetail,
     EvaluationRequest,
@@ -366,6 +367,9 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "total_documents",
                 "completed_documents",
                 "error",
+                "max_pages",
+                "total_elapsed_ms",
+                "average_elapsed_ms",
             )
         },
         metrics=_metrics_model(detail.metrics),
@@ -473,26 +477,105 @@ async def set_document_labels(name: str, document: str, request: LabelsRequest) 
     )
 
 
-@app.post("/api/datasets/{name}/documents/from-run", response_model=DatasetDocument, status_code=201)
-async def promote_run_to_dataset(name: str, request: PromoteRunRequest) -> DatasetDocument:
+@app.post("/api/datasets/{name}/documents/from-run", response_model=list[DatasetDocument], status_code=201)
+async def promote_runs_to_dataset(name: str, request: PromoteRunRequest) -> list[DatasetDocument]:
     _require_dataset(name)
-    run = run_store.get_run(request.run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=f"No run with id {request.run_id}")
-    content = run_store.read_document(run.file_sha256)
-    if content is None:
-        raise HTTPException(
-            status_code=410,
-            detail="The original PDF for that run is no longer stored on this device.",
-        )
-    labels = run_store.validated_values(request.run_id) or {}
+
+    # Resolve everything first: a batch that names a missing run fails before it
+    # has half-populated the dataset.
+    resolved = []
+    for run_id in request.run_ids:
+        run = run_store.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"No run with id {run_id}")
+        content = run_store.read_document(run.file_sha256)
+        if content is None:
+            raise HTTPException(
+                status_code=410,
+                detail=f"The original PDF for run {run_id} is no longer stored on this device.",
+            )
+        resolved.append((run, content, run_store.validated_values(run_id) or {}))
+
+    added: list[DatasetDocument] = []
+    for run, content, labels in resolved:
+        try:
+            document = dataset_store.add_document(
+                name, run.filename, content, labels=labels, source="promoted_run"
+            )
+        except InvalidName as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        added.append(DatasetDocument(**asdict(document)))
+    return added
+
+
+@app.post("/api/datasets/{name}/documents/{document}/draft-labels", response_model=DraftLabels)
+async def draft_labels(name: str, document: str) -> DraftLabels:
+    """Propose ground truth by running the active model. Nothing is saved.
+
+    A blank labelling form for twenty invoices is why datasets never get built.
+    A draft the reviewer corrects is the same work as reading the document once.
+    """
+    _require_dataset(name)
+    settings = settings_store.read()
+
     try:
-        added = dataset_store.add_document(
-            name, run.filename, content, labels=labels, source="promoted_run"
+        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+    except LMStudioError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    selected = next((model for model in available if model.id == settings.model), None)
+    if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="The active model is not ready. Open Settings and use Load & warm up first.",
         )
+
+    try:
+        content = dataset_store.read_document(name, document)
     except InvalidName as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return DatasetDocument(**asdict(added))
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=f"No document named {document}") from exc
+
+    async with exclusive_model_operation("processing"):
+        context = PipelineContext(
+            filename=document,
+            content=content,
+            model=settings.model,
+            lm_studio_url=settings.lm_studio_url,
+        )
+        pipeline = DocumentPipeline(
+            [
+                InspectPdf(max_pages_to_analyze=settings.max_pages_to_analyze),
+                ExtractConfiguredEntities(settings.prompts),
+            ]
+        )
+        started = time.perf_counter()
+        try:
+            result = await pipeline.run(context)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LMStudioError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        extraction = result.artifacts["extraction"]
+        run_store.record_run(
+            filename=document,
+            content=content,
+            model=settings.model,
+            prompts=settings.prompts,
+            extraction=extraction,
+            page_count=result.artifacts["page_count"],
+            processed_pages=result.artifacts["processed_pages"],
+            elapsed_ms=elapsed_ms,
+            source="labelling",
+        )
+        return DraftLabels(
+            document=document,
+            labels={name_: field.value for name_, field in extraction.items()},
+            confidence={name_: field.confidence for name_, field in extraction.items()},
+            elapsed_ms=elapsed_ms,
+        )
 
 
 @app.get("/api/runs", response_model=list[ExtractionRun])
@@ -575,6 +658,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         model=settings.model,
         prompts=settings.prompts,
         total_documents=len(documents),
+        max_pages=settings.max_pages_to_analyze,
     )
     evaluation_cancelled = asyncio.Event()
 
@@ -604,6 +688,17 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
 
     evaluation_task = asyncio.create_task(drive(evaluation_cancelled))
     return _evaluation_model(evaluation_store.get_evaluation(evaluation_id))
+
+
+@app.delete("/api/evaluations/{evaluation_id}", status_code=204, response_class=Response)
+async def delete_evaluation(evaluation_id: int) -> Response:
+    detail = evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    if detail.status == "running":
+        raise HTTPException(status_code=409, detail="Cancel that evaluation before deleting it.")
+    evaluation_store.delete(evaluation_id)
+    return Response(status_code=204)
 
 
 @app.post("/api/evaluations/{evaluation_id}/cancel", status_code=202, response_model=Evaluation)

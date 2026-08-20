@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS evaluations (
     prompts_json        TEXT    NOT NULL,
     status              TEXT    NOT NULL,
     total_documents     INTEGER NOT NULL,
-    error               TEXT
+    error               TEXT,
+    max_pages           INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_documents (
@@ -83,6 +84,9 @@ class EvaluationSummary:
     total_documents: int
     completed_documents: int
     error: str | None
+    max_pages: int
+    total_elapsed_ms: int
+    average_elapsed_ms: int | None
     metrics: EvaluationMetrics
 
 
@@ -110,6 +114,16 @@ class EvaluationStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            self._add_missing_columns(connection)
+
+    @staticmethod
+    def _add_missing_columns(connection: sqlite3.Connection) -> None:
+        """Bring a database created by an earlier version up to date."""
+        existing = {row["name"] for row in connection.execute("PRAGMA table_info(evaluations)")}
+        if "max_pages" not in existing:
+            connection.execute(
+                "ALTER TABLE evaluations ADD COLUMN max_pages INTEGER NOT NULL DEFAULT 0"
+            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -129,12 +143,14 @@ class EvaluationStore:
         model: str,
         prompts: PromptConfiguration,
         total_documents: int,
+        max_pages: int = 0,
     ) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO evaluations (created_at, dataset, model, prompts_json, status, total_documents)
-                VALUES (?, ?, ?, ?, 'running', ?)
+                INSERT INTO evaluations
+                    (created_at, dataset, model, prompts_json, status, total_documents, max_pages)
+                VALUES (?, ?, ?, ?, 'running', ?, ?)
                 """,
                 (
                     _now(),
@@ -142,9 +158,16 @@ class EvaluationStore:
                     model,
                     json.dumps(prompts.model_dump(mode="json"), ensure_ascii=False),
                     total_documents,
+                    max_pages,
                 ),
             )
             return int(cursor.lastrowid)
+
+    def delete(self, evaluation_id: int) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM evaluations WHERE id = ?", (evaluation_id,))
+            # The child rows go with it through ON DELETE CASCADE.
+            return cursor.rowcount > 0
 
     def record_document(
         self,
@@ -275,10 +298,16 @@ class EvaluationStore:
 
     @staticmethod
     def _summary(connection: sqlite3.Connection, row: sqlite3.Row) -> EvaluationSummary:
-        completed = connection.execute(
-            "SELECT COUNT(*) AS n FROM evaluation_documents WHERE evaluation_id = ?",
+        progress = connection.execute(
+            """
+            SELECT COUNT(*) AS n,
+                   COALESCE(SUM(elapsed_ms), 0) AS total_ms,
+                   AVG(elapsed_ms) AS average_ms
+            FROM evaluation_documents WHERE evaluation_id = ?
+            """,
             (row["id"],),
-        ).fetchone()["n"]
+        ).fetchone()
+        completed = progress["n"]
         items = connection.execute(
             "SELECT entity, confidence, matched FROM evaluation_items WHERE evaluation_id = ?",
             (row["id"],),
@@ -303,5 +332,8 @@ class EvaluationStore:
             total_documents=row["total_documents"],
             completed_documents=completed,
             error=row["error"],
+            max_pages=row["max_pages"],
+            total_elapsed_ms=int(progress["total_ms"] or 0),
+            average_elapsed_ms=round(progress["average_ms"]) if progress["average_ms"] else None,
             metrics=aggregate(outcomes),
         )

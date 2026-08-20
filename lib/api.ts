@@ -3,6 +3,7 @@ import type {
   Dataset,
   DatasetDocument,
   DocumentLabels,
+  DraftLabels,
   Evaluation,
   EvaluationDetail,
   ExtractionResponse,
@@ -69,11 +70,20 @@ export const api = {
       `/api/datasets/${segment(name)}/documents/${segment(document)}/labels`,
       json("PUT", { labels }),
     ),
-  promoteRun: (name: string, runId: number) =>
-    request<DatasetDocument>(`/api/datasets/${segment(name)}/documents/from-run`, json("POST", { run_id: runId })),
+  promoteRuns: (name: string, runIds: number[]) =>
+    request<DatasetDocument[]>(
+      `/api/datasets/${segment(name)}/documents/from-run`,
+      json("POST", { run_ids: runIds }),
+    ),
+  draftLabels: (name: string, document: string) =>
+    request<DraftLabels>(
+      `/api/datasets/${segment(name)}/documents/${segment(document)}/draft-labels`,
+      { method: "POST" },
+    ),
 
   evaluations: () => request<Evaluation[]>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
   startEvaluation: (dataset: string) => request<Evaluation>("/api/evaluations", json("POST", { dataset })),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),
+  deleteEvaluation: (id: number) => request<void>(`/api/evaluations/${id}`, { method: "DELETE" }),
 };
