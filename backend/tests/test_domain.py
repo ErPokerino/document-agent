@@ -591,3 +591,26 @@ async def test_a_truncated_response_is_not_retried_with_a_longer_prompt(monkeypa
         await client._request_entities("model", [], default_entities())
 
     assert _FakeAsyncClient.calls == 1
+
+
+def test_runtime_crash_while_loading_is_actionable() -> None:
+    # Verbatim LM Studio body when llama-server dies loading an incomplete GGUF,
+    # such as a standalone MTP/draft companion file.
+    detail = (
+        '{"error":{"type":"model_load_failed","message":"Failed to load LLM '
+        "'qwen3.8-27b-mtp': Error: Engine protocol runtime llama-server for "
+        'bNrBzHg9GntfICQnLSQXF5Zn exited before becoming healthy. '
+        'exitCode=3221225477, signal=null"}}'
+    )
+
+    message = LMStudioClient._friendly_engine_error(detail, "Model loading failed")
+
+    assert "exitCode" not in message
+    assert "llama-server" not in message
+    assert "draft" in message.lower()
+
+
+def test_an_unrecognized_engine_error_still_reports_the_raw_detail() -> None:
+    message = LMStudioClient._friendly_engine_error("something unexpected", "Model loading failed")
+
+    assert message == "Model loading failed: something unexpected"

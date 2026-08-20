@@ -555,6 +555,13 @@ class LMStudioClient:
                 "LM Studio stopped while processing the document image. Reload the model from "
                 "Settings; large models will use the low-memory single-request profile."
             )
+        if "exited before becoming healthy" in detail:
+            return (
+                "LM Studio's inference runtime crashed while loading this model, before it "
+                "could serve anything. The model file is the usual cause: draft and MTP "
+                "companion files are not complete models and always fail this way, and so do "
+                "interrupted downloads. Verify the model in LM Studio, or select another one."
+            )
         if '"terminated"' in detail or "request terminated" in detail.lower():
             return (
                 "LM Studio terminated the request because the model was unloaded, replaced, "
