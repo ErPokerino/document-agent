@@ -87,5 +87,6 @@ export const api = {
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
   startEvaluation: (dataset: string) => request<Evaluation>("/api/evaluations", json("POST", { dataset })),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),
+  retryEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/retry`, { method: "POST" }),
   deleteEvaluation: (id: number) => request<void>(`/api/evaluations/${id}`, { method: "DELETE" }),
 };

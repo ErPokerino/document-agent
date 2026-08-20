@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS evaluation_items (
 );
 """
 
-TERMINAL_STATUSES = ("completed", "failed", "cancelled")
+# "partial" is its own outcome: a run that reached the model for only some
+# of its documents must not be reported as if it had finished the job.
+TERMINAL_STATUSES = ("completed", "partial", "failed", "cancelled")
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,9 @@ class EvaluationSummary:
     completed_documents: int
     error: str | None
     max_pages: int
+    succeeded_documents: int
+    failed_documents: int
+    pending_documents: int
     total_elapsed_ms: int
     average_elapsed_ms: int | None
     metrics: EvaluationMetrics
@@ -125,6 +130,22 @@ class EvaluationStore:
                 "ALTER TABLE evaluations ADD COLUMN max_pages INTEGER NOT NULL DEFAULT 0"
             )
 
+        # Runs finished before "partial" existed were all stored as "completed",
+        # including ones where most documents never reached the model. Their
+        # rows still hold the truth, so the status can be recomputed. Cancelled
+        # and failed runs are left as they are.
+        connection.execute(
+            """
+            UPDATE evaluations SET status = CASE
+                WHEN (SELECT COUNT(*) FROM evaluation_documents d
+                      WHERE d.evaluation_id = evaluations.id AND d.status = 'ok') = 0
+                THEN 'failed' ELSE 'partial' END
+            WHERE status = 'completed'
+              AND (SELECT COUNT(*) FROM evaluation_documents d
+                   WHERE d.evaluation_id = evaluations.id AND d.status = 'ok') < total_documents
+            """
+        )
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
@@ -162,6 +183,41 @@ class EvaluationStore:
                 ),
             )
             return int(cursor.lastrowid)
+
+    def attempted_documents(self, evaluation_id: int) -> dict[str, str]:
+        """Every document this run reached, and how it went."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT document, status FROM evaluation_documents WHERE evaluation_id = ?",
+                (evaluation_id,),
+            ).fetchall()
+        return {row["document"]: row["status"] for row in rows}
+
+    def complete(self, evaluation_id: int) -> str:
+        """Finish a run with the status its documents actually earned."""
+        outcomes = self.attempted_documents(evaluation_id).values()
+        succeeded = sum(status == "ok" for status in outcomes)
+        with self._connect() as connection:
+            total = connection.execute(
+                "SELECT total_documents FROM evaluations WHERE id = ?", (evaluation_id,)
+            ).fetchone()["total_documents"]
+
+        if succeeded == 0:
+            status = "failed"
+        elif succeeded < total:
+            status = "partial"
+        else:
+            status = "completed"
+        self.finish(evaluation_id, status)
+        return status
+
+    def reopen(self, evaluation_id: int) -> None:
+        """Put a finished run back in flight so its gaps can be filled."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE evaluations SET status = 'running', finished_at = NULL, error = NULL WHERE id = ?",
+                (evaluation_id,),
+            )
 
     def delete(self, evaluation_id: int) -> bool:
         with self._connect() as connection:
@@ -213,6 +269,10 @@ class EvaluationStore:
 
     def record_document_failure(self, evaluation_id: int, document: str, error: str) -> None:
         with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM evaluation_items WHERE evaluation_id = ? AND document = ?",
+                (evaluation_id, document),
+            )
             connection.execute(
                 """
                 INSERT INTO evaluation_documents (evaluation_id, document, status, error)
@@ -301,6 +361,8 @@ class EvaluationStore:
         progress = connection.execute(
             """
             SELECT COUNT(*) AS n,
+                   COALESCE(SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END), 0) AS succeeded,
+                   COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
                    COALESCE(SUM(elapsed_ms), 0) AS total_ms,
                    AVG(elapsed_ms) AS average_ms
             FROM evaluation_documents WHERE evaluation_id = ?
@@ -333,6 +395,9 @@ class EvaluationStore:
             completed_documents=completed,
             error=row["error"],
             max_pages=row["max_pages"],
+            succeeded_documents=int(progress["succeeded"] or 0),
+            failed_documents=int(progress["failed"] or 0),
+            pending_documents=max(row["total_documents"] - completed, 0),
             total_elapsed_ms=int(progress["total_ms"] or 0),
             average_elapsed_ms=round(progress["average_ms"]) if progress["average_ms"] else None,
             metrics=aggregate(outcomes),

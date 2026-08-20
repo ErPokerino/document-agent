@@ -104,7 +104,9 @@ async def test_one_failing_document_does_not_abort_the_others(workspace, monkeyp
     await execute(datasets, evaluations, evaluation_id)
 
     detail = evaluations.get_evaluation(evaluation_id)
-    assert detail.status == "completed"
+    # Not "completed": half the dataset never reached the model.
+    assert detail.status == "partial"
+    assert detail.succeeded_documents == 1
     assert len(detail.failures) == 1
     assert "the model died" in detail.failures[0][1]
     assert detail.metrics.total == 1

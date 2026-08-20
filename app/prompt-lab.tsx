@@ -13,6 +13,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Save,
   Sparkles,
   Square,
@@ -708,7 +709,10 @@ export function PromptLab({
                     <td className="run-id">#{evaluation.id}<small>{evaluation.dataset}</small></td>
                     <td className="run-date">{evaluation.created_at.replace("T", " ").slice(0, 16)}</td>
                     <td><span className="model-tag">{evaluation.model}</span></td>
-                    <td className="numeric">{evaluation.total_documents}</td>
+                    <td className="numeric">
+                      {evaluation.succeeded_documents}/{evaluation.total_documents}
+                      {evaluation.failed_documents > 0 && <small className="poor">{evaluation.failed_documents} failed</small>}
+                    </td>
                     <td className="numeric">{seconds(evaluation.total_elapsed_ms)}<small>{seconds(evaluation.average_elapsed_ms)} avg</small></td>
                     <td className="numeric">{evaluation.max_pages || "—"}</td>
                     <td className={`numeric accuracy-cell ${accuracyClass(evaluation.metrics.accuracy)}`}>
@@ -758,7 +762,7 @@ export function PromptLab({
             <span className="settings-card-icon"><CheckCircle2 size={18} /></span>
             <div>
               <h3>Run #{openEvaluation.id} · {openEvaluation.dataset}</h3>
-              <p>{openEvaluation.completed_documents} of {openEvaluation.total_documents} documents · {seconds(openEvaluation.total_elapsed_ms)} in total · {seconds(openEvaluation.average_elapsed_ms)} per document</p>
+              <p>{openEvaluation.succeeded_documents} of {openEvaluation.total_documents} documents scored · {seconds(openEvaluation.total_elapsed_ms)} in total · {seconds(openEvaluation.average_elapsed_ms)} per document</p>
             </div>
             <button className="icon-button" aria-label="Close" onClick={() => setOpenEvaluation(null)}><X size={15} /></button>
           </div>
@@ -770,6 +774,34 @@ export function PromptLab({
           </div>
 
           {openEvaluation.error && <div className="alert error-alert"><AlertCircle size={17} /><span>{openEvaluation.error}</span></div>}
+
+          {openEvaluation.failed_documents + openEvaluation.pending_documents > 0 && (
+            <div className="retry-banner">
+              <AlertCircle size={17} />
+              <span>
+                <strong>
+                  {openEvaluation.failed_documents > 0 && `${openEvaluation.failed_documents} failed`}
+                  {openEvaluation.failed_documents > 0 && openEvaluation.pending_documents > 0 && ", "}
+                  {openEvaluation.pending_documents > 0 && `${openEvaluation.pending_documents} never processed`}
+                  .
+                </strong>{" "}
+                The accuracy above covers only the {openEvaluation.succeeded_documents} documents that were scored.
+                A retry reuses this run&apos;s prompts, model and page limit, so the result stays one experiment.
+              </span>
+              <button
+                className="secondary-button"
+                disabled={busy || !!running || !isModelReady}
+                title={running ? "Another run is in progress" : !isModelReady ? "Load and warm up the model in Settings first" : "Process the documents this run did not score"}
+                onClick={() => guard(async () => {
+                  await api.retryEvaluation(openEvaluation.id);
+                  await refreshEvaluations();
+                  setOpenEvaluation(await api.evaluation(openEvaluation.id));
+                })}
+              >
+                <RefreshCw size={14} /> Retry {openEvaluation.failed_documents + openEvaluation.pending_documents} documents
+              </button>
+            </div>
+          )}
 
           <div className="metric-grid">
             {tallyRows("Accuracy per entity", openEvaluation.metrics.per_entity)}
@@ -786,14 +818,28 @@ export function PromptLab({
                     : <small>{document.items.filter((item) => item.matched).length}/{document.items.length} correct{document.elapsed_ms ? ` · ${seconds(document.elapsed_ms)}` : ""}</small>}
                 </div>
                 {document.error && <p className="field-warning"><AlertCircle size={11} /> {document.error}</p>}
-                {document.items.filter((item) => !item.matched).map((item) => (
-                  <div className="mismatch-row" key={item.entity}>
-                    <span className="mismatch-entity">{item.entity}</span>
-                    <span className="mismatch-expected">expected <code>{describeValue(item.expected)}</code></span>
-                    <span className="mismatch-actual">got <code>{describeValue(item.actual)}</code></span>
-                    <span className={`confidence-pill ${item.confidence}`}><i /> {item.confidence}</span>
-                  </div>
-                ))}
+                {document.items.some((item) => !item.matched) && (
+                  <table className="mismatch-table">
+                    <thead>
+                      <tr>
+                        <th>Entity</th>
+                        <th>Expected</th>
+                        <th>Got</th>
+                        <th>Confidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {document.items.filter((item) => !item.matched).map((item) => (
+                        <tr key={item.entity}>
+                          <td className="mismatch-entity">{item.entity}</td>
+                          <td><code className="expected">{describeValue(item.expected)}</code></td>
+                          <td><code className="actual">{describeValue(item.actual)}</code></td>
+                          <td><span className={`confidence-pill ${item.confidence}`}><i /> {item.confidence}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             ))}
           </div>

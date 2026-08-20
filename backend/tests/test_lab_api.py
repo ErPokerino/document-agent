@@ -368,3 +368,149 @@ def test_renaming_to_an_unsafe_name_is_rejected(api) -> None:
     api.post("/api/datasets", json={"name": "invoices"})
 
     assert api.patch("/api/datasets/invoices", json={"name": "../escape"}).status_code == 400
+
+
+def labelled_dataset(api, names=("a.pdf", "b.pdf")):
+    api.post("/api/datasets", json={"name": "invoices"})
+    for name in names:
+        api.post(
+            "/api/datasets/invoices/documents",
+            files={"file": (name, pdf_bytes(), "application/pdf")},
+        )
+        api.put(
+            f"/api/datasets/invoices/documents/{name}/labels",
+            json={"labels": {"currency": "EUR"}},
+        )
+
+
+def wait_for_run(api, evaluation_id: int, attempts: int = 100) -> dict:
+    """Poll the way the UI does: the retry runs as a background task."""
+    for _ in range(attempts):
+        body = api.get(f"/api/evaluations/{evaluation_id}").json()
+        if body["status"] != "running":
+            return body
+    raise AssertionError(f"evaluation {evaluation_id} never left the running state")
+
+
+def partial_run(api) -> int:
+    """One document scored, one failed: the case the UI was calling "completed"."""
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=2,
+        max_pages=1,
+    )
+    main.evaluation_store.record_document(evaluation_id, "b.pdf", [], elapsed_ms=1000)
+    main.evaluation_store.record_document_failure(evaluation_id, "a.pdf", "Model is unloaded")
+    main.evaluation_store.complete(evaluation_id)
+    return evaluation_id
+
+
+def test_a_run_with_failures_is_reported_as_partial(api) -> None:
+    labelled_dataset(api)
+    evaluation_id = partial_run(api)
+
+    body = api.get(f"/api/evaluations/{evaluation_id}").json()
+
+    assert body["status"] == "partial"
+    assert body["succeeded_documents"] == 1
+    assert body["failed_documents"] == 1
+
+
+def test_documents_a_run_never_reached_are_counted_as_pending(api) -> None:
+    labelled_dataset(api)
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices", model="vision-model", prompts=PromptConfiguration(), total_documents=3
+    )
+    main.evaluation_store.record_document(evaluation_id, "b.pdf", [], elapsed_ms=1)
+    main.evaluation_store.complete(evaluation_id)
+
+    body = api.get(f"/api/evaluations/{evaluation_id}").json()
+
+    assert body["status"] == "partial"
+    assert body["pending_documents"] == 2
+
+
+def test_retrying_reprocesses_only_the_documents_that_did_not_succeed(api, monkeypatch) -> None:
+    labelled_dataset(api)
+    evaluation_id = partial_run(api)
+    main.model_runtime_states["vision-model"] = "ready"
+    seen: list[str] = []
+
+    class Recovered:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+            return {"currency": FieldExtraction(value="EUR", confidence="high")}
+
+    monkeypatch.setattr("app.pipeline.steps.LMStudioClient", Recovered)
+    original_read = main.dataset_store.read_document
+
+    def spy(dataset, document):
+        seen.append(document)
+        return original_read(dataset, document)
+
+    monkeypatch.setattr(main.dataset_store, "read_document", spy)
+
+    response = api.post(f"/api/evaluations/{evaluation_id}/retry")
+
+    assert response.status_code == 202
+    detail = wait_for_run(api, evaluation_id)
+    # b.pdf already succeeded, so the model is not asked about it again.
+    assert seen == ["a.pdf"]
+    assert detail["status"] == "completed"
+    assert detail["failed_documents"] == 0
+    assert detail["succeeded_documents"] == 2
+
+
+def test_retrying_requires_the_model_the_run_used(api) -> None:
+    labelled_dataset(api)
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices", model="another-model", prompts=PromptConfiguration(), total_documents=2
+    )
+    main.evaluation_store.record_document_failure(evaluation_id, "a.pdf", "boom")
+    main.evaluation_store.complete(evaluation_id)
+    main.model_runtime_states["vision-model"] = "ready"
+
+    response = api.post(f"/api/evaluations/{evaluation_id}/retry")
+
+    assert response.status_code == 409
+    assert "another-model" in response.json()["detail"]
+
+
+def test_retrying_a_run_with_nothing_left_to_do_is_refused(api) -> None:
+    labelled_dataset(api, names=("a.pdf",))
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices", model="vision-model", prompts=PromptConfiguration(), total_documents=1
+    )
+    main.evaluation_store.record_document(
+        evaluation_id, "a.pdf", [], elapsed_ms=1
+    )
+    main.evaluation_store.complete(evaluation_id)
+    main.model_runtime_states["vision-model"] = "ready"
+
+    response = api.post(f"/api/evaluations/{evaluation_id}/retry")
+
+    assert response.status_code == 400
+    assert "nothing left" in response.json()["detail"].lower()
+
+
+def test_retrying_a_run_whose_dataset_is_gone_is_a_404(api) -> None:
+    labelled_dataset(api)
+    evaluation_id = partial_run(api)
+    main.model_runtime_states["vision-model"] = "ready"
+    api.delete("/api/datasets/invoices")
+
+    assert api.post(f"/api/evaluations/{evaluation_id}/retry").status_code == 404
+
+
+def test_retrying_a_running_evaluation_conflicts(api) -> None:
+    labelled_dataset(api)
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices", model="vision-model", prompts=PromptConfiguration(), total_documents=2
+    )
+    main.model_runtime_states["vision-model"] = "ready"
+
+    assert api.post(f"/api/evaluations/{evaluation_id}/retry").status_code == 409

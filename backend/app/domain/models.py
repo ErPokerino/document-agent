@@ -272,11 +272,14 @@ class Evaluation(BaseModel):
     finished_at: str | None = None
     dataset: str
     model: str
-    status: Literal["running", "completed", "failed", "cancelled"]
+    status: Literal["running", "completed", "partial", "failed", "cancelled"]
     total_documents: int
     completed_documents: int
     error: str | None = None
     max_pages: int
+    succeeded_documents: int
+    failed_documents: int
+    pending_documents: int
     total_elapsed_ms: int
     average_elapsed_ms: int | None = None
     metrics: Metrics

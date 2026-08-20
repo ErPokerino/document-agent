@@ -506,3 +506,25 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .runs-table .accuracy-cell.poor { color: #9c3b2e; }
 .runs-table .accuracy-cell small { font-weight: 400; font-size: 9.5px; }
 .runs-table .row-actions { width: 1%; }
+
+/* --- partial runs, retry and the expected/got table --- */
+.status-tag.partial { background: #fdf0e4; color: #9a5b1c; }
+
+.retry-banner { display: flex; align-items: center; gap: 12px; padding: 13px 15px; margin: 0 0 18px; border: 1px solid #f0d9c6; border-radius: 11px; background: #fdf7f1; color: #7a5a33; font-size: 11.5px; line-height: 1.5; }
+.retry-banner > svg { flex: 0 0 auto; color: #c07a2c; }
+.retry-banner span { flex: 1; }
+.retry-banner strong { color: #6b4a24; }
+.retry-banner .secondary-button { flex: 0 0 auto; white-space: nowrap; }
+
+.runs-table td small.poor { color: #9c3b2e; }
+
+.mismatch-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
+.mismatch-table th { text-align: left; padding: 5px 8px; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; border-bottom: 1px dashed var(--line); }
+.mismatch-table th:last-child { text-align: right; }
+.mismatch-table td { padding: 6px 8px; border-bottom: 1px dashed #eef1ef; vertical-align: middle; }
+.mismatch-table tr:last-child td { border-bottom: 0; }
+.mismatch-table td:last-child { text-align: right; }
+.mismatch-table .mismatch-entity { font-family: var(--font-mono), monospace; white-space: nowrap; }
+.mismatch-table code { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 10.5px; }
+.mismatch-table code.expected { background: #e2f4ec; color: #1d7a56; }
+.mismatch-table code.actual { background: #fbe9e7; color: #9c3b2e; }

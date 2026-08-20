@@ -86,7 +86,7 @@ async def run_evaluation(
                     source="evaluation",
                 )
 
-        evaluations.finish(evaluation_id, "completed")
+        evaluations.complete(evaluation_id)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - the run must never die silently

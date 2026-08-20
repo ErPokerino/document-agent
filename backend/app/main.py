@@ -368,6 +368,9 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "completed_documents",
                 "error",
                 "max_pages",
+                "succeeded_documents",
+                "failed_documents",
+                "pending_documents",
                 "total_elapsed_ms",
                 "average_elapsed_ms",
             )
@@ -711,6 +714,88 @@ async def delete_evaluation(evaluation_id: int) -> Response:
         raise HTTPException(status_code=409, detail="Cancel that evaluation before deleting it.")
     evaluation_store.delete(evaluation_id)
     return Response(status_code=204)
+
+
+@app.post("/api/evaluations/{evaluation_id}/retry", status_code=202, response_model=Evaluation)
+async def retry_evaluation(evaluation_id: int) -> Evaluation:
+    """Fill in the documents a run never scored, inside the same run.
+
+    The retry deliberately reuses the prompts, the model and the page limit the
+    run was started with. Finishing a run with today's configuration would make
+    its single accuracy number the average of two different experiments.
+    """
+    global evaluation_task, evaluation_cancelled
+
+    detail = evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    if detail.status == "running":
+        raise HTTPException(status_code=409, detail="That evaluation is already running.")
+    _require_dataset(detail.dataset)
+
+    settings = settings_store.read()
+    if settings.model != detail.model:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This run used {detail.model}. Select and warm up that model in Settings, "
+                "so the retried documents are scored the same way as the rest of the run."
+            ),
+        )
+    try:
+        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+    except LMStudioError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    selected = next((model for model in available if model.id == detail.model), None)
+    if selected is None or not selected.loaded or model_runtime_states.get(detail.model) != "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="The active model is not ready. Open Settings and use Load & warm up first.",
+        )
+
+    attempted = evaluation_store.attempted_documents(evaluation_id)
+    documents: list[tuple[str, dict[str, Any]]] = []
+    for document in dataset_store.list_documents(detail.dataset):
+        if not document.labelled or attempted.get(document.name) == "ok":
+            continue
+        label_file = dataset_store.read_labels(detail.dataset, document.name)
+        if label_file is not None:
+            documents.append((document.name, label_file.labels))
+    if not documents:
+        raise HTTPException(
+            status_code=400,
+            detail="This run has nothing left to process: every labelled document already succeeded.",
+        )
+
+    claim_model_operation("evaluating")
+    evaluation_store.reopen(evaluation_id)
+    evaluation_cancelled = asyncio.Event()
+
+    async def drive(cancelled: asyncio.Event) -> None:
+        try:
+            await run_evaluation(
+                evaluation_id=evaluation_id,
+                evaluations=evaluation_store,
+                datasets=dataset_store,
+                run_store=run_store,
+                dataset=detail.dataset,
+                documents=documents,
+                entities=detail.prompts.entities,
+                prompts=detail.prompts,
+                model=detail.model,
+                lm_studio_url=settings.lm_studio_url,
+                max_pages=detail.max_pages or settings.max_pages_to_analyze,
+                cancelled=cancelled,
+            )
+        except asyncio.CancelledError:
+            evaluation_store.finish(evaluation_id, "cancelled")
+        except Exception:
+            pass
+        finally:
+            release_model_operation()
+
+    evaluation_task = asyncio.create_task(drive(evaluation_cancelled))
+    return _evaluation_model(evaluation_store.get_evaluation(evaluation_id))
 
 
 @app.post("/api/evaluations/{evaluation_id}/cancel", status_code=202, response_model=Evaluation)

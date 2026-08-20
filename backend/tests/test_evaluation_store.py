@@ -198,3 +198,119 @@ def test_an_evaluation_can_be_deleted_with_its_results(store) -> None:
 
 def test_deleting_an_unknown_evaluation_reports_it(store) -> None:
     assert store.delete(999) is False
+
+
+def test_a_run_where_everything_worked_is_completed(store) -> None:
+    evaluation_id = start(store)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+    store.record_document(evaluation_id, "b.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+
+    store.complete(evaluation_id)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.status == "completed"
+    assert detail.succeeded_documents == 2
+    assert detail.failed_documents == 0
+    assert detail.pending_documents == 0
+
+
+def test_a_run_with_some_failures_is_partial_not_completed(store) -> None:
+    # Reporting "completed, 85%" for a run where six of ten documents never
+    # reached the model is the headline number lying.
+    evaluation_id = start(store, total=3)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+    store.record_document_failure(evaluation_id, "b.pdf", "Model is unloaded")
+
+    store.complete(evaluation_id)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.status == "partial"
+    assert detail.succeeded_documents == 1
+    assert detail.failed_documents == 1
+    assert detail.pending_documents == 1
+
+
+def test_a_run_where_every_document_failed_is_failed(store) -> None:
+    evaluation_id = start(store, total=2)
+    store.record_document_failure(evaluation_id, "a.pdf", "boom")
+    store.record_document_failure(evaluation_id, "b.pdf", "boom")
+
+    store.complete(evaluation_id)
+
+    assert store.get_evaluation(evaluation_id).status == "failed"
+
+
+def test_a_run_that_scored_nothing_at_all_is_failed(store) -> None:
+    evaluation_id = start(store, total=2)
+
+    store.complete(evaluation_id)
+
+    assert store.get_evaluation(evaluation_id).status == "failed"
+
+
+def test_the_outcome_of_each_attempted_document_is_available(store) -> None:
+    evaluation_id = start(store, total=3)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+    store.record_document_failure(evaluation_id, "b.pdf", "boom")
+
+    assert store.attempted_documents(evaluation_id) == {"a.pdf": "ok", "b.pdf": "failed"}
+
+
+def test_reopening_a_run_puts_it_back_to_running(store) -> None:
+    evaluation_id = start(store)
+    store.record_document_failure(evaluation_id, "a.pdf", "boom")
+    store.complete(evaluation_id)
+
+    store.reopen(evaluation_id)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.status == "running"
+    assert detail.finished_at is None
+    assert detail.error is None
+
+
+def test_a_retried_document_replaces_its_failure(store) -> None:
+    evaluation_id = start(store, total=1)
+    store.record_document_failure(evaluation_id, "a.pdf", "Model is unloaded")
+    store.complete(evaluation_id)
+
+    store.reopen(evaluation_id)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=2000)
+    store.complete(evaluation_id)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.status == "completed"
+    assert detail.failed_documents == 0
+    assert detail.succeeded_documents == 1
+    assert detail.metrics.accuracy == 1.0
+    assert detail.failures == []
+
+
+def test_a_run_stored_as_completed_before_partial_existed_is_reclassified(store, tmp_path) -> None:
+    evaluation_id = start(store, total=3)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+    store.record_document_failure(evaluation_id, "b.pdf", "Model is unloaded")
+    store.finish(evaluation_id, "completed")  # what the old code wrote
+
+    EvaluationStore(tmp_path / "docuflow.db")  # reopening runs the migration
+
+    assert store.get_evaluation(evaluation_id).status == "partial"
+
+
+def test_reclassifying_leaves_genuinely_complete_runs_alone(store, tmp_path) -> None:
+    evaluation_id = start(store, total=1)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+    store.finish(evaluation_id, "completed")
+
+    EvaluationStore(tmp_path / "docuflow.db")
+
+    assert store.get_evaluation(evaluation_id).status == "completed"
+
+
+def test_reclassifying_does_not_resurrect_a_cancelled_run(store, tmp_path) -> None:
+    evaluation_id = start(store, total=3)
+    store.finish(evaluation_id, "cancelled")
+
+    EvaluationStore(tmp_path / "docuflow.db")
+
+    assert store.get_evaluation(evaluation_id).status == "cancelled"
