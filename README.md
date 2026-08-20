@@ -34,8 +34,21 @@ npm install
 ```
 
 `npm run start` serves a production build and never creates one, so `start.ps1`
-runs `npm run build` itself when `dist/` is missing. Run `npm test` to execute the
-type check, the frontend tests and the backend tests.
+runs `npm run build` itself when `dist/` is missing.
+
+After changing any frontend code, restart with a rebuild in one step:
+
+```powershell
+.estart.ps1
+```
+
+Building under a running server is what breaks the app silently: `vinext start`
+loads `dist/server/index.js` once and serves client chunks by content hash, so a
+rebuild leaves it pointing at hashes that no longer exist. The page still renders,
+but React never hydrates and every click does nothing. `npm test` runs a build,
+so re-run `.estart.ps1` after it.
+
+Run `npm test` for the type check, the frontend tests and the backend tests.
 
 To stop the frontend and backend:
 
