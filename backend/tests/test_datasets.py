@@ -159,3 +159,41 @@ def test_only_pdf_documents_are_accepted(store) -> None:
 
     with pytest.raises(ValueError, match="PDF"):
         store.add_document("invoices", "notes.txt", b"hello")
+
+
+def test_a_dataset_can_be_renamed_keeping_its_documents(store) -> None:
+    store.create("invoices")
+    store.add_document("invoices", "invoice21.pdf", pdf_bytes(), labels={"currency": "EUR"})
+
+    renamed = store.rename("invoices", "invoices-2026")
+
+    assert renamed.name == "invoices-2026"
+    assert [dataset.name for dataset in store.list_datasets()] == ["invoices-2026"]
+    assert [document.name for document in store.list_documents("invoices-2026")] == ["invoice21.pdf"]
+    assert store.read_labels("invoices-2026", "invoice21.pdf").labels == {"currency": "EUR"}
+
+
+def test_renaming_to_an_existing_name_is_rejected(store) -> None:
+    store.create("invoices")
+    store.create("receipts")
+
+    with pytest.raises(ValueError, match="already exists"):
+        store.rename("invoices", "receipts")
+
+
+def test_renaming_an_unknown_dataset_is_rejected(store) -> None:
+    with pytest.raises(FileNotFoundError):
+        store.rename("nope", "something")
+
+
+def test_renaming_to_an_unsafe_name_is_rejected(store) -> None:
+    store.create("invoices")
+
+    with pytest.raises(InvalidName):
+        store.rename("invoices", "../escape")
+
+
+def test_renaming_to_the_same_name_is_a_no_op(store) -> None:
+    store.create("invoices")
+
+    assert store.rename("invoices", "invoices").name == "invoices"

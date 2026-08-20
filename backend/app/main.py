@@ -396,6 +396,18 @@ async def create_dataset(request: DatasetCreateRequest) -> Dataset:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@app.patch("/api/datasets/{name}", response_model=Dataset)
+async def rename_dataset(name: str, request: DatasetCreateRequest) -> Dataset:
+    try:
+        return Dataset(**asdict(dataset_store.rename(name, request.name)))
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.delete("/api/datasets/{name}", status_code=204, response_class=Response)
 async def delete_dataset(name: str) -> Response:
     try:

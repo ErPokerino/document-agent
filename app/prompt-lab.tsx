@@ -10,6 +10,7 @@ import {
   FlaskConical,
   History,
   LoaderCircle,
+  Pencil,
   Play,
   Plus,
   Save,
@@ -109,6 +110,14 @@ export function PromptLab({
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [documents, setDocuments] = useState<DatasetDocument[]>([]);
   const [newDatasetName, setNewDatasetName] = useState("");
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  // Inline confirmation instead of window.confirm: a browser dialog steals
+  // focus, cannot be styled, and reads as a script prompt rather than part
+  // of the application.
+  const [confirmingDataset, setConfirmingDataset] = useState<string | null>(null);
+  const [confirmingRun, setConfirmingRun] = useState<number | null>(null);
+  const [confirmingDocument, setConfirmingDocument] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [labelling, setLabelling] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState<Record<string, LabelDraft>>({});
@@ -196,6 +205,10 @@ export function PromptLab({
     }, 2000);
     return () => window.clearInterval(timer);
   }, [running, openEvaluation?.id]);
+
+  function openRun(evaluationId: number) {
+    void guard(async () => setOpenEvaluation(await api.evaluation(evaluationId)));
+  }
 
   async function guard(action: () => Promise<void>) {
     setBusy(true);
@@ -391,30 +404,62 @@ export function PromptLab({
           <div className="dataset-list">
             {datasets.map((dataset) => (
               <div key={dataset.name} className={`dataset-option ${selectedDataset === dataset.name ? "selected" : ""}`}>
-                <button className="dataset-pick" onClick={() => { setSelectedDataset(dataset.name); setLabelling(null); setPickedRuns(new Set()); }}>
-                  <span className="radio">{selectedDataset === dataset.name && <span />}</span>
-                  <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
-                </button>
-                {dataset.labelled_count === 0 && <em className="warn">No ground truth</em>}
-                <button
-                  className="icon-button"
-                  aria-label={`Delete dataset ${dataset.name}`}
-                  disabled={busy}
-                  onClick={() => {
-                    if (!window.confirm(`Delete the dataset "${dataset.name}" and all its documents and labels?`)) return;
-                    void guard(async () => {
-                      await api.deleteDataset(dataset.name);
-                      if (selectedDataset === dataset.name) {
-                        setSelectedDataset(null);
-                        setDocuments([]);
-                        setLabelling(null);
-                      }
-                      await refreshDatasets();
-                    });
-                  }}
-                >
-                  <Trash2 size={15} />
-                </button>
+                {renaming === dataset.name ? (
+                  <form
+                    className="dataset-rename"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const next = renameValue.trim();
+                      if (!next || next === dataset.name) { setRenaming(null); return; }
+                      void guard(async () => {
+                        await api.renameDataset(dataset.name, next);
+                        if (selectedDataset === dataset.name) setSelectedDataset(next);
+                        setRenaming(null);
+                        await refreshDatasets();
+                      });
+                    }}
+                  >
+                    {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+                    <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={`New name for ${dataset.name}`} />
+                    <button type="submit" className="secondary-button small" disabled={busy}><Check size={13} /> Save</button>
+                    <button type="button" className="secondary-button small ghost" onClick={() => setRenaming(null)}>Cancel</button>
+                  </form>
+                ) : confirmingDataset === dataset.name ? (
+                  <div className="row-confirm">
+                    <span><strong>Delete {dataset.name}?</strong> Its documents and labels go with it.</span>
+                    <button className="secondary-button small ghost" onClick={() => setConfirmingDataset(null)}>Cancel</button>
+                    <button
+                      className="secondary-button small danger"
+                      disabled={busy}
+                      onClick={() => guard(async () => {
+                        await api.deleteDataset(dataset.name);
+                        if (selectedDataset === dataset.name) {
+                          setSelectedDataset(null);
+                          setDocuments([]);
+                          setLabelling(null);
+                        }
+                        setConfirmingDataset(null);
+                        await refreshDatasets();
+                      })}
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button className="dataset-pick" onClick={() => { setSelectedDataset(dataset.name); setLabelling(null); setPickedRuns(new Set()); }}>
+                      <span className="radio">{selectedDataset === dataset.name && <span />}</span>
+                      <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
+                    </button>
+                    {dataset.labelled_count === 0 && <em className="warn">No ground truth</em>}
+                    <button className="icon-button" aria-label={`Rename dataset ${dataset.name}`} onClick={() => { setRenameValue(dataset.name); setRenaming(dataset.name); setConfirmingDataset(null); }}>
+                      <Pencil size={14} />
+                    </button>
+                    <button className="icon-button" aria-label={`Delete dataset ${dataset.name}`} disabled={busy} onClick={() => { setConfirmingDataset(dataset.name); setRenaming(null); }}>
+                      <Trash2 size={15} />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -486,7 +531,25 @@ export function PromptLab({
                     {drafting === document.name ? <LoaderCircle className="spin" size={13} /> : <Wand2 size={13} />} Draft
                   </button>
                   <button className="secondary-button small" onClick={() => openLabels(document.name)}>{document.labelled ? "Edit" : "Label"}</button>
-                  <button className="icon-button" aria-label={`Remove ${document.name}`} onClick={() => guard(async () => { await api.removeDatasetDocument(selectedDataset, document.name); await refreshDocuments(selectedDataset); await refreshDatasets(); })}><Trash2 size={15} /></button>
+                  {confirmingDocument === document.name ? (
+                    <span className="row-confirm compact">
+                      <button className="secondary-button small ghost" onClick={() => setConfirmingDocument(null)}>Cancel</button>
+                      <button
+                        className="secondary-button small danger"
+                        disabled={busy}
+                        onClick={() => guard(async () => {
+                          await api.removeDatasetDocument(selectedDataset, document.name);
+                          setConfirmingDocument(null);
+                          await refreshDocuments(selectedDataset);
+                          await refreshDatasets();
+                        })}
+                      >
+                        Remove
+                      </button>
+                    </span>
+                  ) : (
+                    <button className="icon-button" aria-label={`Remove ${document.name}`} title={document.labelled ? "Removes the document and its ground truth" : "Remove this document"} onClick={() => setConfirmingDocument(document.name)}><Trash2 size={15} /></button>
+                  )}
                 </div>
               ))}
             </div>
@@ -613,39 +676,78 @@ export function PromptLab({
         ) : visibleEvaluations.length === 0 ? (
           <div className="models-empty"><AlertCircle size={18} /><span>No run matches these filters. {evaluations.length} hidden.</span></div>
         ) : (
-          <div className="evaluation-list">
-            {visibleEvaluations.map((evaluation) => (
-              <div key={evaluation.id} className={`evaluation-row ${openEvaluation?.id === evaluation.id ? "selected" : ""}`}>
-                <button className="evaluation-open" onClick={() => guard(async () => setOpenEvaluation(await api.evaluation(evaluation.id)))}>
-                  <span className={`status-tag ${evaluation.status}`}>{evaluation.status}</span>
-                  <span className="evaluation-meta">
-                    <strong>{evaluation.dataset}</strong>
-                    <small>{evaluation.created_at.replace("T", " ").slice(0, 16)} · {evaluation.total_documents} docs · {seconds(evaluation.total_elapsed_ms)} total · {seconds(evaluation.average_elapsed_ms)} avg</small>
-                  </span>
-                  <span className="tag-row">
-                    <span className="model-tag">{evaluation.model}</span>
-                    <span className="pages-tag">{evaluation.max_pages || "?"} pg</span>
-                  </span>
-                  <span className={`evaluation-score ${accuracyClass(evaluation.metrics.accuracy)}`}>{percent(evaluation.metrics.accuracy)}</span>
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label={`Delete run ${evaluation.id}`}
-                  disabled={evaluation.status === "running" || busy}
-                  title={evaluation.status === "running" ? "Cancel the run before deleting it" : "Delete this run"}
-                  onClick={() => {
-                    if (!window.confirm(`Delete run #${evaluation.id} and its results?`)) return;
-                    void guard(async () => {
-                      await api.deleteEvaluation(evaluation.id);
-                      if (openEvaluation?.id === evaluation.id) setOpenEvaluation(null);
-                      await refreshEvaluations();
-                    });
-                  }}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
+          <div className="runs-table-wrap">
+            <table className="runs-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Run</th>
+                  <th>Date</th>
+                  <th>Model</th>
+                  <th className="numeric">Docs</th>
+                  <th className="numeric">Total time</th>
+                  <th className="numeric">Max pages</th>
+                  <th className="numeric">Accuracy</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEvaluations.map((evaluation) => (
+                  <tr
+                    key={evaluation.id}
+                    className={`${openEvaluation?.id === evaluation.id ? "selected" : ""} ${confirmingRun === evaluation.id ? "confirming" : ""}`}
+                    tabIndex={0}
+                    onClick={() => openRun(evaluation.id)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      openRun(evaluation.id);
+                    }}
+                  >
+                    <td><span className={`status-tag ${evaluation.status}`}>{evaluation.status}</span></td>
+                    <td className="run-id">#{evaluation.id}<small>{evaluation.dataset}</small></td>
+                    <td className="run-date">{evaluation.created_at.replace("T", " ").slice(0, 16)}</td>
+                    <td><span className="model-tag">{evaluation.model}</span></td>
+                    <td className="numeric">{evaluation.total_documents}</td>
+                    <td className="numeric">{seconds(evaluation.total_elapsed_ms)}<small>{seconds(evaluation.average_elapsed_ms)} avg</small></td>
+                    <td className="numeric">{evaluation.max_pages || "—"}</td>
+                    <td className={`numeric accuracy-cell ${accuracyClass(evaluation.metrics.accuracy)}`}>
+                      {percent(evaluation.metrics.accuracy)}
+                      <small>{evaluation.metrics.matched}/{evaluation.metrics.total}</small>
+                    </td>
+                    <td className="row-actions" onClick={(event) => event.stopPropagation()}>
+                      {confirmingRun === evaluation.id ? (
+                        <span className="row-confirm compact">
+                          <button className="secondary-button small ghost" onClick={() => setConfirmingRun(null)}>Cancel</button>
+                          <button
+                            className="secondary-button small danger"
+                            disabled={busy}
+                            onClick={() => guard(async () => {
+                              await api.deleteEvaluation(evaluation.id);
+                              if (openEvaluation?.id === evaluation.id) setOpenEvaluation(null);
+                              setConfirmingRun(null);
+                              await refreshEvaluations();
+                            })}
+                          >
+                            Delete
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          className="icon-button"
+                          aria-label={`Delete run ${evaluation.id}`}
+                          disabled={evaluation.status === "running" || busy}
+                          title={evaluation.status === "running" ? "Cancel the run before deleting it" : "Delete this run"}
+                          onClick={() => setConfirmingRun(evaluation.id)}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

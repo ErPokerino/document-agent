@@ -340,3 +340,31 @@ def test_the_page_limit_is_recorded_on_the_evaluation(api, monkeypatch) -> None:
 
     assert response.status_code == 202
     assert response.json()["max_pages"] == 7
+
+
+def test_a_dataset_can_be_renamed(api) -> None:
+    seed_document(api)
+
+    response = api.patch("/api/datasets/invoices", json={"name": "invoices-2026"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "invoices-2026"
+    assert [dataset["name"] for dataset in api.get("/api/datasets").json()] == ["invoices-2026"]
+    assert api.get("/api/datasets/invoices-2026/documents").json()[0]["name"] == "invoice21.pdf"
+
+
+def test_renaming_onto_an_existing_dataset_conflicts(api) -> None:
+    api.post("/api/datasets", json={"name": "invoices"})
+    api.post("/api/datasets", json={"name": "receipts"})
+
+    assert api.patch("/api/datasets/invoices", json={"name": "receipts"}).status_code == 409
+
+
+def test_renaming_an_unknown_dataset_is_a_404(api) -> None:
+    assert api.patch("/api/datasets/nope", json={"name": "other"}).status_code == 404
+
+
+def test_renaming_to_an_unsafe_name_is_rejected(api) -> None:
+    api.post("/api/datasets", json={"name": "invoices"})
+
+    assert api.patch("/api/datasets/invoices", json={"name": "../escape"}).status_code == 400

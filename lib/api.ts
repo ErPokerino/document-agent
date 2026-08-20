@@ -56,6 +56,8 @@ export const api = {
 
   datasets: () => request<Dataset[]>("/api/datasets"),
   createDataset: (name: string) => request<Dataset>("/api/datasets", json("POST", { name })),
+  renameDataset: (name: string, newName: string) =>
+    request<Dataset>(`/api/datasets/${segment(name)}`, json("PATCH", { name: newName })),
   deleteDataset: (name: string) => request<void>(`/api/datasets/${segment(name)}`, { method: "DELETE" }),
   datasetDocuments: (name: string) =>
     request<DatasetDocument[]>(`/api/datasets/${segment(name)}/documents`),

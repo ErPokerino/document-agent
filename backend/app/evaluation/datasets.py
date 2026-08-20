@@ -104,6 +104,20 @@ class DatasetStore:
         (directory / "documents").mkdir(parents=True)
         return DatasetSummary(name=name, document_count=0, labelled_count=0)
 
+    def rename(self, name: str, new_name: str) -> DatasetSummary:
+        source = self._dataset_dir(name)
+        target = self._dataset_dir(new_name)
+        if not source.is_dir():
+            raise FileNotFoundError(f"No dataset named {name!r}")
+        if source == target:
+            return next(
+                dataset for dataset in self.list_datasets() if dataset.name == new_name
+            )
+        if target.exists():
+            raise ValueError(f"A dataset named {new_name!r} already exists")
+        os.rename(source, target)
+        return next(dataset for dataset in self.list_datasets() if dataset.name == new_name)
+
     def delete(self, name: str) -> None:
         import shutil
 
