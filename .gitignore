@@ -35,7 +35,10 @@ yarn-error.log*
 # local Python and runtime state
 /.venv/
 /.runtime/
-/backend/data/settings.json
+# local application data: settings, run history and evaluation datasets all
+# contain real customer documents or device-specific configuration
+/backend/data/*
+!/backend/data/.gitkeep
 /backend/**/__pycache__/
 /.pytest_cache/
 
