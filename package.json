@@ -13,7 +13,8 @@
     "test:frontend": "npm run build && node --test \"tests/*.test.mjs\"",
     "test:backend": ".venv\\Scripts\\python.exe -m pytest -q",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "types:generate": ".venv\\Scripts\\python.exe backend/scripts/generate_types.py"
   },
   "dependencies": {
     "lucide-react": "^1.32.0",

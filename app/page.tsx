@@ -36,6 +36,8 @@ import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import { resolveBootstrap } from "../lib/bootstrap";
+import { buildReviewedExport } from "../lib/review";
+import { validateSettingsDraft } from "../lib/validation";
 import type {
   AppSettings,
   Confidence,
@@ -292,22 +294,7 @@ export default function Home() {
 
   function validateDraft() {
     if (!draftSettings) return "Settings have not been loaded from the backend yet.";
-    const names = draftSettings.prompts.entities.map((entity) => entity.name);
-    if (names.some((name) => !/^[a-z][a-z0-9_]*$/.test(name))) {
-      return "Names must start with a lowercase letter and contain only letters, numbers and underscores.";
-    }
-    if (new Set(names).size !== names.length) return "Entity names must be unique.";
-    if (draftSettings.prompts.entities.some((entity) => !entity.description.trim())) {
-      return "Every entity must have a description.";
-    }
-    if (!draftSettings.prompts.system_prompt.trim() || !draftSettings.prompts.user_prompt.trim() || !draftSettings.prompts.confidence_prompt.trim()) {
-      return "Prompts cannot be empty.";
-    }
-    const pageLimit = Number(pageLimitInput);
-    if (!/^\d+$/.test(pageLimitInput) || !Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 100) {
-      return "Maximum pages must be an integer between 1 and 100.";
-    }
-    return null;
+    return validateSettingsDraft(draftSettings.prompts, pageLimitInput);
   }
 
   async function saveSettings() {
@@ -371,23 +358,11 @@ export default function Home() {
 
   function downloadJson() {
     if (!result || !settings) return;
-    const reviewedData = Object.fromEntries(
-      settings.prompts.entities.map((entity) => {
-        const original = result.data[entity.name];
-        const rawValue = editableValues[entity.name]?.trim() ?? "";
-        let value: string | number | null = rawValue || null;
-        if (rawValue && entity.format === "decimal") value = Number(rawValue);
-        if (rawValue && entity.format === "integer") value = Number.parseInt(rawValue, 10);
-        return [
-          entity.name,
-          {
-            value,
-            confidence: original.confidence,
-            manually_edited: editedFields.has(entity.name),
-            ...(original.warning && !editedFields.has(entity.name) ? { warning: original.warning } : {}),
-          },
-        ];
-      }),
+    const reviewedData = buildReviewedExport(
+      settings.prompts.entities,
+      result.data,
+      editableValues,
+      editedFields,
     );
     const blob = new Blob([JSON.stringify(reviewedData, null, 2)], { type: "application/json" });
     const href = URL.createObjectURL(blob);

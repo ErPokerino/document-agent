@@ -1,6 +1,22 @@
+// Generated from the FastAPI OpenAPI schema. Do not edit by hand.
+// Regenerate with: .venv/Scripts/python.exe backend/scripts/generate_types.py
+//
+// Every property is emitted as required: FastAPI serializes response models in
+// full, defaults included, and the frontend always sends complete objects back.
+
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
-export type Confidence = "low" | "medium" | "high";
-export type ModelRuntimeState = "not_loaded" | "loaded" | "loading" | "warming_up" | "ready" | "error";
+
+export type Confidence = FieldExtraction["confidence"];
+
+export type ModelRuntimeState = ModelInfo["runtime_state"];
+
+export type AppSettings = {
+  model: string;
+  excluded_model_ids: string[];
+  lm_studio_url: string;
+  max_pages_to_analyze: number;
+  prompts: PromptConfiguration;
+};
 
 export type EntityDefinition = {
   name: string;
@@ -8,17 +24,56 @@ export type EntityDefinition = {
   description: string;
 };
 
-export type PromptConfiguration = {
-  system_prompt: string;
-  user_prompt: string;
-  confidence_prompt: string;
-  entities: EntityDefinition[];
+export type ExtractionResponse = {
+  document_type: string;
+  filename: string;
+  model: string;
+  elapsed_ms: number;
+  data: Record<string, FieldExtraction>;
+  processing: ProcessingInfo;
 };
 
 export type FieldExtraction = {
   value: string | number | null;
-  confidence: Confidence;
+  confidence: "low" | "medium" | "high";
   warning: string | null;
+};
+
+export type HealthStatus = {
+  status: string;
+  lm_studio: boolean;
+  active_model: string;
+};
+
+export type ModelInfo = {
+  id: string;
+  name: string;
+  parameters: string | null;
+  quantization: string | null;
+  size_bytes: number | null;
+  context_length: number | null;
+  loaded: boolean;
+  ready: boolean;
+  runtime_state: "not_loaded" | "loaded" | "loading" | "warming_up" | "ready" | "error";
+  vision: boolean;
+};
+
+export type ModelLoadRequest = {
+  model: string;
+};
+
+export type ModelLoadResponse = {
+  model: string;
+  status: "ready";
+  load_ms: number;
+  warmup_ms: number;
+  total_ms: number;
+  unloaded_models: number;
+  profile: "default" | "compatibility";
+  already_loaded: boolean;
+  already_ready: boolean;
+  warmup_mode: "vision" | "vision_and_schema";
+  preparation_attempts: number;
 };
 
 export type ProcessingInfo = {
@@ -36,52 +91,9 @@ export type ProcessingInfo = {
   completion_tokens: number | null;
 };
 
-export type ExtractionResponse = {
-  document_type: "invoice";
-  filename: string;
-  model: string;
-  elapsed_ms: number;
-  data: Record<string, FieldExtraction>;
-  processing: ProcessingInfo;
-};
-
-export type ModelInfo = {
-  id: string;
-  name: string;
-  parameters: string | null;
-  quantization: string | null;
-  size_bytes: number | null;
-  context_length: number | null;
-  loaded: boolean;
-  ready: boolean;
-  runtime_state: ModelRuntimeState;
-  vision: boolean;
-};
-
-export type ModelLoadResponse = {
-  model: string;
-  status: "ready";
-  load_ms: number;
-  warmup_ms: number;
-  total_ms: number;
-  unloaded_models: number;
-  profile: "default" | "compatibility";
-  already_loaded: boolean;
-  already_ready: boolean;
-  warmup_mode: "vision" | "vision_and_schema";
-  preparation_attempts: number;
-};
-
-export type AppSettings = {
-  model: string;
-  excluded_model_ids: string[];
-  lm_studio_url: string;
-  max_pages_to_analyze: number;
-  prompts: PromptConfiguration;
-};
-
-export type HealthStatus = {
-  status: string;
-  lm_studio: boolean;
-  active_model: string;
+export type PromptConfiguration = {
+  system_prompt: string;
+  user_prompt: string;
+  confidence_prompt: string;
+  entities: EntityDefinition[];
 };
