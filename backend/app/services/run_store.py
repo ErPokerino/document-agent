@@ -11,6 +11,7 @@ request handlers.
 
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -78,8 +79,21 @@ class RunStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # PDFs live beside the database, addressed by content hash: identical
+        # files are stored once, and the database stays small enough to copy.
+        self.documents_dir = self.path.parent / "documents"
+        self.documents_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+
+    def read_document(self, file_sha256: str) -> bytes | None:
+        path = self._document_path(file_sha256)
+        return path.read_bytes() if path.exists() else None
+
+    def _document_path(self, file_sha256: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{64}", file_sha256):
+            raise ValueError("A document is addressed by its sha256 hex digest")
+        return self.documents_dir / f"{file_sha256}.pdf"
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -110,6 +124,10 @@ class RunStore:
         serialized = {
             name: field.model_dump(mode="json") for name, field in extraction.items()
         }
+        digest = hashlib.sha256(content).hexdigest()
+        document_path = self._document_path(digest)
+        if not document_path.exists():
+            document_path.write_bytes(content)
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -120,7 +138,7 @@ class RunStore:
                 (
                     _now(),
                     filename,
-                    hashlib.sha256(content).hexdigest(),
+                    digest,
                     model,
                     page_count,
                     processed_pages,

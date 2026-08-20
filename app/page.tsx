@@ -11,12 +11,12 @@ import {
   Download,
   ExternalLink,
   Eye,
+  FlaskConical,
   FileJson,
   FileText,
   LayoutDashboard,
   LoaderCircle,
   Pencil,
-  Plus,
   Power,
   RefreshCw,
   RotateCcw,
@@ -36,6 +36,7 @@ import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import { resolveBootstrap } from "../lib/bootstrap";
+import { PromptLab } from "./prompt-lab";
 import { buildReviewedExport } from "../lib/review";
 import { validateSettingsDraft } from "../lib/validation";
 import type {
@@ -50,8 +51,7 @@ import type {
   ModelRuntimeState,
 } from "../lib/types";
 
-type View = "workspace" | "settings";
-type SettingsSection = "model" | "prompts";
+type View = "workspace" | "lab" | "settings";
 type ProcessState = "idle" | "ready" | "processing" | "complete" | "error";
 
 const formatLabels: Record<EntityFormat, string> = {
@@ -106,7 +106,6 @@ const modelBadgeLabels: Record<ModelRuntimeState, string> = {
 
 export default function Home() {
   const [view, setView] = useState<View>("workspace");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("model");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -127,6 +126,7 @@ export default function Home() {
   const [modelLoadState, setModelLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [modelLoadReport, setModelLoadReport] = useState<ModelLoadResponse | null>(null);
   const [pageLimitInput, setPageLimitInput] = useState("");
+  const [reviewState, setReviewState] = useState<"idle" | "saving" | "saved">("idle");
   const fileInput = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
 
@@ -252,46 +252,6 @@ export default function Home() {
     }
   }
 
-  function updateEntity(index: number, update: Partial<EntityDefinition>) {
-    if (!draftSettings) return;
-    const entities = draftSettings.prompts.entities.map((entity, entityIndex) =>
-      entityIndex === index ? { ...entity, ...update } : entity,
-    );
-    setDraftSettings({
-      ...draftSettings,
-      prompts: { ...draftSettings.prompts, entities },
-    });
-  }
-
-  function addEntity() {
-    if (!draftSettings) return;
-    const existing = new Set(draftSettings.prompts.entities.map((entity) => entity.name));
-    let suffix = 1;
-    let name = "new_field";
-    while (existing.has(name)) name = `new_field_${++suffix}`;
-    setDraftSettings({
-      ...draftSettings,
-      prompts: {
-        ...draftSettings.prompts,
-        entities: [
-          ...draftSettings.prompts.entities,
-          { name, format: "text", description: "Describe where to find the value and how to interpret it." },
-        ],
-      },
-    });
-  }
-
-  function removeEntity(index: number) {
-    if (!draftSettings || draftSettings.prompts.entities.length === 1) return;
-    setDraftSettings({
-      ...draftSettings,
-      prompts: {
-        ...draftSettings.prompts,
-        entities: draftSettings.prompts.entities.filter((_, entityIndex) => entityIndex !== index),
-      },
-    });
-  }
-
   function validateDraft() {
     if (!draftSettings) return "Settings have not been loaded from the backend yet.";
     return validateSettingsDraft(draftSettings.prompts, pageLimitInput);
@@ -371,6 +331,31 @@ export default function Home() {
     anchor.download = `${result.filename.replace(/\.pdf$/i, "")}.json`;
     anchor.click();
     URL.revokeObjectURL(href);
+  }
+
+  async function markReviewed() {
+    if (!result?.run_id || !settings) return;
+    setReviewState("saving");
+    setError(null);
+    try {
+      // Every field is sent, not only the edited ones: a run where the model
+      // was right about everything is the most useful ground truth there is.
+      const reviewed = buildReviewedExport(
+        settings.prompts.entities,
+        result.data,
+        editableValues,
+        editedFields,
+      );
+      await api.saveCorrections(
+        result.run_id,
+        Object.fromEntries(Object.entries(reviewed).map(([name, field]) => [name, field.value])),
+      );
+      setReviewState("saved");
+      window.setTimeout(() => setReviewState("idle"), 2000);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The corrections could not be saved");
+      setReviewState("idle");
+    }
   }
 
   function updateReviewValue(entity: EntityDefinition, value: string) {
@@ -481,6 +466,9 @@ export default function Home() {
 
       <div className="schema-footer">
         <span><FileJson size={13} /> Dynamic JSON Schema</span>
+        <button className="export-button" disabled={!result?.run_id || reviewState === "saving"} onClick={markReviewed} title="Store these values as verified, so this document can become ground truth in Prompt Lab">
+          {reviewState === "saved" ? <><Check size={14} /> Saved as verified</> : <><ShieldCheck size={14} /> Mark as reviewed</>}
+        </button>
         <button className="export-button" disabled={!result} onClick={downloadJson}><Download size={14} /> Export JSON</button>
       </div>
     </section>
@@ -497,6 +485,9 @@ export default function Home() {
         <nav className="nav-list" aria-label="Main navigation">
           <button className={`nav-item ${view === "workspace" ? "active" : ""}`} onClick={() => setView("workspace")}>
             <LayoutDashboard size={17} /> Workspace
+          </button>
+          <button className={`nav-item ${view === "lab" ? "active" : ""}`} onClick={() => setView("lab")}>
+            <FlaskConical size={17} /> Prompt Lab
           </button>
           <button className="nav-item disabled" aria-disabled="true"><FileText size={17} /> Documents <small>Soon</small></button>
           <button className="nav-item disabled" aria-disabled="true"><Workflow size={17} /> Pipeline <small>Soon</small></button>
@@ -517,8 +508,8 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">{view === "workspace" ? "Invoice extraction" : "Configuration"}</p>
-            <h1>{view === "workspace" ? "Document workspace" : "Settings"}</h1>
+            <p className="eyebrow">{view === "workspace" ? "Invoice extraction" : view === "lab" ? "Extraction quality" : "Configuration"}</p>
+            <h1>{view === "workspace" ? "Document workspace" : view === "lab" ? "Prompt Lab" : "Settings"}</h1>
           </div>
           <div className="model-chip" title="Change the model in Settings">
             <span className="model-icon"><Cpu size={15} /></span>
@@ -585,7 +576,7 @@ export default function Home() {
                     <button className="icon-button" onClick={resetDocument} aria-label="Remove document"><Trash2 size={16} /></button>
                   </div>
                   {!isConnected && <small className="session-warning">Start LM Studio to process this document</small>}
-                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => { setView("settings"); setSettingsSection("model"); }}>Prepare the active model in Settings before processing</button>}
+                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("settings")}>Prepare the active model in Settings before processing</button>}
                 </section>
                 <div className="review-grid">
                   {previewUrl && (
@@ -634,6 +625,16 @@ export default function Home() {
               </div>
             )}
           </section>
+        ) : view === "lab" ? (
+          <PromptLab
+            draftSettings={draftSettings}
+            setDraftSettings={setDraftSettings}
+            savedEntities={configuredEntities}
+            onSave={saveSettings}
+            settingsState={settingsState}
+            settingsError={settingsError}
+            isModelReady={isModelReady}
+          />
         ) : (
           <section className="settings-layout wide">
             <div className="settings-intro">
@@ -641,15 +642,8 @@ export default function Home() {
               <div><h2>Agent configuration</h2><p>Model, prompts and entities are stored locally and applied to every subsequent run.</p></div>
             </div>
 
-            <div className="settings-tabs" role="tablist">
-              <button className={settingsSection === "model" ? "active" : ""} onClick={() => setSettingsSection("model")}><Cpu size={15} /> Model</button>
-              <button className={settingsSection === "prompts" ? "active" : ""} onClick={() => setSettingsSection("prompts")}><Braces size={15} /> Prompts &amp; entities <span>{draftSettings.prompts.entities.length}</span></button>
-            </div>
-
             {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}
 
-            {settingsSection === "model" ? (
-              <>
                 <div className="settings-card">
                   <div className="settings-card-heading">
                     <span className="settings-card-icon"><Server size={18} /></span>
@@ -711,41 +705,6 @@ export default function Home() {
                     </label>
                   </div>
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="settings-card prompt-card">
-                  <div className="settings-card-heading"><span className="settings-card-icon"><Sparkles size={18} /></span><div><h3>Global prompts</h3><p>Control the agent, the single document request and the confidence rubric.</p></div></div>
-                  <label className="input-label" htmlFor="system-prompt">System prompt</label>
-                  <textarea id="system-prompt" className="prompt-textarea large" value={draftSettings.prompts.system_prompt} onChange={(event) => setDraftSettings({ ...draftSettings, prompts: { ...draftSettings.prompts, system_prompt: event.target.value } })} />
-                  <label className="input-label prompt-label" htmlFor="user-prompt">Extraction instructions</label>
-                  <textarea id="user-prompt" className="prompt-textarea" value={draftSettings.prompts.user_prompt} onChange={(event) => setDraftSettings({ ...draftSettings, prompts: { ...draftSettings.prompts, user_prompt: event.target.value } })} />
-                  <p className="field-help">Use <code>{"{page_range}"}</code> to insert the pages included in the single model call.</p>
-                  <label className="input-label prompt-label" htmlFor="confidence-prompt">Confidence instructions</label>
-                  <textarea id="confidence-prompt" className="prompt-textarea" value={draftSettings.prompts.confidence_prompt} onChange={(event) => setDraftSettings({ ...draftSettings, prompts: { ...draftSettings.prompts, confidence_prompt: event.target.value } })} />
-                  <p className="field-help">Define how the model assigns <code>low</code>, <code>medium</code> and <code>high</code> to every extracted value.</p>
-                </div>
-
-                <div className="settings-card entity-card">
-                  <div className="settings-card-heading entity-heading"><span className="settings-card-icon"><Braces size={18} /></span><div><h3>Entities to extract</h3><p>Name, format and description automatically build the prompt and JSON Schema.</p></div><button className="add-entity-button" onClick={addEntity}><Plus size={14} /> Add entity</button></div>
-                  <div className="entity-list">
-                    {draftSettings.prompts.entities.map((entity, index) => (
-                      <div className="entity-editor" key={`${entity.name}-${index}`}>
-                        <div className="entity-index">{String(index + 1).padStart(2, "0")}</div>
-                        <div className="entity-fields">
-                          <div className="entity-row">
-                            <label><span>JSON name</span><input value={entity.name} onChange={(event) => updateEntity(index, { name: event.target.value.toLowerCase().replaceAll(" ", "_") })} /></label>
-                            <label><span>Format</span><select value={entity.format} onChange={(event) => updateEntity(index, { format: event.target.value as EntityFormat })}>{Object.entries(formatLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                          </div>
-                          <label className="entity-description"><span>Description for the model</span><textarea value={entity.description} onChange={(event) => updateEntity(index, { description: event.target.value })} /></label>
-                        </div>
-                        <button className="remove-entity-button" disabled={draftSettings.prompts.entities.length === 1} onClick={() => removeEntity(index)} aria-label={`Remove ${entity.name}`}><Trash2 size={15} /></button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
 
             <div className="settings-actions sticky-actions">
               <p><ShieldCheck size={14} /> Changes apply from the next processing run.</p>

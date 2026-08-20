@@ -134,3 +134,22 @@ def test_only_runs_a_human_validated_are_offered_as_ground_truth(store) -> None:
     store.record_corrections(validated, {"total_amount": 999.0})
 
     assert [run.filename for run in store.list_runs(validated_only=True)] == ["reviewed.pdf"]
+
+
+def test_the_original_pdf_is_kept_so_a_run_can_become_ground_truth(store) -> None:
+    run_id = record(store, content=b"%PDF-1.4 the real bytes")
+
+    run = store.get_run(run_id)
+    assert store.read_document(run.file_sha256) == b"%PDF-1.4 the real bytes"
+
+
+def test_the_same_pdf_is_stored_once(store, tmp_path) -> None:
+    record(store, "a.pdf", content=b"identical")
+    record(store, "b.pdf", content=b"identical")
+
+    stored = list((tmp_path / "documents").glob("*.pdf"))
+    assert len(stored) == 1
+
+
+def test_an_unknown_document_hash_reads_as_missing(store) -> None:
+    assert store.read_document("0" * 64) is None

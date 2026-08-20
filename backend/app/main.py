@@ -1,28 +1,51 @@
+import asyncio
 import time
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.domain.models import (
     AppSettings,
+    CorrectionsRequest,
+    Dataset,
+    DatasetCreateRequest,
+    DatasetDocument,
+    DocumentLabels,
+    Evaluation,
+    EvaluationDetail,
+    EvaluationRequest,
     ExtractionResponse,
+    ExtractionRun,
+    ExtractionRunDetail,
     HealthStatus,
+    LabelsRequest,
+    MetricTally,
+    Metrics,
     ModelInfo,
     ModelLoadRequest,
     ModelLoadResponse,
     ProcessingInfo,
+    PromoteRunRequest,
 )
+from app.evaluation.datasets import DatasetStore, InvalidName
+from app.evaluation.runner import run_evaluation
+from app.evaluation.store import EvaluationStore
 from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.steps import ExtractConfiguredEntities, InspectPdf
 from app.services.lm_studio import LMStudioClient, LMStudioError
+from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
 
 
 MAX_FILE_SIZE = 20 * 1024 * 1024
-SETTINGS_PATH = Path(__file__).resolve().parents[1] / "data" / "settings.json"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+SETTINGS_PATH = DATA_DIR / "settings.json"
+DATABASE_PATH = DATA_DIR / "docuflow.db"
+DATASETS_PATH = DATA_DIR / "datasets"
 
 app = FastAPI(title="DocuFlow API", version="0.1.0")
 app.add_middleware(
@@ -34,29 +57,46 @@ app.add_middleware(
 )
 
 settings_store = SettingsStore(SETTINGS_PATH)
+run_store = RunStore(DATABASE_PATH)
+evaluation_store = EvaluationStore(DATABASE_PATH)
+dataset_store = DatasetStore(DATASETS_PATH)
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
 active_model_operation: str | None = None
+evaluation_task: asyncio.Task | None = None
+evaluation_cancelled: asyncio.Event | None = None
+
+# A run still marked `running` belongs to a backend that no longer exists.
+evaluation_store.mark_interrupted()
 
 
-@asynccontextmanager
-async def exclusive_model_operation(phase: str) -> AsyncIterator[None]:
+def claim_model_operation(phase: str) -> None:
     """Refuse, never queue, a second model operation.
 
     The busy check and the claim happen without an intervening await, so the
     event loop cannot interleave two callers between them. `asyncio.Lock` was
-    deliberately avoided: a lock makes the second caller wait for an inference
-    that can legitimately run for ten minutes.
+    deliberately avoided: a lock makes the second caller wait for work that can
+    legitimately run for many minutes.
     """
     global active_model_operation
 
     if active_model_operation is not None:
         raise HTTPException(status_code=409, detail=_busy_message())
     active_model_operation = phase
+
+
+def release_model_operation() -> None:
+    global active_model_operation
+    active_model_operation = None
+
+
+@asynccontextmanager
+async def exclusive_model_operation(phase: str) -> AsyncIterator[None]:
+    claim_model_operation(phase)
     try:
         yield
     finally:
-        active_model_operation = None
+        release_model_operation()
 
 
 def _models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
@@ -85,6 +125,11 @@ def _models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
 def _busy_message() -> str:
     if active_model_operation == "processing":
         return "A document is currently being processed. Wait for it to finish before changing models."
+    if active_model_operation == "evaluating":
+        return (
+            "An evaluation is running in Prompt Lab. Only one model operation can run at a "
+            "time, so wait for it to finish or cancel it."
+        )
     return "A model is currently loading or warming up. Wait until it is ready."
 
 
@@ -260,7 +305,20 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
                 model_runtime_states[settings.model] = "error"
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+        run_id = run_store.record_run(
+            filename=context.filename,
+            content=content,
+            model=context.model,
+            prompts=settings.prompts,
+            extraction=result.artifacts["extraction"],
+            page_count=result.artifacts["page_count"],
+            processed_pages=result.artifacts["processed_pages"],
+            elapsed_ms=round((time.perf_counter() - started) * 1000),
+            source="workspace",
+        )
+
         return ExtractionResponse(
+            run_id=run_id,
             filename=context.filename,
             model=context.model,
             elapsed_ms=round((time.perf_counter() - started) * 1000),
@@ -276,3 +334,287 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
                 **result.artifacts.get("inference_stats", {}),
             ),
         )
+
+
+# --- Prompt Lab -------------------------------------------------------------
+
+
+def _metrics_model(metrics: Any) -> Metrics:
+    def tally(value: Any) -> MetricTally:
+        return MetricTally(matched=value.matched, total=value.total, accuracy=value.accuracy)
+
+    return Metrics(
+        matched=metrics.matched,
+        total=metrics.total,
+        accuracy=metrics.accuracy,
+        per_entity={name: tally(value) for name, value in metrics.per_entity.items()},
+        per_confidence={name: tally(value) for name, value in metrics.per_confidence.items()},
+    )
+
+
+def _evaluation_model(detail: Any) -> Evaluation:
+    return Evaluation(
+        **{
+            key: getattr(detail, key)
+            for key in (
+                "id",
+                "created_at",
+                "finished_at",
+                "dataset",
+                "model",
+                "status",
+                "total_documents",
+                "completed_documents",
+                "error",
+            )
+        },
+        metrics=_metrics_model(detail.metrics),
+    )
+
+
+def _require_dataset(name: str) -> None:
+    if name not in {dataset.name for dataset in dataset_store.list_datasets()}:
+        raise HTTPException(status_code=404, detail=f"No dataset named {name}")
+
+
+@app.get("/api/datasets", response_model=list[Dataset])
+async def list_datasets() -> list[Dataset]:
+    return [Dataset(**asdict(dataset)) for dataset in dataset_store.list_datasets()]
+
+
+@app.post("/api/datasets", response_model=Dataset, status_code=201)
+async def create_dataset(request: DatasetCreateRequest) -> Dataset:
+    try:
+        return Dataset(**asdict(dataset_store.create(request.name)))
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/datasets/{name}", status_code=204, response_class=Response)
+async def delete_dataset(name: str) -> Response:
+    try:
+        dataset_store.delete(name)
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.get("/api/datasets/{name}/documents", response_model=list[DatasetDocument])
+async def list_dataset_documents(name: str) -> list[DatasetDocument]:
+    _require_dataset(name)
+    return [DatasetDocument(**asdict(document)) for document in dataset_store.list_documents(name)]
+
+
+@app.post("/api/datasets/{name}/documents", response_model=DatasetDocument, status_code=201)
+async def add_dataset_document(name: str, file: UploadFile = File(...)) -> DatasetDocument:
+    _require_dataset(name)
+    content = await file.read(MAX_FILE_SIZE + 1)
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="The PDF exceeds the 20 MB limit")
+    try:
+        added = dataset_store.add_document(name, file.filename or "document.pdf", content)
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    return DatasetDocument(**asdict(added))
+
+
+@app.delete("/api/datasets/{name}/documents/{document}", status_code=204, response_class=Response)
+async def delete_dataset_document(name: str, document: str) -> Response:
+    _require_dataset(name)
+    try:
+        dataset_store.remove_document(name, document)
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.get("/api/datasets/{name}/documents/{document}/labels", response_model=DocumentLabels)
+async def get_document_labels(name: str, document: str) -> DocumentLabels:
+    _require_dataset(name)
+    try:
+        label_file = dataset_store.read_labels(name, document)
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if label_file is None:
+        return DocumentLabels(document=document, source="none", labels={})
+    return DocumentLabels(
+        document=document,
+        source=label_file.source,
+        labels=label_file.labels,
+        updated_at=label_file.updated_at,
+    )
+
+
+@app.put("/api/datasets/{name}/documents/{document}/labels", response_model=DocumentLabels)
+async def set_document_labels(name: str, document: str, request: LabelsRequest) -> DocumentLabels:
+    _require_dataset(name)
+    configured = {entity.name for entity in settings_store.read().prompts.entities}
+    unknown = sorted(set(request.labels) - configured)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail="These labels name entities that are not configured: " + ", ".join(unknown),
+        )
+    try:
+        label_file = dataset_store.set_labels(name, document, request.labels, source="manual")
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DocumentLabels(
+        document=document,
+        source=label_file.source,
+        labels=label_file.labels,
+        updated_at=label_file.updated_at,
+    )
+
+
+@app.post("/api/datasets/{name}/documents/from-run", response_model=DatasetDocument, status_code=201)
+async def promote_run_to_dataset(name: str, request: PromoteRunRequest) -> DatasetDocument:
+    _require_dataset(name)
+    run = run_store.get_run(request.run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"No run with id {request.run_id}")
+    content = run_store.read_document(run.file_sha256)
+    if content is None:
+        raise HTTPException(
+            status_code=410,
+            detail="The original PDF for that run is no longer stored on this device.",
+        )
+    labels = run_store.validated_values(request.run_id) or {}
+    try:
+        added = dataset_store.add_document(
+            name, run.filename, content, labels=labels, source="promoted_run"
+        )
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DatasetDocument(**asdict(added))
+
+
+@app.get("/api/runs", response_model=list[ExtractionRun])
+async def list_runs(limit: int = 50, validated_only: bool = False) -> list[ExtractionRun]:
+    return [
+        ExtractionRun(**asdict(run))
+        for run in run_store.list_runs(limit=min(limit, 200), validated_only=validated_only)
+    ]
+
+
+@app.get("/api/runs/{run_id}", response_model=ExtractionRunDetail)
+async def get_run(run_id: int) -> ExtractionRunDetail:
+    run = run_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"No run with id {run_id}")
+    return ExtractionRunDetail(**asdict(run))
+
+
+@app.post("/api/runs/{run_id}/corrections", status_code=204, response_class=Response)
+async def record_corrections(run_id: int, request: CorrectionsRequest) -> Response:
+    try:
+        run_store.record_corrections(run_id, request.corrections)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.get("/api/evaluations", response_model=list[Evaluation])
+async def list_evaluations() -> list[Evaluation]:
+    return [_evaluation_model(evaluation) for evaluation in evaluation_store.list_evaluations()]
+
+
+@app.get("/api/evaluations/{evaluation_id}", response_model=EvaluationDetail)
+async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
+    detail = evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    summary = _evaluation_model(detail)
+    return EvaluationDetail(
+        **summary.model_dump(),
+        prompts=detail.prompts,
+        documents=[asdict(document) for document in detail.documents],
+    )
+
+
+@app.post("/api/evaluations", response_model=Evaluation, status_code=202)
+async def start_evaluation(request: EvaluationRequest) -> Evaluation:
+    global evaluation_task, evaluation_cancelled
+
+    _require_dataset(request.dataset)
+    settings = settings_store.read()
+
+    documents: list[tuple[str, dict[str, Any]]] = []
+    for document in dataset_store.list_documents(request.dataset):
+        if not document.labelled:
+            continue
+        label_file = dataset_store.read_labels(request.dataset, document.name)
+        if label_file is not None:
+            documents.append((document.name, label_file.labels))
+    if not documents:
+        raise HTTPException(
+            status_code=400,
+            detail="This dataset has no labelled documents. Add ground truth before running a test.",
+        )
+
+    try:
+        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+    except LMStudioError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    selected = next((model for model in available if model.id == settings.model), None)
+    if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="The active model is not ready. Open Settings and use Load & warm up first.",
+        )
+
+    claim_model_operation("evaluating")
+    evaluation_id = evaluation_store.start(
+        dataset=request.dataset,
+        model=settings.model,
+        prompts=settings.prompts,
+        total_documents=len(documents),
+    )
+    evaluation_cancelled = asyncio.Event()
+
+    async def drive(cancelled: asyncio.Event) -> None:
+        try:
+            await run_evaluation(
+                evaluation_id=evaluation_id,
+                evaluations=evaluation_store,
+                datasets=dataset_store,
+                run_store=run_store,
+                dataset=request.dataset,
+                documents=documents,
+                entities=settings.prompts.entities,
+                prompts=settings.prompts,
+                model=settings.model,
+                lm_studio_url=settings.lm_studio_url,
+                max_pages=settings.max_pages_to_analyze,
+                cancelled=cancelled,
+            )
+        except asyncio.CancelledError:
+            evaluation_store.finish(evaluation_id, "cancelled")
+        except Exception:
+            # run_evaluation has already recorded the failure on the evaluation.
+            pass
+        finally:
+            release_model_operation()
+
+    evaluation_task = asyncio.create_task(drive(evaluation_cancelled))
+    return _evaluation_model(evaluation_store.get_evaluation(evaluation_id))
+
+
+@app.post("/api/evaluations/{evaluation_id}/cancel", status_code=202, response_model=Evaluation)
+async def cancel_evaluation(evaluation_id: int) -> Evaluation:
+    detail = evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    if detail.status != "running":
+        raise HTTPException(status_code=409, detail="That evaluation is not running.")
+    if evaluation_cancelled is not None:
+        # Stops after the document in flight: killing a request mid-inference
+        # leaves LM Studio busy with work nobody is waiting for.
+        evaluation_cancelled.set()
+    return _evaluation_model(evaluation_store.get_evaluation(evaluation_id))

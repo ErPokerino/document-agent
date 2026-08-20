@@ -65,3 +65,26 @@ def test_an_unsupported_schema_construct_fails_loudly() -> None:
     }
     with pytest.raises(UnsupportedSchema):
         render(broken)
+
+
+def test_an_open_ended_value_becomes_unknown() -> None:
+    from scripts.generate_types import render_types as render
+
+    schema = {
+        "components": {
+            "schemas": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "expected": {},
+                        "labels": {"type": "object", "additionalProperties": True},
+                    },
+                }
+            }
+        }
+    }
+
+    generated = render(schema)
+
+    assert "expected: unknown;" in generated
+    assert "labels: Record<string, unknown>;" in generated

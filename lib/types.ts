@@ -18,19 +18,127 @@ export type AppSettings = {
   prompts: PromptConfiguration;
 };
 
+export type CorrectionsRequest = {
+  corrections: Record<string, unknown>;
+};
+
+export type Dataset = {
+  name: string;
+  document_count: number;
+  labelled_count: number;
+};
+
+export type DatasetCreateRequest = {
+  name: string;
+};
+
+export type DatasetDocument = {
+  name: string;
+  size_bytes: number;
+  labelled: boolean;
+  labelled_entities: string[];
+  label_source: string | null;
+  label_error: string | null;
+};
+
+export type DocumentLabels = {
+  document: string;
+  source: string;
+  labels: Record<string, unknown>;
+  updated_at: string | null;
+};
+
 export type EntityDefinition = {
   name: string;
   format: EntityFormat;
   description: string;
 };
 
+export type Evaluation = {
+  id: number;
+  created_at: string;
+  finished_at: string | null;
+  dataset: string;
+  model: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  total_documents: number;
+  completed_documents: number;
+  error: string | null;
+  metrics: Metrics;
+};
+
+export type EvaluationDetail = {
+  id: number;
+  created_at: string;
+  finished_at: string | null;
+  dataset: string;
+  model: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  total_documents: number;
+  completed_documents: number;
+  error: string | null;
+  metrics: Metrics;
+  prompts: PromptConfiguration;
+  documents: EvaluationDocumentResult[];
+};
+
+export type EvaluationDocumentResult = {
+  name: string;
+  status: string;
+  error: string | null;
+  elapsed_ms: number | null;
+  items: EvaluationFieldResult[];
+};
+
+export type EvaluationFieldResult = {
+  entity: string;
+  expected: string | number | boolean | null;
+  actual: string | number | boolean | null;
+  confidence: "low" | "medium" | "high";
+  matched: boolean;
+};
+
+export type EvaluationRequest = {
+  dataset: string;
+};
+
 export type ExtractionResponse = {
   document_type: string;
+  run_id: number | null;
   filename: string;
   model: string;
   elapsed_ms: number;
   data: Record<string, FieldExtraction>;
   processing: ProcessingInfo;
+};
+
+export type ExtractionRun = {
+  id: number;
+  created_at: string;
+  filename: string;
+  file_sha256: string;
+  model: string;
+  page_count: number;
+  processed_pages: number;
+  elapsed_ms: number;
+  source: string;
+  has_corrections: boolean;
+};
+
+export type ExtractionRunDetail = {
+  id: number;
+  created_at: string;
+  filename: string;
+  file_sha256: string;
+  model: string;
+  page_count: number;
+  processed_pages: number;
+  elapsed_ms: number;
+  source: string;
+  has_corrections: boolean;
+  prompts: PromptConfiguration;
+  extraction: Record<string, FieldExtraction>;
+  corrections: Record<string, unknown>;
 };
 
 export type FieldExtraction = {
@@ -43,6 +151,24 @@ export type HealthStatus = {
   status: string;
   lm_studio: boolean;
   active_model: string;
+};
+
+export type LabelsRequest = {
+  labels: Record<string, unknown>;
+};
+
+export type MetricTally = {
+  matched: number;
+  total: number;
+  accuracy: number | null;
+};
+
+export type Metrics = {
+  matched: number;
+  total: number;
+  accuracy: number | null;
+  per_entity: Record<string, MetricTally>;
+  per_confidence: Record<string, MetricTally>;
 };
 
 export type ModelInfo = {
@@ -89,6 +215,10 @@ export type ProcessingInfo = {
   tokens_per_second: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
+};
+
+export type PromoteRunRequest = {
+  run_id: number;
 };
 
 export type PromptConfiguration = {

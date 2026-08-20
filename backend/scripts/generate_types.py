@@ -65,6 +65,10 @@ def _type_of(schema: dict[str, Any], context: str) -> str:
         # Pydantic renders a single-value Literal as `const`, not as a one-item enum.
         return f'"{schema["const"]}"'
 
+    if not schema:
+        # An unconstrained value: Pydantic renders `Any` as an empty schema.
+        return "unknown"
+
     kind = schema.get("type")
     if kind == "string":
         return "string"
@@ -83,6 +87,8 @@ def _type_of(schema: dict[str, Any], context: str) -> str:
         additional = schema.get("additionalProperties")
         if isinstance(additional, dict):
             return f"Record<string, {_type_of(additional, context)}>"
+        if additional is True:
+            return "Record<string, unknown>"
         raise UnsupportedSchema(f"{context}: object without additionalProperties")
 
     raise UnsupportedSchema(f"{context}: unsupported schema {sorted(schema)}")

@@ -1,4 +1,16 @@
-import type { AppSettings, ExtractionResponse, HealthStatus, ModelInfo, ModelLoadResponse } from "./types";
+import type {
+  AppSettings,
+  Dataset,
+  DatasetDocument,
+  DocumentLabels,
+  Evaluation,
+  EvaluationDetail,
+  ExtractionResponse,
+  ExtractionRun,
+  HealthStatus,
+  ModelInfo,
+  ModelLoadResponse,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -12,31 +24,56 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       : detail;
     throw new Error(message ?? `Request failed (${response.status})`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+
+function json(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+function upload(file: File): RequestInit {
+  const form = new FormData();
+  form.append("file", file);
+  return { method: "POST", body: form };
+}
+
+const segment = encodeURIComponent;
 
 export const api = {
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
-  loadModel: (model: string) =>
-    request<ModelLoadResponse>("/api/models/load", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model }),
-    }),
+  loadModel: (model: string) => request<ModelLoadResponse>("/api/models/load", json("POST", { model })),
   settings: () => request<AppSettings>("/api/settings"),
-  saveSettings: (settings: AppSettings) =>
-    request<AppSettings>("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    }),
-  extract: (file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return request<ExtractionResponse>("/api/documents/extract", {
-      method: "POST",
-      body: form,
-    });
-  },
+  saveSettings: (settings: AppSettings) => request<AppSettings>("/api/settings", json("PUT", settings)),
+  extract: (file: File) => request<ExtractionResponse>("/api/documents/extract", upload(file)),
+
+  runs: (validatedOnly = false) =>
+    request<ExtractionRun[]>(`/api/runs?validated_only=${validatedOnly}`),
+  saveCorrections: (runId: number, corrections: Record<string, unknown>) =>
+    request<void>(`/api/runs/${runId}/corrections`, json("POST", { corrections })),
+
+  datasets: () => request<Dataset[]>("/api/datasets"),
+  createDataset: (name: string) => request<Dataset>("/api/datasets", json("POST", { name })),
+  deleteDataset: (name: string) => request<void>(`/api/datasets/${segment(name)}`, { method: "DELETE" }),
+  datasetDocuments: (name: string) =>
+    request<DatasetDocument[]>(`/api/datasets/${segment(name)}/documents`),
+  addDatasetDocument: (name: string, file: File) =>
+    request<DatasetDocument>(`/api/datasets/${segment(name)}/documents`, upload(file)),
+  removeDatasetDocument: (name: string, document: string) =>
+    request<void>(`/api/datasets/${segment(name)}/documents/${segment(document)}`, { method: "DELETE" }),
+  documentLabels: (name: string, document: string) =>
+    request<DocumentLabels>(`/api/datasets/${segment(name)}/documents/${segment(document)}/labels`),
+  saveDocumentLabels: (name: string, document: string, labels: Record<string, unknown>) =>
+    request<DocumentLabels>(
+      `/api/datasets/${segment(name)}/documents/${segment(document)}/labels`,
+      json("PUT", { labels }),
+    ),
+  promoteRun: (name: string, runId: number) =>
+    request<DatasetDocument>(`/api/datasets/${segment(name)}/documents/from-run`, json("POST", { run_id: runId })),
+
+  evaluations: () => request<Evaluation[]>("/api/evaluations"),
+  evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
+  startEvaluation: (dataset: string) => request<Evaluation>("/api/evaluations", json("POST", { dataset })),
+  cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),
 };

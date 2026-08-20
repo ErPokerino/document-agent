@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -163,8 +163,131 @@ class ProcessingInfo(BaseModel):
 
 class ExtractionResponse(BaseModel):
     document_type: str = "invoice"
+    run_id: int | None = None
     filename: str
     model: str
     elapsed_ms: int
     data: dict[str, FieldExtraction]
     processing: ProcessingInfo
+
+
+# --- Prompt Lab -------------------------------------------------------------
+
+
+class Dataset(BaseModel):
+    name: str
+    document_count: int
+    labelled_count: int
+
+
+class DatasetDocument(BaseModel):
+    name: str
+    size_bytes: int
+    labelled: bool
+    labelled_entities: list[str]
+    label_source: str | None = None
+    label_error: str | None = None
+
+
+class DatasetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class LabelsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    labels: dict[str, Any]
+
+
+class DocumentLabels(BaseModel):
+    document: str
+    source: str
+    labels: dict[str, Any]
+    updated_at: str | None = None
+
+
+class PromoteRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int
+
+
+class ExtractionRun(BaseModel):
+    id: int
+    created_at: str
+    filename: str
+    file_sha256: str
+    model: str
+    page_count: int
+    processed_pages: int
+    elapsed_ms: int
+    source: str
+    has_corrections: bool
+
+
+class ExtractionRunDetail(ExtractionRun):
+    prompts: PromptConfiguration
+    extraction: dict[str, FieldExtraction]
+    corrections: dict[str, Any]
+
+
+class CorrectionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    corrections: dict[str, Any]
+
+
+class MetricTally(BaseModel):
+    matched: int
+    total: int
+    accuracy: float | None = None
+
+
+class Metrics(BaseModel):
+    matched: int
+    total: int
+    accuracy: float | None = None
+    per_entity: dict[str, MetricTally] = Field(default_factory=dict)
+    per_confidence: dict[str, MetricTally] = Field(default_factory=dict)
+
+
+class EvaluationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class Evaluation(BaseModel):
+    id: int
+    created_at: str
+    finished_at: str | None = None
+    dataset: str
+    model: str
+    status: Literal["running", "completed", "failed", "cancelled"]
+    total_documents: int
+    completed_documents: int
+    error: str | None = None
+    metrics: Metrics
+
+
+class EvaluationFieldResult(BaseModel):
+    entity: str
+    expected: str | float | int | bool | None
+    actual: str | float | int | bool | None
+    confidence: Literal["low", "medium", "high"]
+    matched: bool
+
+
+class EvaluationDocumentResult(BaseModel):
+    name: str
+    status: str
+    error: str | None = None
+    elapsed_ms: int | None = None
+    items: list[EvaluationFieldResult]
+
+
+class EvaluationDetail(Evaluation):
+    prompts: PromptConfiguration
+    documents: list[EvaluationDocumentResult]
