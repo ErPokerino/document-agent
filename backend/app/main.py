@@ -22,6 +22,7 @@ from app.domain.models import (
     ExtractionResponse,
     ExtractionRun,
     ExtractionRunDetail,
+    GeminiKeyStatus,
     HealthStatus,
     LabelsRequest,
     MetricTally,
@@ -38,6 +39,7 @@ from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
 from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.steps import ExtractConfiguredEntities, InspectPdf
+from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
 from app.services.lm_studio import LMStudioClient, LMStudioError
 from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
@@ -124,6 +126,81 @@ def _models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
     return enriched
 
 
+def _hosted_models(settings: AppSettings) -> list[ModelInfo]:
+    """Hosted models need no loading: a valid key is the whole readiness story."""
+    ready = bool(settings.gemini.api_key.strip())
+    return [
+        ModelInfo(
+            id=model.id,
+            name=model.name,
+            provider="gemini",
+            loaded=ready,
+            ready=ready,
+            runtime_state="ready" if ready else "not_loaded",
+        )
+        for model in GEMINI_MODELS
+    ]
+
+
+async def _ensure_model_ready(settings: AppSettings) -> None:
+    """Raise unless the configured model can answer right now.
+
+    A hosted model is ready as soon as its key is present; a local one has to be
+    in memory and warmed up, which costs a round trip to LM Studio to confirm.
+    """
+    if settings.provider == "gemini":
+        if find_model(settings.model) is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{settings.model} is not one of the supported hosted models.",
+            )
+        if not settings.gemini.api_key.strip():
+            raise HTTPException(
+                status_code=409,
+                detail="No Gemini API key is configured. Add one in Settings.",
+            )
+        return
+
+    try:
+        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+    except LMStudioError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    selected = next((model for model in available if model.id == settings.model), None)
+    if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="The active model is not ready. Open Settings and use Load & warm up first.",
+        )
+
+
+def _pipeline_context(settings: AppSettings, filename: str, content: bytes) -> PipelineContext:
+    return PipelineContext(
+        filename=filename,
+        content=content,
+        model=settings.model,
+        lm_studio_url=settings.lm_studio_url,
+        provider=settings.provider,
+        gemini_api_key=settings.gemini.api_key,
+        gemini_thinking_level=settings.gemini.thinking_level,
+    )
+
+
+def _masked(settings: AppSettings) -> AppSettings:
+    """The key never leaves the backend; the UI works from the hint instead."""
+    return settings.model_copy(
+        update={"gemini": settings.gemini.model_copy(update={"api_key": ""})}
+    )
+
+
+def _key_status(settings: AppSettings, verified: list[str] | None = None) -> GeminiKeyStatus:
+    key = settings.gemini.api_key.strip()
+    return GeminiKeyStatus(
+        configured=bool(key),
+        hint=f"…{key[-4:]}" if len(key) >= 4 else ("…" if key else ""),
+        verified_models=verified or [],
+    )
+
+
 def _busy_message() -> str:
     if active_model_operation == "processing":
         return "A document is currently being processed. Wait for it to finish before changing models."
@@ -153,18 +230,29 @@ async def health() -> HealthStatus:
 @app.get("/api/models", response_model=list[ModelInfo])
 async def models() -> list[ModelInfo]:
     settings = settings_store.read()
+    hosted = _hosted_models(settings)
     try:
         discovered = await LMStudioClient(settings.lm_studio_url).list_vision_models(
             settings.excluded_model_ids
         )
-        return _models_with_runtime_state(discovered)
     except LMStudioError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # One provider being unreachable must not hide the other. Only report a
+        # failure when there is nothing at all to choose from.
+        if not hosted:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return hosted
+    return [*_models_with_runtime_state(discovered), *hosted]
 
 
 @app.post("/api/models/load", response_model=ModelLoadResponse)
 async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
     settings = settings_store.read()
+    if find_model(request.model) is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="This model runs on Google's servers and does not need loading. "
+            "Add an API key in Settings and it is ready.",
+        )
     if request.model in settings.excluded_model_ids:
         raise HTTPException(
             status_code=400,
@@ -214,7 +302,35 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
 
 @app.get("/api/settings", response_model=AppSettings)
 async def get_settings() -> AppSettings:
-    return settings_store.read()
+    return _masked(settings_store.read())
+
+
+@app.get("/api/settings/gemini", response_model=GeminiKeyStatus)
+async def gemini_key_status() -> GeminiKeyStatus:
+    return _key_status(settings_store.read())
+
+
+@app.post("/api/settings/gemini/verify", response_model=GeminiKeyStatus)
+async def verify_gemini_key() -> GeminiKeyStatus:
+    """Ask Google what this key can see, so a bad key fails here and not mid-run."""
+    settings = settings_store.read()
+    if not settings.gemini.api_key.strip():
+        raise HTTPException(status_code=400, detail="Add a Gemini API key first.")
+    try:
+        available = await GeminiClient(settings.gemini.api_key).list_models()
+    except GeminiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    supported = {model.id for model in GEMINI_MODELS}
+    return _key_status(settings, verified=[name for name in available if name in supported])
+
+
+@app.delete("/api/settings/gemini", status_code=204, response_class=Response)
+async def clear_gemini_key() -> Response:
+    settings = settings_store.read()
+    settings_store.write(
+        settings.model_copy(update={"gemini": settings.gemini.model_copy(update={"api_key": ""})})
+    )
+    return Response(status_code=204)
 
 
 @app.put("/api/settings", response_model=AppSettings)
@@ -225,16 +341,36 @@ async def update_settings(settings: AppSettings) -> AppSettings:
             status_code=400,
             detail="The active model cannot also be excluded on this device",
         )
-    # Prompts and entities must stay editable while LM Studio is down; only a
-    # change of target model or endpoint needs the live model list.
-    endpoint_changed = settings.lm_studio_url != previous_settings.lm_studio_url
-    if settings.model != previous_settings.model or endpoint_changed:
-        try:
-            available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
-        except LMStudioError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if settings.model not in {model.id for model in available}:
-            raise HTTPException(status_code=400, detail="Select a vision-capable model")
+
+    # The key is write-only: an empty field means "leave the stored one alone",
+    # which is what the masked value the UI holds always sends back.
+    if not settings.gemini.api_key.strip():
+        settings = settings.model_copy(
+            update={
+                "gemini": settings.gemini.model_copy(
+                    update={"api_key": previous_settings.gemini.api_key}
+                )
+            }
+        )
+
+    if settings.provider == "gemini":
+        if find_model(settings.model) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{settings.model} is not one of the supported hosted models.",
+            )
+    else:
+        # Prompts and entities must stay editable while LM Studio is down; only a
+        # change of target model or endpoint needs the live model list.
+        endpoint_changed = settings.lm_studio_url != previous_settings.lm_studio_url
+        provider_changed = settings.provider != previous_settings.provider
+        if settings.model != previous_settings.model or endpoint_changed or provider_changed:
+            try:
+                available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+            except LMStudioError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            if settings.model not in {model.id for model in available}:
+                raise HTTPException(status_code=400, detail="Select a vision-capable model")
     saved = settings_store.write(settings)
     previous_schema = [
         (entity.name, entity.format) for entity in previous_settings.prompts.entities
@@ -246,7 +382,7 @@ async def update_settings(settings: AppSettings) -> AppSettings:
         and model_warmup_modes.get(saved.model) == "vision_and_schema"
     ):
         model_runtime_states[saved.model] = "loaded"
-    return saved
+    return _masked(saved)
 
 
 @app.post("/api/documents/extract", response_model=ExtractionResponse)
@@ -263,32 +399,9 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
         raise HTTPException(status_code=413, detail="The PDF exceeds the 20 MB limit")
 
     settings = settings_store.read()
-    client = LMStudioClient(settings.lm_studio_url)
     async with exclusive_model_operation("processing"):
-        try:
-            available_models = await client.list_vision_models()
-        except LMStudioError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        selected_model = next(
-            (model for model in available_models if model.id == settings.model),
-            None,
-        )
-        if (
-            selected_model is None
-            or not selected_model.loaded
-            or model_runtime_states.get(settings.model) != "ready"
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="The active model is not ready. Open Settings and use Load & warm up first.",
-            )
-
-        context = PipelineContext(
-            filename=file.filename or "invoice.pdf",
-            content=content,
-            model=settings.model,
-            lm_studio_url=settings.lm_studio_url,
-        )
+        await _ensure_model_ready(settings)
+        context = _pipeline_context(settings, file.filename or "invoice.pdf", content)
         pipeline = DocumentPipeline(
             [
                 InspectPdf(
@@ -302,7 +415,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             result = await pipeline.run(context)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except LMStudioError as exc:
+        except (LMStudioError, GeminiError) as exc:
             if "terminated" in str(exc).lower() or "device was lost" in str(exc).lower():
                 model_runtime_states[settings.model] = "error"
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -317,6 +430,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             processed_pages=result.artifacts["processed_pages"],
             elapsed_ms=round((time.perf_counter() - started) * 1000),
             source="workspace",
+            provider=settings.provider,
         )
 
         return ExtractionResponse(
@@ -550,17 +664,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
     """
     _require_dataset(name)
     settings = settings_store.read()
-
-    try:
-        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
-    except LMStudioError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    selected = next((model for model in available if model.id == settings.model), None)
-    if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
-        raise HTTPException(
-            status_code=409,
-            detail="The active model is not ready. Open Settings and use Load & warm up first.",
-        )
+    await _ensure_model_ready(settings)
 
     try:
         content = dataset_store.read_document(name, document)
@@ -570,12 +674,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
         raise HTTPException(status_code=404, detail=f"No document named {document}") from exc
 
     async with exclusive_model_operation("processing"):
-        context = PipelineContext(
-            filename=document,
-            content=content,
-            model=settings.model,
-            lm_studio_url=settings.lm_studio_url,
-        )
+        context = _pipeline_context(settings, document, content)
         pipeline = DocumentPipeline(
             [
                 InspectPdf(max_pages_to_analyze=settings.max_pages_to_analyze),
@@ -587,7 +686,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
             result = await pipeline.run(context)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except LMStudioError as exc:
+        except (LMStudioError, GeminiError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         elapsed_ms = round((time.perf_counter() - started) * 1000)
@@ -602,6 +701,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
             processed_pages=result.artifacts["processed_pages"],
             elapsed_ms=elapsed_ms,
             source="labelling",
+            provider=settings.provider,
         )
         return DraftLabels(
             document=document,
@@ -687,16 +787,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
             detail="This dataset has no labelled documents. Add ground truth before running a test.",
         )
 
-    try:
-        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
-    except LMStudioError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    selected = next((model for model in available if model.id == settings.model), None)
-    if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
-        raise HTTPException(
-            status_code=409,
-            detail="The active model is not ready. Open Settings and use Load & warm up first.",
-        )
+    await _ensure_model_ready(settings)
 
     claim_model_operation("evaluating")
     evaluation_id = evaluation_store.start(
@@ -721,6 +812,9 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 prompts=settings.prompts,
                 model=settings.model,
                 lm_studio_url=settings.lm_studio_url,
+                provider=settings.provider,
+                gemini_api_key=settings.gemini.api_key,
+                gemini_thinking_level=settings.gemini.thinking_level,
                 max_pages=settings.max_pages_to_analyze,
                 cancelled=cancelled,
             )
@@ -773,16 +867,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 "so the retried documents are scored the same way as the rest of the run."
             ),
         )
-    try:
-        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
-    except LMStudioError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    selected = next((model for model in available if model.id == detail.model), None)
-    if selected is None or not selected.loaded or model_runtime_states.get(detail.model) != "ready":
-        raise HTTPException(
-            status_code=409,
-            detail="The active model is not ready. Open Settings and use Load & warm up first.",
-        )
+    await _ensure_model_ready(settings)
 
     attempted = evaluation_store.attempted_documents(evaluation_id)
     documents: list[tuple[str, dict[str, Any]]] = []
@@ -815,6 +900,9 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 prompts=detail.prompts,
                 model=detail.model,
                 lm_studio_url=settings.lm_studio_url,
+                provider=settings.provider,
+                gemini_api_key=settings.gemini.api_key,
+                gemini_thinking_level=settings.gemini.thinking_level,
                 max_pages=detail.max_pages or settings.max_pages_to_analyze,
                 cancelled=cancelled,
             )

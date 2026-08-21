@@ -11,8 +11,10 @@ export type Confidence = FieldExtraction["confidence"];
 export type ModelRuntimeState = ModelInfo["runtime_state"];
 
 export type AppSettings = {
+  provider: "lm_studio" | "gemini";
   model: string;
   excluded_model_ids: string[];
+  gemini: GeminiSettings;
   lm_studio_url: string;
   max_pages_to_analyze: number;
   prompts: PromptConfiguration;
@@ -166,6 +168,19 @@ export type FieldExtraction = {
   warning: string | null;
 };
 
+export type GeminiKeyStatus = {
+  configured: boolean;
+  hint: string;
+  verified_models: string[];
+};
+
+export type GeminiSettings = {
+  api_key: string;
+  thinking_level: "minimal" | "low" | "medium" | "high";
+  pricing: Record<string, ModelPricing>;
+  pricing_checked_on: string;
+};
+
 export type HealthStatus = {
   status: string;
   lm_studio: boolean;
@@ -193,6 +208,7 @@ export type Metrics = {
 export type ModelInfo = {
   id: string;
   name: string;
+  provider: "lm_studio" | "gemini";
   parameters: string | null;
   quantization: string | null;
   size_bytes: number | null;
@@ -219,6 +235,11 @@ export type ModelLoadResponse = {
   already_ready: boolean;
   warmup_mode: "vision" | "vision_and_schema";
   preparation_attempts: number;
+};
+
+export type ModelPricing = {
+  input_per_million: number | null;
+  output_per_million: number | null;
 };
 
 export type ProcessingInfo = {

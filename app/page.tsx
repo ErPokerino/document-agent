@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Eye,
   FlaskConical,
+  KeyRound,
   FileJson,
   FileText,
   LayoutDashboard,
@@ -47,6 +48,7 @@ import type {
   HealthStatus,
   ModelInfo,
   ModelLoadResponse,
+  GeminiKeyStatus,
   ModelRuntimeState,
 } from "../lib/types";
 
@@ -126,6 +128,9 @@ export default function Home() {
   const [modelLoadReport, setModelLoadReport] = useState<ModelLoadResponse | null>(null);
   const [pageLimitInput, setPageLimitInput] = useState("");
   const [reviewState, setReviewState] = useState<"idle" | "saving" | "saved">("idle");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [keyStatus, setKeyStatus] = useState<GeminiKeyStatus | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
 
@@ -145,6 +150,7 @@ export default function Home() {
         setSettingsError(resolved.error);
         setSettingsState("error");
       }
+      await api.geminiKeyStatus().then(setKeyStatus).catch(() => undefined);
     }
     bootstrap();
   }, []);
@@ -267,10 +273,18 @@ export default function Home() {
     setSettingsState("saving");
     setSettingsError(null);
     try {
-      const settingsToSave = { ...draftSettings, max_pages_to_analyze: Number(pageLimitInput) };
+      // An empty key field means "keep the stored one"; the backend never
+      // sends the real key back, so the draft always carries a blank.
+      const settingsToSave = {
+        ...draftSettings,
+        max_pages_to_analyze: Number(pageLimitInput),
+        gemini: { ...draftSettings.gemini, api_key: geminiKey },
+      };
       const saved = await api.saveSettings(settingsToSave);
       setSettings(saved);
       setDraftSettings(saved);
+      setGeminiKey("");
+      await api.geminiKeyStatus().then(setKeyStatus).catch(() => undefined);
       setHealth((current) => current && { ...current, active_model: saved.model });
       setResult(null);
       setEditableValues({});
@@ -296,10 +310,15 @@ export default function Home() {
     setModelLoadReport(null);
     setSettingsError(null);
     try {
-      const settingsToSave = { ...draftSettings, max_pages_to_analyze: Number(pageLimitInput) };
+      const settingsToSave = {
+        ...draftSettings,
+        max_pages_to_analyze: Number(pageLimitInput),
+        gemini: { ...draftSettings.gemini, api_key: geminiKey },
+      };
       const saved = await api.saveSettings(settingsToSave);
       setSettings(saved);
       setDraftSettings(saved);
+      setGeminiKey("");
       setHealth((current) => current && { ...current, active_model: saved.model });
 
       const report = await api.loadModel(saved.model);
@@ -654,7 +673,7 @@ export default function Home() {
                 <div className="settings-card">
                   <div className="settings-card-heading">
                     <span className="settings-card-icon"><Cpu size={18} /></span>
-                    <div><h3>Vision model</h3><p>Image-capable models are discovered from LM Studio and refreshed every 10 seconds.</p></div>
+                    <div><h3>Vision model</h3><p>Local models come from LM Studio, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
                     <span className="connection-badge"><RefreshCw className={modelsRefreshing ? "spin" : ""} size={12} /> Auto refresh</span>
                   </div>
                   <div className="model-list">
@@ -663,15 +682,26 @@ export default function Home() {
                     ) : models.map((model) => {
                       const selected = draftSettings?.model === model.id;
                       return (
-                        <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id }); setModelLoadState("idle"); setModelLoadReport(null); }}>
-                          <span className="radio">{selected && <span />}</span><span className="model-option-icon"><Eye size={17} /></span>
+                        <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id, provider: model.provider }); setModelLoadState("idle"); setModelLoadReport(null); }}>
+                          <span className="radio">{selected && <span />}</span><span className="model-option-icon">{model.provider === "gemini" ? <Sparkles size={17} /> : <Eye size={17} />}</span>
                           <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
+                          <span className={`provider-tag ${model.provider}`}>{model.provider === "gemini" ? "Google API" : "Local"}</span>
                           <span className="model-specs">{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
                         </button>
                       );
                     })}
                   </div>
-                  {selectedDraftModel && (
+                  {selectedDraftModel && selectedDraftModel.provider === "gemini" && (
+                    <div className="model-loader ready hosted">
+                      <span className="model-loader-icon"><KeyRound size={17} /></span>
+                      <div className="model-loader-copy">
+                        <strong>{keyStatus?.configured ? "Ready when the key is valid" : "An API key is required"}</strong>
+                        <span>Nothing is loaded for a hosted model: it answers as soon as the key works. Add the key below.</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedDraftModel && selectedDraftModel.provider !== "gemini" && (
                     <div className={`model-loader ${selectedRuntimeState}`}>
                       <span className="model-loader-icon"><Power size={17} /></span>
                       <div className="model-loader-copy">
@@ -687,6 +717,113 @@ export default function Home() {
                     </div>
                   )}
                   <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends the dynamic entity JSON Schema with every extraction request; the LM Studio desktop field does not need to be filled manually.</span></div></div>
+                </div>
+
+                <div className="settings-card">
+                  <div className="settings-card-heading">
+                    <span className="settings-card-icon"><KeyRound size={18} /></span>
+                    <div><h3>Google Gemini</h3><p>Create a key in Google AI Studio. It is stored on this machine and never sent back to the browser.</p></div>
+                    <span className={`connection-badge ${keyStatus?.configured ? "online" : ""}`}>
+                      <CircleDot size={12} /> {keyStatus?.configured ? `Key ${keyStatus.hint}` : "No key"}
+                    </span>
+                  </div>
+
+                  <label className="input-label" htmlFor="gemini-key">API key</label>
+                  <div className="key-row">
+                    <input
+                      id="gemini-key"
+                      className="text-input"
+                      type="password"
+                      autoComplete="off"
+                      placeholder={keyStatus?.configured ? "Leave empty to keep the stored key" : "Paste your Google AI Studio key"}
+                      value={geminiKey}
+                      onChange={(event) => setGeminiKey(event.target.value)}
+                    />
+                    <button
+                      className="secondary-button"
+                      disabled={!keyStatus?.configured || verifying}
+                      onClick={() => {
+                        setVerifying(true);
+                        setSettingsError(null);
+                        void api.verifyGeminiKey()
+                          .then(setKeyStatus)
+                          .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)))
+                          .finally(() => setVerifying(false));
+                      }}
+                    >
+                      {verifying ? <LoaderCircle className="spin" size={14} /> : <ShieldCheck size={14} />} Verify
+                    </button>
+                    {keyStatus?.configured && (
+                      <button
+                        className="secondary-button danger"
+                        onClick={() => {
+                          void api.clearGeminiKey()
+                            .then(() => api.geminiKeyStatus())
+                            .then(setKeyStatus)
+                            .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)));
+                          setGeminiKey("");
+                        }}
+                      >
+                        <Trash2 size={14} /> Remove
+                      </button>
+                    )}
+                  </div>
+                  <p className="field-help">
+                    Saving with the field empty keeps the key already stored. The key is written to
+                    backend/data/settings.json on this machine.
+                  </p>
+                  {keyStatus && keyStatus.verified_models.length > 0 && (
+                    <p className="field-help good-note">
+                      <Check size={12} /> The key can use: {keyStatus.verified_models.join(", ")}.
+                    </p>
+                  )}
+
+                  <label className="input-label prompt-label" htmlFor="thinking-level">Thinking level</label>
+                  <select
+                    id="thinking-level"
+                    className="text-input"
+                    value={draftSettings.gemini.thinking_level}
+                    onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, thinking_level: event.target.value as AppSettings["gemini"]["thinking_level"] } })}
+                  >
+                    <option value="minimal">Minimal</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                  <p className="field-help">
+                    Gemini 3 defaults to <code>high</code>, which an extraction rarely needs and always pays for.
+                    Ignored by models without thinking, such as Flash Lite.
+                  </p>
+
+                  <p className="input-label prompt-label">Price per million tokens (USD)</p>
+                  <div className="pricing-grid">
+                    {Object.entries(draftSettings.gemini.pricing).map(([modelId, price]) => (
+                      <div className="pricing-row" key={modelId}>
+                        <code>{modelId}</code>
+                        <label>
+                          <span>Input</span>
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={price.input_per_million ?? ""}
+                            onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [modelId]: { ...price, input_per_million: event.target.value === "" ? null : Number(event.target.value) } } } })}
+                          />
+                        </label>
+                        <label>
+                          <span>Output</span>
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={price.output_per_million ?? ""}
+                            onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [modelId]: { ...price, output_per_million: event.target.value === "" ? null : Number(event.target.value) } } } })}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="field-help">
+                    Rates you can edit, checked on {draftSettings.gemini.pricing_checked_on}. They are not
+                    read from Google: published prices change, and Gemini 3.7 Flash is already scheduled to
+                    double on 1 January 2027. Thinking tokens are billed at the output rate.
+                  </p>
                 </div>
 
                 <div className="settings-card">

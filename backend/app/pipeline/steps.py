@@ -4,6 +4,7 @@ import pymupdf
 
 from app.domain.models import PromptConfiguration
 from app.pipeline.engine import PipelineContext
+from app.services.gemini import GeminiClient
 from app.services.lm_studio import LMStudioClient
 
 
@@ -11,6 +12,13 @@ from app.services.lm_studio import LMStudioClient
 # returns. Without a ceiling, a 100-page limit on a large PDF can exhaust the
 # backend process long before LM Studio ever rejects the request.
 MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024
+
+
+def build_extraction_client(context: PipelineContext):
+    """The pipeline is provider-agnostic; only this decides who does the work."""
+    if context.provider == "gemini":
+        return GeminiClient(context.gemini_api_key, context.gemini_thinking_level)
+    return LMStudioClient(context.lm_studio_url)
 
 
 class InspectPdf:
@@ -86,7 +94,7 @@ class ExtractConfiguredEntities:
         finally:
             document.close()
 
-        client = LMStudioClient(context.lm_studio_url)
+        client = build_extraction_client(context)
         page_range = "1" if processed_pages == 1 else f"1-{processed_pages}"
         context.artifacts["extraction"] = await client.extract_entities(
             context.model,

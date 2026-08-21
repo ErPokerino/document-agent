@@ -8,6 +8,7 @@ import type {
   EvaluationDetail,
   ExtractionResponse,
   ExtractionRun,
+  GeminiKeyStatus,
   HealthStatus,
   ModelInfo,
   ModelLoadResponse,
@@ -55,6 +56,10 @@ export const api = {
   settings: () => request<AppSettings>("/api/settings"),
   saveSettings: (settings: AppSettings) => request<AppSettings>("/api/settings", json("PUT", settings)),
   extract: (file: File) => request<ExtractionResponse>("/api/documents/extract", upload(file)),
+
+  geminiKeyStatus: () => request<GeminiKeyStatus>("/api/settings/gemini"),
+  verifyGeminiKey: () => request<GeminiKeyStatus>("/api/settings/gemini/verify", { method: "POST" }),
+  clearGeminiKey: () => request<void>("/api/settings/gemini", { method: "DELETE" }),
 
   runs: (validatedOnly = false) =>
     request<ExtractionRun[]>(`/api/runs?validated_only=${validatedOnly}`),

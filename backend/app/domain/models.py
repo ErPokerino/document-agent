@@ -98,6 +98,7 @@ class FieldExtraction(BaseModel):
 class ModelInfo(BaseModel):
     id: str
     name: str
+    provider: Literal["lm_studio", "gemini"] = "lm_studio"
     parameters: str | None = None
     quantization: str | None = None
     size_bytes: int | None = None
@@ -130,14 +131,54 @@ class ModelLoadResponse(BaseModel):
     preparation_attempts: int = 0
 
 
+class ModelPricing(BaseModel):
+    """USD per million tokens. Editable, because published prices change.
+
+    Gemini 3.7 Flash is already scheduled to double on 1 January 2027, so a
+    hardcoded constant would quietly start lying. Cost is derived from these at
+    display time and never stored on a run: update a rate and history follows.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_per_million: float | None = None
+    output_per_million: float | None = None
+
+
+def default_gemini_pricing() -> dict[str, ModelPricing]:
+    # Paid tier, checked on 2026-08-21. Verify against the pricing page.
+    return {
+        "gemini-3.7-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75),
+        "gemini-3.5-flash-lite": ModelPricing(input_per_million=0.30, output_per_million=2.50),
+    }
+
+
+class GeminiSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Write-only over HTTP: the API masks it on the way out.
+    api_key: str = ""
+    thinking_level: Literal["minimal", "low", "medium", "high"] = "low"
+    pricing: dict[str, ModelPricing] = Field(default_factory=default_gemini_pricing)
+    pricing_checked_on: str = "2026-08-21"
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider: Literal["lm_studio", "gemini"] = "lm_studio"
     model: str = "qwen/qwen3.8-27b"
     excluded_model_ids: list[str] = Field(default_factory=list)
+    gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     lm_studio_url: str = "http://127.0.0.1:1234"
     max_pages_to_analyze: Annotated[int, Field(ge=1, le=100)] = 10
     prompts: PromptConfiguration = Field(default_factory=PromptConfiguration)
+
+
+class GeminiKeyStatus(BaseModel):
+    configured: bool
+    hint: str = ""
+    verified_models: list[str] = Field(default_factory=list)
 
 
 class HealthStatus(BaseModel):

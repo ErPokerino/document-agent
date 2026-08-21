@@ -12,6 +12,7 @@ from app.domain.models import (
     PromptConfiguration,
     default_entities,
 )
+from app.services.field_validation import validate_result
 from app.services.lm_studio import LMStudioClient, LMStudioError, _representative_warmup_image
 
 
@@ -152,14 +153,14 @@ def test_result_validation_normalizes_decimal() -> None:
         "currency": {"value": "EUR", "confidence": "high"},
         "total_amount": {"value": 122, "confidence": "high"},
     }
-    result = LMStudioClient._validate_result(payload, default_entities())
+    result = validate_result(payload, default_entities())
     assert result["total_amount"].value == 122.0
     assert result["supplier_name"].confidence == "medium"
 
 
 def test_null_value_always_has_low_confidence() -> None:
     entity = EntityDefinition(name="reference", format=EntityFormat.text, description="Reference")
-    result = LMStudioClient._validate_result(
+    result = validate_result(
         {"reference": {"value": None, "confidence": "high"}},
         [entity],
     )
@@ -168,7 +169,7 @@ def test_null_value_always_has_low_confidence() -> None:
 
 def test_invalid_currency_only_invalidates_that_field() -> None:
     entity = EntityDefinition(name="currency", format=EntityFormat.currency, description="Currency")
-    result = LMStudioClient._validate_result(
+    result = validate_result(
         {"currency": {"value": "euro", "confidence": "medium"}},
         [entity],
     )
@@ -186,7 +187,7 @@ def test_partial_validation_preserves_valid_fields() -> None:
         "currency": {"value": "not-a-currency", "confidence": "medium"},
         "total_amount": {"value": 125.31, "confidence": "high"},
     }
-    result = LMStudioClient._validate_result(payload, entities)
+    result = validate_result(payload, entities)
     assert result["date"].value == "2026-07-31"
     assert result["document_number"].value == "ZDP0566463"
     assert result["supplier_name"].value == "ZircoDATA SG Holdings Pte. Ltd."
@@ -197,7 +198,7 @@ def test_partial_validation_preserves_valid_fields() -> None:
 
 def test_currency_symbol_is_not_inferred() -> None:
     entity = EntityDefinition(name="currency", format=EntityFormat.currency, description="Currency")
-    result = LMStudioClient._validate_result(
+    result = validate_result(
         {"currency": {"value": "S$", "confidence": "high"}},
         [entity],
     )
@@ -208,7 +209,7 @@ def test_currency_symbol_is_not_inferred() -> None:
 
 def test_lowercase_iso_currency_is_canonicalized() -> None:
     entity = EntityDefinition(name="currency", format=EntityFormat.currency, description="Currency")
-    result = LMStudioClient._validate_result(
+    result = validate_result(
         {"currency": {"value": " sgd ", "confidence": "high"}},
         [entity],
     )

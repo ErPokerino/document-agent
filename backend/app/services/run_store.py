@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS runs (
     elapsed_ms      INTEGER NOT NULL,
     prompts_json    TEXT    NOT NULL,
     extraction_json TEXT    NOT NULL,
-    source          TEXT    NOT NULL
+    source          TEXT    NOT NULL,
+    provider        TEXT    NOT NULL DEFAULT 'lm_studio'
 );
 
 CREATE TABLE IF NOT EXISTS run_corrections (
@@ -61,6 +62,7 @@ class RunSummary:
     processed_pages: int
     elapsed_ms: int
     source: str
+    provider: str
     has_corrections: bool
 
 
@@ -85,6 +87,11 @@ class RunStore:
         self.documents_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            existing = {row["name"] for row in connection.execute("PRAGMA table_info(runs)")}
+            if "provider" not in existing:
+                connection.execute(
+                    "ALTER TABLE runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'lm_studio'"
+                )
 
     def read_document(self, file_sha256: str) -> bytes | None:
         path = self._document_path(file_sha256)
@@ -120,6 +127,7 @@ class RunStore:
         processed_pages: int,
         elapsed_ms: int,
         source: str = "workspace",
+        provider: str = "lm_studio",
     ) -> int:
         serialized = {
             name: field.model_dump(mode="json") for name, field in extraction.items()
@@ -132,8 +140,9 @@ class RunStore:
             cursor = connection.execute(
                 """
                 INSERT INTO runs (created_at, filename, file_sha256, model, page_count,
-                                  processed_pages, elapsed_ms, prompts_json, extraction_json, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  processed_pages, elapsed_ms, prompts_json, extraction_json,
+                                  source, provider)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -146,6 +155,7 @@ class RunStore:
                     json.dumps(prompts.model_dump(mode="json"), ensure_ascii=False),
                     json.dumps(serialized, ensure_ascii=False),
                     source,
+                    provider,
                 ),
             )
             return int(cursor.lastrowid)
@@ -239,5 +249,6 @@ class RunStore:
             processed_pages=row["processed_pages"],
             elapsed_ms=row["elapsed_ms"],
             source=row["source"],
+            provider=row["provider"],
             has_corrections=bool(row["correction_count"]),
         )

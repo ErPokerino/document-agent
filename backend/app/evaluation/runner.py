@@ -16,6 +16,7 @@ from app.evaluation.scoring import score_document
 from app.evaluation.store import EvaluationStore
 from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.steps import ExtractConfiguredEntities, InspectPdf
+from app.services.gemini import GeminiError
 from app.services.lm_studio import LMStudioError
 from app.services.run_store import RunStore
 
@@ -33,6 +34,9 @@ async def run_evaluation(
     model: str,
     lm_studio_url: str,
     max_pages: int,
+    provider: str = "lm_studio",
+    gemini_api_key: str = "",
+    gemini_thinking_level: str = "low",
     cancelled: asyncio.Event | None = None,
 ) -> None:
     try:
@@ -49,6 +53,9 @@ async def run_evaluation(
                     content=content,
                     model=model,
                     lm_studio_url=lm_studio_url,
+                    provider=provider,
+                    gemini_api_key=gemini_api_key,
+                    gemini_thinking_level=gemini_thinking_level,
                 )
                 pipeline = DocumentPipeline(
                     [
@@ -60,7 +67,7 @@ async def run_evaluation(
             except asyncio.CancelledError:
                 evaluations.finish(evaluation_id, "cancelled")
                 raise
-            except (OSError, ValueError, LMStudioError) as exc:
+            except (OSError, ValueError, LMStudioError, GeminiError) as exc:
                 evaluations.record_document_failure(evaluation_id, name, str(exc))
                 continue
 
@@ -84,6 +91,7 @@ async def run_evaluation(
                     processed_pages=result.artifacts["processed_pages"],
                     elapsed_ms=elapsed_ms,
                     source="evaluation",
+                    provider=provider,
                 )
 
         evaluations.complete(evaluation_id)

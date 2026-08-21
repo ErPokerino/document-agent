@@ -8,6 +8,9 @@ class PipelineContext:
     content: bytes
     model: str
     lm_studio_url: str
+    provider: str = "lm_studio"
+    gemini_api_key: str = ""
+    gemini_thinking_level: str = "low"
     artifacts: dict[str, Any] = field(default_factory=dict)
 
 
