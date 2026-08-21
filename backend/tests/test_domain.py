@@ -262,20 +262,27 @@ async def test_load_uses_one_conservative_vision_model(monkeypatch) -> None:
         calls.append((path, payload))
         return {"load_time_seconds": 1.25} if path.endswith("/load") else {}
 
+    async def fake_cli(model):
+        calls.append(("cli-gpu-off", {"model": model}))
+        return 1250
+
     async def fake_warmup(model, entities, **kwargs):
         calls.append(("warmup", {"model": model}))
 
     monkeypatch.setattr(client, "_fetch_model_items", fake_items)
     monkeypatch.setattr(client, "_post_json", fake_post)
+    monkeypatch.setattr(client, "_load_large_model_with_cli", fake_cli)
     monkeypatch.setattr(client, "_warm_up_structured_output", fake_warmup)
 
     result = await client.load_and_warm_model("target")
 
     assert calls[0] == ("/api/v1/models/unload", {"instance_id": "old-instance"})
-    assert calls[1][0] == "/api/v1/models/load"
-    assert calls[1][1]["eval_batch_size"] == 512
-    assert calls[1][1]["offload_kv_cache_to_gpu"] is False
-    assert calls[1][1]["parallel"] == 1
+    # An IQ quant goes through the CLI, which is the only path that turns GPU
+    # offload off. It used to take the REST path with a payload that disabled
+    # the KV cache on the GPU but left the layers there, which is the
+    # configuration that raised vk::Queue::submit: ErrorDeviceLost.
+    assert calls[1] == ("cli-gpu-off", {"model": "target"})
+    assert not any(path.endswith("/models/load") for path, _ in calls if isinstance(path, str))
     assert calls[2] == ("warmup", {"model": "target"})
     assert result["load_ms"] == 1250
     assert result["unloaded_models"] == 1

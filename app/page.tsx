@@ -94,6 +94,7 @@ const modelStateLabels: Record<ModelRuntimeState, string> = {
   warming_up: "Warming up model",
   ready: "Model ready",
   error: "Model preparation failed",
+  profile_mismatch: "Loaded with the wrong profile",
 };
 
 const modelBadgeLabels: Record<ModelRuntimeState, string> = {
@@ -103,6 +104,7 @@ const modelBadgeLabels: Record<ModelRuntimeState, string> = {
   warming_up: "Warming up",
   ready: "Ready",
   error: "Preparation failed",
+  profile_mismatch: "Needs reload",
 };
 
 export default function Home() {
@@ -706,13 +708,13 @@ export default function Home() {
                       <span className="model-loader-icon"><Power size={17} /></span>
                       <div className="model-loader-copy">
                         <strong>{modelStateLabels[selectedRuntimeState]}</strong>
-                        <span>Vision is prepared before document processing and timed separately. Large models use a CPU-safe profile on this device to avoid integrated-GPU memory failures.</span>
+                        <span>{selectedRuntimeState === "profile_mismatch" ? "Something loaded this model with LM Studio's defaults, which put it on the integrated GPU. The first image would lose the Vulkan device, so reload it here first." : "Vision is prepared before document processing and timed separately. Large models use a CPU-safe profile on this device to avoid integrated-GPU memory failures."}</span>
                         {modelLoadReport && modelLoadReport.model === selectedDraftModel.id && (
                           <small>{modelLoadReport.profile === "compatibility" ? "CPU-safe" : "LM Studio default"} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
                         )}
                       </div>
                       <button className="model-load-button" disabled={!isConnected || selectedModelPreparing || selectedRuntimeState === "ready" || processState === "processing"} onClick={loadSelectedModel}>
-                        {selectedModelPreparing ? <><LoaderCircle className="spin" size={14} /> {selectedRuntimeState === "warming_up" ? "Warming up…" : "Loading…"}</> : selectedRuntimeState === "ready" ? <><Check size={14} /> Ready</> : <><Power size={14} /> {selectedRuntimeState === "loaded" || selectedRuntimeState === "error" ? "Warm up" : "Load & warm up"}</>}
+                        {selectedModelPreparing ? <><LoaderCircle className="spin" size={14} /> {selectedRuntimeState === "warming_up" ? "Warming up…" : "Loading…"}</> : selectedRuntimeState === "ready" ? <><Check size={14} /> Ready</> : <><Power size={14} /> {selectedRuntimeState === "profile_mismatch" ? "Reload safely" : selectedRuntimeState === "loaded" || selectedRuntimeState === "error" ? "Warm up" : "Load & warm up"}</>}
                       </button>
                     </div>
                   )}

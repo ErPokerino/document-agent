@@ -103,10 +103,17 @@ class ModelInfo(BaseModel):
     quantization: str | None = None
     size_bytes: int | None = None
     context_length: int | None = None
+    parallel: int | None = None
+    # This device cannot give a large or IQ-quantized model to the integrated
+    # GPU without losing the Vulkan device, so those need the CPU-safe profile.
+    requires_safe_profile: bool = False
+    # False when the loaded instance was not the one we prepared: LM Studio
+    # loads on demand with its own defaults, and that instance crashes here.
+    profile_matches: bool = True
     loaded: bool = False
     ready: bool = False
     runtime_state: Literal[
-        "not_loaded", "loaded", "loading", "warming_up", "ready", "error"
+        "not_loaded", "loaded", "loading", "warming_up", "ready", "error", "profile_mismatch"
     ] = "not_loaded"
     vision: bool = True
 

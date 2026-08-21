@@ -251,3 +251,59 @@ def test_verifying_without_a_key_is_refused(api) -> None:
     client, _ = api
 
     assert client.post("/api/settings/gemini/verify").status_code == 400
+
+
+MISMATCHED_MODEL = ModelInfo(
+    id="vision-model",
+    name="Vision Model",
+    loaded=True,
+    requires_safe_profile=True,
+    profile_matches=False,
+    parallel=4,
+)
+
+
+def test_a_model_loaded_with_the_wrong_profile_is_refused_with_a_way_out(api, monkeypatch) -> None:
+    client, _ = api
+
+    class WrongProfile:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def list_vision_models(self, excluded_model_ids=None):
+            return [MISMATCHED_MODEL]
+
+    monkeypatch.setattr(main, "LMStudioClient", WrongProfile)
+    main.model_runtime_states["vision-model"] = "ready"
+
+    response = client.post(
+        "/api/documents/extract",
+        files={"file": ("invoice.pdf", pdf_bytes(), "application/pdf")},
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    # The message has to name the fix, not just the symptom.
+    assert "Load & warm up" in detail
+    assert "Vulkan" in detail
+
+
+def test_a_mismatched_model_is_never_reported_as_ready(api, monkeypatch) -> None:
+    client, _ = api
+
+    class WrongProfile:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def list_vision_models(self, excluded_model_ids=None):
+            return [MISMATCHED_MODEL]
+
+    monkeypatch.setattr(main, "LMStudioClient", WrongProfile)
+    # Even with our own state saying "ready", the live instance overrules it.
+    main.model_runtime_states["vision-model"] = "ready"
+
+    listed = client.get("/api/models").json()
+    local = next(model for model in listed if model["id"] == "vision-model")
+
+    assert local["runtime_state"] == "profile_mismatch"
+    assert local["ready"] is False

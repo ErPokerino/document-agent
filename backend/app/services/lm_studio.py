@@ -34,6 +34,22 @@ INFERENCE_TIMEOUT_SECONDS = 600
 VISION_PREPARATION_TIMEOUT_SECONDS = 600
 LARGE_MODEL_THRESHOLD_BYTES = 8 * 1024**3
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# What the CPU-safe profile looks like once applied. LM Studio's own default is
+# four parallel slots, so `parallel` tells our instance apart from one it loaded
+# on demand.
+SAFE_PROFILE_PARALLEL = 1
+SAFE_PROFILE_CONTEXT_LENGTH = 8192
+
+
+def requires_cpu_safe_profile(quantization: str | None, size_bytes: int | None) -> bool:
+    """Whether this model must be kept off the integrated GPU on this device.
+
+    Both signals used to select a "compatibility" profile, but only the size one
+    actually reached the CLI path that disables GPU offload; an IQ quant under
+    the threshold was loaded through REST with the GPU still on, which is the
+    configuration that raises vk::Queue::submit: ErrorDeviceLost.
+    """
+    return (quantization or "").upper().startswith("IQ") or int(size_bytes or 0) >= LARGE_MODEL_THRESHOLD_BYTES
 
 
 @lru_cache(maxsize=1)
@@ -82,14 +98,24 @@ class LMStudioClient:
                 continue
             loaded_instances = item.get("loaded_instances") or []
             loaded_config = (loaded_instances[0].get("config") or {}) if loaded_instances else {}
+            quantization = (item.get("quantization") or {}).get("name")
+            needs_safe = requires_cpu_safe_profile(quantization, item.get("size_bytes"))
+            parallel = loaded_config.get("parallel")
             models.append(
                 ModelInfo(
                     id=item["key"],
                     name=item.get("display_name") or item["key"],
                     parameters=item.get("params_string"),
-                    quantization=(item.get("quantization") or {}).get("name"),
+                    quantization=quantization,
                     size_bytes=item.get("size_bytes"),
                     context_length=loaded_config.get("context_length"),
+                    parallel=parallel,
+                    requires_safe_profile=needs_safe,
+                    profile_matches=(
+                        not loaded_instances
+                        or not needs_safe
+                        or parallel == SAFE_PROFILE_PARALLEL
+                    ),
                     loaded=bool(loaded_instances),
                 )
             )
@@ -121,9 +147,12 @@ class LMStudioClient:
             raise LMStudioError("Select an installed vision-capable model")
         selected_item = next(item for item in vision_items if item.get("key") == model)
         quantization = ((selected_item.get("quantization") or {}).get("name") or "").upper()
-        large_model = int(selected_item.get("size_bytes") or 0) >= LARGE_MODEL_THRESHOLD_BYTES
-        profile = "compatibility" if quantization.startswith("IQ") or large_model else "default"
-        warmup_mode = "vision" if large_model else "vision_and_schema"
+        size_bytes = int(selected_item.get("size_bytes") or 0)
+        large_model = requires_cpu_safe_profile(quantization, size_bytes)
+        profile = "compatibility" if large_model else "default"
+        warmup_mode = (
+            "vision" if size_bytes >= LARGE_MODEL_THRESHOLD_BYTES else "vision_and_schema"
+        )
         selected_instances = selected_item.get("loaded_instances") or []
         already_loaded = bool(selected_instances)
 
@@ -258,9 +287,9 @@ class LMStudioClient:
             "--gpu",
             "off",
             "--context-length",
-            "8192",
+            str(SAFE_PROFILE_CONTEXT_LENGTH),
             "--parallel",
-            "1",
+            str(SAFE_PROFILE_PARALLEL),
             "--identifier",
             model,
             "--speculative-draft-mtp",

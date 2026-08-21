@@ -213,9 +213,12 @@ export type ModelInfo = {
   quantization: string | null;
   size_bytes: number | null;
   context_length: number | null;
+  parallel: number | null;
+  requires_safe_profile: boolean;
+  profile_matches: boolean;
   loaded: boolean;
   ready: boolean;
-  runtime_state: "not_loaded" | "loaded" | "loading" | "warming_up" | "ready" | "error";
+  runtime_state: "not_loaded" | "loaded" | "loading" | "warming_up" | "ready" | "error" | "profile_mismatch";
   vision: boolean;
 };
 

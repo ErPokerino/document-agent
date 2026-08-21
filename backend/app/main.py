@@ -109,6 +109,11 @@ def _models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
         tracked = model_runtime_states.get(model.id)
         if tracked in {"loading", "warming_up", "error"}:
             runtime_state = tracked
+        elif model.loaded and not model.profile_matches:
+            # Something loaded this model with LM Studio's defaults, which put it
+            # on the integrated GPU. Requests to it lose the Vulkan device, so it
+            # must be reloaded before it can be called ready.
+            runtime_state = "profile_mismatch"
         elif tracked == "ready" and model.loaded:
             runtime_state = "ready"
         elif model.loaded:
@@ -166,6 +171,15 @@ async def _ensure_model_ready(settings: AppSettings) -> None:
     except LMStudioError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     selected = next((model for model in available if model.id == settings.model), None)
+    if selected is not None and selected.loaded and not selected.profile_matches:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{settings.model} is loaded with LM Studio's default profile, which puts it on "
+                "the integrated GPU and loses the Vulkan device on the first image. Open Settings "
+                "and use Load & warm up to reload it with the CPU-safe profile."
+            ),
+        )
     if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
         raise HTTPException(
             status_code=409,
