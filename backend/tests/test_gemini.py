@@ -84,11 +84,45 @@ def test_the_schema_never_uses_pattern_because_gemini_rejects_it() -> None:
     assert "pattern" not in serialized
 
 
-def test_nullable_values_are_expressed_as_a_type_union() -> None:
+def test_type_is_a_single_proto_enum_never_a_list() -> None:
+    # responseSchema is a proto Schema, not JSON Schema: `type` is a scalar
+    # field. Sending ["string", "null"] returns
+    # 400 Unknown name "type" ... Proto field is not repeating, cannot start list.
     schema = GeminiClient.generation_schema(ENTITIES)
 
-    assert schema["properties"]["total_amount"]["type"] == ["number", "null"]
-    assert schema["properties"]["supplier_name"]["type"] == ["string", "null"]
+    def every_type(node):
+        if isinstance(node, dict):
+            if "type" in node:
+                yield node["type"]
+            for value in node.values():
+                yield from every_type(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from every_type(value)
+
+    assert all(isinstance(kind, str) for kind in every_type(schema))
+
+
+def test_nullable_values_use_the_nullable_flag() -> None:
+    schema = GeminiClient.generation_schema(ENTITIES)
+
+    assert schema["properties"]["total_amount"]["type"] == "NUMBER"
+    assert schema["properties"]["total_amount"]["nullable"] is True
+    assert schema["properties"]["supplier_name"]["type"] == "STRING"
+    assert schema["properties"]["supplier_name"]["nullable"] is True
+
+
+def test_the_object_types_are_proto_enum_names() -> None:
+    schema = GeminiClient.generation_schema(ENTITIES)
+
+    assert schema["type"] == "OBJECT"
+    assert schema["properties"]["confidence"]["type"] == "OBJECT"
+
+
+def test_the_field_order_is_stated_so_generation_is_deterministic() -> None:
+    schema = GeminiClient.generation_schema(ENTITIES)
+
+    assert schema["propertyOrdering"] == [*[e.name for e in ENTITIES], "confidence"]
 
 
 def test_confidence_is_an_enum_per_entity_instead_of_a_packed_string() -> None:
@@ -96,6 +130,7 @@ def test_confidence_is_an_enum_per_entity_instead_of_a_packed_string() -> None:
 
     confidence = schema["properties"]["confidence"]
     assert confidence["properties"]["date"]["enum"] == ["low", "medium", "high"]
+    assert confidence["properties"]["date"]["type"] == "STRING"
     assert set(confidence["required"]) == {entity.name for entity in ENTITIES}
     assert "c" not in schema["properties"]
 
@@ -143,7 +178,7 @@ async def test_structured_output_is_requested() -> None:
 
     config = FakeAsyncClient.requests[0]["body"]["generationConfig"]
     assert config["responseMimeType"] == "application/json"
-    assert config["responseSchema"]["type"] == "object"
+    assert config["responseSchema"]["type"] == "OBJECT"
     assert config["temperature"] == 0
 
 
@@ -280,4 +315,5 @@ def test_an_integer_entity_is_typed_as_integer() -> None:
 
     schema = GeminiClient.generation_schema(entities)
 
-    assert schema["properties"]["pages"]["type"] == ["integer", "null"]
+    assert schema["properties"]["pages"]["type"] == "INTEGER"
+    assert schema["properties"]["pages"]["nullable"] is True

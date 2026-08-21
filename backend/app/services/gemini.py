@@ -61,35 +61,49 @@ class GeminiClient:
 
     @staticmethod
     def generation_schema(entities: list[EntityDefinition]) -> dict[str, Any]:
+        """Build a proto `Schema`, which is not quite JSON Schema.
+
+        Two differences bite. `type` is a scalar enum, so `["string", "null"]`
+        is rejected with `Proto field is not repeating, cannot start list`;
+        nullability is the separate `nullable` flag. And `pattern` does not
+        exist here at all, so formats are stated in the description and enforced
+        by the shared validation once the answer comes back.
+        """
         types = {
-            EntityFormat.decimal: "number",
-            EntityFormat.integer: "integer",
+            EntityFormat.decimal: "NUMBER",
+            EntityFormat.integer: "INTEGER",
         }
         properties: dict[str, Any] = {}
         for entity in entities:
-            json_type = types.get(entity.format, "string")
             description = entity.description
             if entity.format is EntityFormat.date:
                 description = f"{description} Format the value as YYYY-MM-DD."
             elif entity.format is EntityFormat.currency:
                 description = f"{description} Use the three-letter ISO 4217 code in upper case."
             properties[entity.name] = {
-                # Nullable is a type union here; `anyOf` plus `pattern` is what
-                # the local schema uses and Gemini would not accept it.
-                "type": [json_type, "null"],
+                "type": types.get(entity.format, "STRING"),
+                "nullable": True,
                 "description": description,
             }
 
         names = [entity.name for entity in entities]
         properties["confidence"] = {
-            "type": "object",
+            "type": "OBJECT",
             "description": "How sure you are of each value.",
             "properties": {
-                name: {"type": "string", "enum": CONFIDENCE_LEVELS} for name in names
+                name: {"type": "STRING", "enum": CONFIDENCE_LEVELS} for name in names
             },
             "required": names,
+            "propertyOrdering": names,
         }
-        return {"type": "object", "properties": properties, "required": [*names, "confidence"]}
+        return {
+            "type": "OBJECT",
+            "properties": properties,
+            "required": [*names, "confidence"],
+            # Key order affects output quality, and the values must be decided
+            # before the model states how sure it is of them.
+            "propertyOrdering": [*names, "confidence"],
+        }
 
     # -- requests -------------------------------------------------------------
 
