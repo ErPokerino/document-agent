@@ -33,6 +33,7 @@ from app.domain.models import (
     PromoteRunRequest,
 )
 from app.evaluation.datasets import DatasetStore, InvalidName
+from app.evaluation.export import evaluation_to_csv
 from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
 from app.pipeline.engine import DocumentPipeline, PipelineContext
@@ -451,6 +452,23 @@ async def delete_dataset_document(name: str, document: str) -> Response:
     return Response(status_code=204)
 
 
+@app.get("/api/datasets/{name}/documents/{document}/file", response_class=Response)
+async def read_dataset_document(name: str, document: str) -> Response:
+    """Serve the PDF itself, so the reviewer can look at it while labelling."""
+    _require_dataset(name)
+    try:
+        content = dataset_store.read_document(name, document)
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=f"No document named {document}") from exc
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{document}"'},
+    )
+
+
 @app.get("/api/datasets/{name}/documents/{document}/labels", response_model=DocumentLabels)
 async def get_document_labels(name: str, document: str) -> DocumentLabels:
     _require_dataset(name)
@@ -633,6 +651,19 @@ async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
         **summary.model_dump(),
         prompts=detail.prompts,
         documents=[asdict(document) for document in detail.documents],
+    )
+
+
+@app.get("/api/evaluations/{evaluation_id}/export.csv", response_class=Response)
+async def export_evaluation(evaluation_id: int) -> Response:
+    detail = evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    filename = f"run-{evaluation_id}-{detail.dataset}.csv"
+    return Response(
+        content=evaluation_to_csv(detail),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

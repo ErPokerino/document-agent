@@ -528,3 +528,31 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .mismatch-table code { display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 10.5px; }
 .mismatch-table code.expected { background: #e2f4ec; color: #1d7a56; }
 .mismatch-table code.actual { background: #fbe9e7; color: #9c3b2e; }
+
+/* --- name filter, expandable results and the document preview --- */
+.name-filter { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; }
+.name-filter input { flex: 1; max-width: 320px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); font: inherit; font-size: 12px; }
+.name-filter small { color: var(--muted); font-size: 10.5px; }
+
+.document-result.expanded { border-color: #b9cec6; }
+.document-toggle { display: flex; align-items: center; gap: 7px; margin-right: auto; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; color: var(--ink); }
+.document-toggle strong { font-size: 12.5px; }
+.document-summary { display: flex; align-items: baseline; gap: 6px; margin-right: 10px; }
+.document-summary > span { font-weight: 700; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.document-summary > span.good { color: #1d7a56; }
+.document-summary > span.poor { color: #9a5b1c; }
+.document-summary small { color: var(--muted); font-size: 10px; }
+.document-summary .document-time { font-family: var(--font-mono), monospace; }
+.document-result .icon-button { align-self: center; }
+
+.mismatch-table .result-cell { width: 22px; color: #9c3b2e; }
+.mismatch-table tr.matched .result-cell { color: #1d7a56; }
+.mismatch-table code.correct { background: #eef1ef; color: var(--ink); }
+.mismatch-table .same-as-got { color: #c2ccc8; }
+
+.pdf-modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 34px; }
+.pdf-modal-backdrop { position: absolute; inset: 0; border: 0; padding: 0; background: #10211ca8; cursor: pointer; }
+.pdf-modal-panel { position: relative; display: flex; flex-direction: column; width: min(980px, 100%); height: 100%; background: var(--paper); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 60px #10211c40; }
+.pdf-modal-panel header { display: flex; align-items: center; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.pdf-modal-panel header strong { margin-right: auto; font-size: 13px; }
+.pdf-modal-panel iframe { flex: 1; width: 100%; border: 0; background: var(--canvas); }

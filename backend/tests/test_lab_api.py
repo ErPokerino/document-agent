@@ -514,3 +514,43 @@ def test_retrying_a_running_evaluation_conflicts(api) -> None:
     main.model_runtime_states["vision-model"] = "ready"
 
     assert api.post(f"/api/evaluations/{evaluation_id}/retry").status_code == 409
+
+
+def test_a_dataset_document_can_be_fetched_for_preview(api) -> None:
+    seed_document(api)
+
+    response = api.get("/api/datasets/invoices/documents/invoice21.pdf/file")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+    assert "inline" in response.headers.get("content-disposition", "")
+
+
+def test_fetching_an_unknown_document_is_a_404(api) -> None:
+    api.post("/api/datasets", json={"name": "invoices"})
+
+    assert api.get("/api/datasets/invoices/documents/nope.pdf/file").status_code == 404
+
+
+def test_a_document_path_that_escapes_the_dataset_is_rejected(api) -> None:
+    api.post("/api/datasets", json={"name": "invoices"})
+
+    assert api.get("/api/datasets/invoices/documents/..%2F..%2Fsecret.pdf/file").status_code in (400, 404)
+
+
+def test_a_run_can_be_exported_as_csv(api) -> None:
+    labelled_dataset(api)
+    evaluation_id = partial_run(api)
+
+    response = api.get(f"/api/evaluations/{evaluation_id}/export.csv")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert f"run-{evaluation_id}" in response.headers.get("content-disposition", "")
+    assert response.text.splitlines()[0].startswith("run_id,")
+    assert "a.pdf" in response.text
+
+
+def test_exporting_an_unknown_run_is_a_404(api) -> None:
+    assert api.get("/api/evaluations/999/export.csv").status_code == 404

@@ -5,7 +5,11 @@ import {
   Braces,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Database,
+  Download,
+  Eye,
   FilterX,
   FlaskConical,
   History,
@@ -25,7 +29,8 @@ import {
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 
-import { api } from "../lib/api";
+import { api, apiUrls } from "../lib/api";
+import { filterByName } from "../lib/document-filter";
 import {
   draftFromModel,
   draftToLabels,
@@ -120,6 +125,10 @@ export function PromptLab({
   const [confirmingRun, setConfirmingRun] = useState<number | null>(null);
   const [confirmingDocument, setConfirmingDocument] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [documentQuery, setDocumentQuery] = useState("");
+  const [runDocumentQuery, setRunDocumentQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [preview, setPreview] = useState<{ dataset: string; document: string } | null>(null);
   const [labelling, setLabelling] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState<Record<string, LabelDraft>>({});
   const [labelHints, setLabelHints] = useState<Record<string, string>>({});
@@ -135,6 +144,7 @@ export function PromptLab({
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
   const visibleEvaluations = filterEvaluations(evaluations, filters);
+  const visibleDocuments = filterByName(documents, documentQuery);
 
   async function refreshDatasets() {
     setDatasets(await api.datasets());
@@ -206,6 +216,24 @@ export function PromptLab({
     }, 2000);
     return () => window.clearInterval(timer);
   }, [running, openEvaluation?.id]);
+
+  useEffect(() => {
+    if (!preview) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setPreview(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview]);
+
+  function toggleExpanded(name: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
 
   function openRun(evaluationId: number) {
     void guard(async () => setOpenEvaluation(await api.evaluation(evaluationId)));
@@ -514,11 +542,30 @@ export function PromptLab({
             </div>
           )}
 
+          {documents.length > 1 && (
+            <div className="name-filter">
+              <input
+                placeholder="Filter by file name"
+                value={documentQuery}
+                onChange={(event) => setDocumentQuery(event.target.value)}
+                aria-label="Filter documents by file name"
+              />
+              <small>{visibleDocuments.length} of {documents.length}</small>
+              {documentQuery && (
+                <button className="secondary-button small ghost" onClick={() => setDocumentQuery("")}>
+                  <FilterX size={13} /> Clear
+                </button>
+              )}
+            </div>
+          )}
+
           {documents.length === 0 ? (
             <div className="models-empty"><AlertCircle size={18} /><span>This dataset is empty.</span></div>
+          ) : visibleDocuments.length === 0 ? (
+            <div className="models-empty"><AlertCircle size={18} /><span>No document matches &quot;{documentQuery}&quot;.</span></div>
           ) : (
             <div className="document-list">
-              {documents.map((document) => (
+              {visibleDocuments.map((document) => (
                 <div className="document-row" key={document.name}>
                   <div className="document-meta">
                     <strong>{document.name}</strong>
@@ -528,6 +575,7 @@ export function PromptLab({
                     </small>
                   </div>
                   <span className={`label-pill ${document.labelled ? "ok" : "missing"}`}>{document.labelled ? <Check size={11} /> : <AlertCircle size={11} />}</span>
+                  <button className="icon-button" aria-label={`Preview ${document.name}`} title="Open the document" onClick={() => setPreview({ dataset: selectedDataset, document: document.name })}><Eye size={15} /></button>
                   <button className="secondary-button small" disabled={!isModelReady || busy} title={isModelReady ? "Extract with the active model, then review the result" : "Load and warm up the model in Settings first"} onClick={() => draftWithModel(document.name)}>
                     {drafting === document.name ? <LoaderCircle className="spin" size={13} /> : <Wand2 size={13} />} Draft
                   </button>
@@ -560,6 +608,9 @@ export function PromptLab({
             <div className="label-editor">
               <div className="label-editor-head">
                 <strong>Ground truth · {labelling}</strong>
+                <button className="secondary-button small" onClick={() => setPreview({ dataset: selectedDataset, document: labelling })}>
+                  <Eye size={13} /> View document
+                </button>
                 <button className="icon-button" aria-label="Close" onClick={() => setLabelling(null)}><X size={15} /></button>
               </div>
               {Object.keys(labelHints).length > 0 && (
@@ -764,6 +815,9 @@ export function PromptLab({
               <h3>Run #{openEvaluation.id} · {openEvaluation.dataset}</h3>
               <p>{openEvaluation.succeeded_documents} of {openEvaluation.total_documents} documents scored · {seconds(openEvaluation.total_elapsed_ms)} in total · {seconds(openEvaluation.average_elapsed_ms)} per document</p>
             </div>
+            <a className="secondary-button small" href={apiUrls.evaluationCsv(openEvaluation.id)} download>
+              <Download size={13} /> CSV
+            </a>
             <button className="icon-button" aria-label="Close" onClick={() => setOpenEvaluation(null)}><X size={15} /></button>
           </div>
 
@@ -808,40 +862,82 @@ export function PromptLab({
             {tallyRows("How often each confidence level was right", openEvaluation.metrics.per_confidence)}
           </div>
 
+          {openEvaluation.documents.length > 1 && (
+            <div className="name-filter">
+              <input
+                placeholder="Filter by file name"
+                value={runDocumentQuery}
+                onChange={(event) => setRunDocumentQuery(event.target.value)}
+                aria-label="Filter run documents by file name"
+              />
+              <small>{filterByName(openEvaluation.documents, runDocumentQuery).length} of {openEvaluation.documents.length}</small>
+              {runDocumentQuery && (
+                <button className="secondary-button small ghost" onClick={() => setRunDocumentQuery("")}>
+                  <FilterX size={13} /> Clear
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="document-results">
-            {openEvaluation.documents.map((document) => (
-              <div className="document-result" key={document.name}>
-                <div className="document-result-head">
-                  <strong>{document.name}</strong>
-                  {document.status === "failed"
-                    ? <span className="status-tag failed">failed</span>
-                    : <small>{document.items.filter((item) => item.matched).length}/{document.items.length} correct{document.elapsed_ms ? ` · ${seconds(document.elapsed_ms)}` : ""}</small>}
-                </div>
-                {document.error && <p className="field-warning"><AlertCircle size={11} /> {document.error}</p>}
-                {document.items.some((item) => !item.matched) && (
-                  <table className="mismatch-table">
-                    <thead>
-                      <tr>
-                        <th>Entity</th>
-                        <th>Expected</th>
-                        <th>Got</th>
-                        <th>Confidence</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {document.items.filter((item) => !item.matched).map((item) => (
-                        <tr key={item.entity}>
-                          <td className="mismatch-entity">{item.entity}</td>
-                          <td><code className="expected">{describeValue(item.expected)}</code></td>
-                          <td><code className="actual">{describeValue(item.actual)}</code></td>
-                          <td><span className={`confidence-pill ${item.confidence}`}><i /> {item.confidence}</span></td>
+            {filterByName(openEvaluation.documents, runDocumentQuery).map((document) => {
+              const correct = document.items.filter((item) => item.matched).length;
+              const isOpen = expanded.has(document.name);
+              return (
+                <div className={`document-result ${isOpen ? "expanded" : ""}`} key={document.name}>
+                  <div className="document-result-head">
+                    <button className="document-toggle" aria-expanded={isOpen} onClick={() => toggleExpanded(document.name)}>
+                      {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      <strong>{document.name}</strong>
+                    </button>
+                    {document.status === "failed" ? (
+                      <span className="status-tag failed">failed</span>
+                    ) : (
+                      <span className="document-summary">
+                        <span className={correct === document.items.length ? "good" : "poor"}>{correct}/{document.items.length}</span>
+                        <small>correct</small>
+                        <small className="document-time">{seconds(document.elapsed_ms)}</small>
+                      </span>
+                    )}
+                    <button
+                      className="icon-button"
+                      aria-label={`Preview ${document.name}`}
+                      title="Open the document"
+                      onClick={() => setPreview({ dataset: openEvaluation.dataset, document: document.name })}
+                    >
+                      <Eye size={15} />
+                    </button>
+                  </div>
+
+                  {document.error && <p className="field-warning"><AlertCircle size={11} /> {document.error}</p>}
+
+                  {isOpen && document.items.length > 0 && (
+                    <table className="mismatch-table">
+                      <thead>
+                        <tr>
+                          <th aria-label="Result" />
+                          <th>Entity</th>
+                          <th>Expected</th>
+                          <th>Got</th>
+                          <th>Confidence</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            ))}
+                      </thead>
+                      <tbody>
+                        {document.items.map((item) => (
+                          <tr key={item.entity} className={item.matched ? "matched" : ""}>
+                            <td className="result-cell">{item.matched ? <Check size={13} /> : <X size={13} />}</td>
+                            <td className="mismatch-entity">{item.entity}</td>
+                            <td>{item.matched ? <span className="same-as-got">—</span> : <code className="expected">{describeValue(item.expected)}</code>}</td>
+                            <td><code className={item.matched ? "correct" : "actual"}>{describeValue(item.actual)}</code></td>
+                            <td><span className={`confidence-pill ${item.confidence}`}><i /> {item.confidence}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -870,6 +966,21 @@ export function PromptLab({
       )}
 
       {tab === "prompts" ? promptsTab : tab === "datasets" ? datasetsTab : runsTab}
+
+      {preview && (
+        <div className="pdf-modal">
+          {/* A real button, so dismissing the modal works from the keyboard too. */}
+          <button className="pdf-modal-backdrop" aria-label="Close preview" onClick={() => setPreview(null)} />
+          <div className="pdf-modal-panel" role="dialog" aria-modal="true" aria-label={`Preview of ${preview.document}`}>
+            <header>
+              <strong>{preview.document}</strong>
+              <a className="secondary-button small ghost" href={apiUrls.documentFile(preview.dataset, preview.document)} target="_blank" rel="noreferrer">Open in a tab</a>
+              <button className="icon-button" aria-label="Close preview" onClick={() => setPreview(null)}><X size={15} /></button>
+            </header>
+            <iframe src={apiUrls.documentFile(preview.dataset, preview.document)} title={`Preview of ${preview.document}`} />
+          </div>
+        </div>
+      )}
 
       {tab === "prompts" && (
         <div className="settings-actions sticky-actions">

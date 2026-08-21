@@ -41,6 +41,13 @@ function upload(file: File): RequestInit {
 
 const segment = encodeURIComponent;
 
+/** Direct links, for an <iframe> preview and for a browser download. */
+export const apiUrls = {
+  documentFile: (dataset: string, document: string) =>
+    `${API_BASE}/api/datasets/${segment(dataset)}/documents/${segment(document)}/file`,
+  evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
+};
+
 export const api = {
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
