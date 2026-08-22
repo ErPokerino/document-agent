@@ -7,6 +7,8 @@ from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, P
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.runner import run_evaluation
 from app.pipeline.compiler import build_steps
+from app.pipeline.engine import PipelineContext
+from app.services.document_ai import DocumentAiError
 from app.pipeline.definition import PipelineDefinition
 from app.evaluation.store import EvaluationStore
 from app.services.lm_studio import LMStudioError
@@ -69,9 +71,11 @@ async def execute(datasets, evaluations, evaluation_id, cancelled=None):
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        lm_studio_url="http://localhost:1234",
         max_pages=1,
         steps=default_steps(),
+        make_context=lambda name, content: PipelineContext(
+            filename=name, content=content, model="vision-model", lm_studio_url="http://localhost:1234"
+        ),
         cancelled=cancelled,
     )
 
@@ -151,9 +155,11 @@ async def test_labels_naming_an_unconfigured_entity_fail_only_that_document(work
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        lm_studio_url="http://localhost:1234",
         max_pages=1,
         steps=default_steps(),
+        make_context=lambda name, content: PipelineContext(
+            filename=name, content=content, model="vision-model", lm_studio_url="http://localhost:1234"
+        ),
     )
 
     detail = evaluations.get_evaluation(evaluation_id)
@@ -189,3 +195,80 @@ async def test_a_provider_that_reports_nothing_leaves_the_counts_empty(workspace
     await execute(datasets, evaluations, evaluation_id)
 
     assert evaluations.get_evaluation(evaluation_id).prompt_tokens == 0
+
+
+async def test_the_run_uses_the_same_context_the_app_builds(workspace, monkeypatch) -> None:
+    """A run reads the pipeline's settings from one place, or it reads them wrong.
+
+    The Lab used to assemble its own context and knew nothing about Google
+    Cloud, so an OCR pipeline that worked in Workspace failed on every
+    document here.
+    """
+    datasets, evaluations = workspace
+    monkeypatch.setattr("app.pipeline.steps.LMStudioClient", fake_client(lambda n: "EUR"))
+    evaluation_id = evaluations.start(
+        dataset="invoices", model="m", prompts=PromptConfiguration(), total_documents=1
+    )
+    seen: list[PipelineContext] = []
+
+    def make_context(filename: str, content: bytes) -> PipelineContext:
+        context = PipelineContext(
+            filename=filename,
+            content=content,
+            model="vision-model",
+            lm_studio_url="http://localhost:1234",
+            gcp_project_id="a-project",
+            gcp_credentials_path="key.json",
+        )
+        seen.append(context)
+        return context
+
+    await run_evaluation(
+        evaluation_id=evaluation_id,
+        evaluations=evaluations,
+        datasets=datasets,
+        run_store=None,
+        dataset="invoices",
+        documents=[("a.pdf", {"currency": "EUR"})],
+        entities=ENTITIES,
+        prompts=PromptConfiguration(entities=ENTITIES),
+        model="vision-model",
+        max_pages=1,
+        steps=default_steps(),
+        make_context=make_context,
+    )
+
+    assert [context.gcp_project_id for context in seen] == ["a-project"]
+
+
+async def test_a_document_ai_failure_costs_one_document_not_the_whole_run(workspace, monkeypatch) -> None:
+    datasets, evaluations = workspace
+    evaluation_id = evaluations.start(
+        dataset="invoices", model="m", prompts=PromptConfiguration(), total_documents=2
+    )
+
+    class Refuses:
+        async def run(self, context) -> None:
+            raise DocumentAiError("Document AI refused processor x (403). Permission denied")
+
+    await run_evaluation(
+        evaluation_id=evaluation_id,
+        evaluations=evaluations,
+        datasets=datasets,
+        run_store=None,
+        dataset="invoices",
+        documents=[("a.pdf", {"currency": "EUR"}), ("b.pdf", {"currency": "EUR"})],
+        entities=ENTITIES,
+        prompts=PromptConfiguration(entities=ENTITIES),
+        model="vision-model",
+        max_pages=1,
+        steps=[Refuses()],
+        make_context=lambda name, content: PipelineContext(
+            filename=name, content=content, model="m", lm_studio_url="http://x"
+        ),
+    )
+
+    detail = evaluations.get_evaluation(evaluation_id)
+    assert detail.status == "failed"
+    assert len(detail.failures) == 2
+    assert "Permission denied" in detail.failures[0][1]

@@ -1119,13 +1119,11 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 entities=settings.prompts.entities,
                 prompts=settings.prompts,
                 model=settings.model,
-                lm_studio_url=settings.lm_studio_url,
                 provider=settings.provider,
-                gemini_api_key=settings.gemini.api_key,
-                gemini_thinking_level=settings.gemini.thinking_level,
                 max_pages=pipeline_definition.page_limit,
                 steps=steps,
                 pipeline_name=settings.pipeline,
+                make_context=lambda name, content: _pipeline_context(settings, name, content),
                 cancelled=cancelled,
             )
         except asyncio.CancelledError:
@@ -1232,13 +1230,13 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 entities=detail.prompts.entities,
                 prompts=detail.prompts,
                 model=detail.model,
-                lm_studio_url=settings.lm_studio_url,
                 provider=settings.provider,
-                gemini_api_key=settings.gemini.api_key,
-                gemini_thinking_level=settings.gemini.thinking_level,
                 max_pages=page_limit,
                 steps=steps,
                 pipeline_name=detail.pipeline,
+                make_context=lambda name, content: _pipeline_context(
+                    settings.model_copy(update={"model": detail.model}), name, content
+                ),
                 cancelled=cancelled,
             )
         except asyncio.CancelledError:

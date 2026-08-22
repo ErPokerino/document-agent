@@ -8,7 +8,7 @@ the whole run.
 
 import asyncio
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from app.domain.models import EntityDefinition, PromptConfiguration
 from app.evaluation.datasets import DatasetStore
@@ -16,6 +16,7 @@ from app.evaluation.scoring import score_document
 from app.evaluation.store import EvaluationStore
 from app.pipeline.definition import DEFAULT_PIPELINE_NAME
 from app.pipeline.engine import DocumentPipeline, PipelineContext
+from app.services.document_ai import DocumentAiError
 from app.services.gemini import GeminiError
 from app.services.lm_studio import LMStudioError
 from app.services.run_store import RunStore
@@ -32,13 +33,14 @@ async def run_evaluation(
     entities: list[EntityDefinition],
     prompts: PromptConfiguration,
     model: str,
-    lm_studio_url: str,
     max_pages: int,
     steps: list[Any],
+    # One place builds a pipeline context, and it is not here. Assembling a
+    # second one is how the Lab ended up running without the Google Cloud
+    # settings that Workspace had.
+    make_context: Callable[[str, bytes], PipelineContext],
     pipeline_name: str = DEFAULT_PIPELINE_NAME,
     provider: str = "lm_studio",
-    gemini_api_key: str = "",
-    gemini_thinking_level: str = "low",
     cancelled: asyncio.Event | None = None,
 ) -> None:
     try:
@@ -50,22 +52,13 @@ async def run_evaluation(
             started = time.perf_counter()
             try:
                 content = datasets.read_document(dataset, name)
-                context = PipelineContext(
-                    filename=name,
-                    content=content,
-                    model=model,
-                    lm_studio_url=lm_studio_url,
-                    provider=provider,
-                    gemini_api_key=gemini_api_key,
-                    gemini_thinking_level=gemini_thinking_level,
-                )
                 # The steps hold no per-document state, so one compiled
                 # pipeline serves the whole run.
-                result = await DocumentPipeline(steps).run(context)
+                result = await DocumentPipeline(steps).run(make_context(name, content))
             except asyncio.CancelledError:
                 evaluations.finish(evaluation_id, "cancelled")
                 raise
-            except (OSError, ValueError, LMStudioError, GeminiError) as exc:
+            except (OSError, ValueError, LMStudioError, GeminiError, DocumentAiError) as exc:
                 evaluations.record_document_failure(evaluation_id, name, str(exc))
                 continue
 

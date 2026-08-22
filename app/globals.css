@@ -606,7 +606,7 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 
 .key-row { display: flex; gap: 10px; align-items: center; }
 .key-row .text-input { flex: 1; font-family: var(--font-mono), monospace; }
-.field-help.good-note { display: flex; align-items: center; gap: 6px; color: #1d7a56; }
+.field-help.good-note { display: flex; align-items: center; gap: 6px; color: #1d7a56; font-size: 10.5px; }
 
 .pricing-grid { display: grid; gap: 9px; }
 .pricing-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
@@ -707,7 +707,17 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .info-hint:hover, .info-hint:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
 /* display, not opacity: a hidden absolutely-positioned bubble still counts
    towards the page's scroll width, which gives the whole app a scrollbar. */
-.info-hint-bubble { display: none; position: absolute; bottom: calc(100% + 7px); left: -6px; z-index: 30; width: max-content; max-width: min(260px, 60vw); padding: 8px 10px; border-radius: 8px; background: var(--nav); color: #eff5f2; font: 400 10.5px/1.5 var(--font-manrope), sans-serif; text-align: left; letter-spacing: 0; box-shadow: 0 6px 20px #0000002e; text-transform: none; pointer-events: none; }
+/* Every property is stated on a selector with two classes. A single-class
+   rule loses to any container rule that styles a bare `span` — which is how
+   the same bubble turned up 9px and bold in one place, and permanently
+   visible in another. */
+.info-hint .info-hint-bubble {
+  display: none; position: absolute; bottom: calc(100% + 7px); left: -6px; z-index: 30;
+  width: max-content; max-width: min(280px, 60vw); padding: 9px 11px; border-radius: 8px;
+  background: var(--nav); color: #eff5f2; font: 400 11px/1.55 var(--font-manrope), sans-serif;
+  text-align: left; letter-spacing: 0; text-transform: none; white-space: normal;
+  box-shadow: 0 6px 20px #00000038; pointer-events: none;
+}
 .info-hint.end .info-hint-bubble { left: auto; right: -6px; }
 .info-hint:hover .info-hint-bubble, .info-hint:focus-visible .info-hint-bubble { display: block; }
 
@@ -755,3 +765,8 @@ button.model-chip:hover { border-color: var(--line-strong); }
 .gcp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin-bottom: 16px; }
 .gcp-grid label { display: grid; gap: 6px; }
 .gcp-grid span { color: var(--muted); font-size: 9px; font-weight: 700; }
+
+/* The key note is a status line, not a footnote: it needs room of its own. */
+.gcp-grid { margin-top: 4px; }
+.settings-card .good-note + .gcp-grid { margin-top: 14px; }
+.gcp-grid label > span { display: flex; align-items: center; font-size: 9px; }
