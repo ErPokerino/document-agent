@@ -606,3 +606,14 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .prompt-preview-body .link-button { margin-left: 8px; }
 .prompt-preview-text { margin: 0 0 10px; padding: 13px 15px; border-radius: 10px; background: #f7f9f8; border: 1px solid var(--line); font: 400 11px/1.6 var(--font-mono), monospace; white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto; }
 .prompt-preview-body details summary { cursor: pointer; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+
+/* The two shorter prompts sit side by side once there is room for them. */
+.prompt-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.prompt-pair .prompt-field + .prompt-field { margin-top: 0; padding-top: 0; border-top: 0; }
+.prompt-pair .prompt-textarea { min-height: 132px; }
+@media (max-width: 1180px) { .prompt-pair { grid-template-columns: 1fr; } }
+
+/* A denser entity row: the description is the part worth reading. */
+.entity-editor { padding: 12px 13px; }
+.entity-row { gap: 12px; }
+.entity-description textarea { min-height: 58px; }

@@ -413,6 +413,7 @@ export function PromptLab({
           <textarea id="system-prompt" className="prompt-textarea large" value={draftSettings.prompts.system_prompt} onChange={(event) => setPrompt("system_prompt", event.target.value)} />
         </div>
 
+        <div className="prompt-pair">
         <div className="prompt-field">
           <div className="prompt-field-head">
             <label className="input-label" htmlFor="user-prompt">Extraction instructions</label>
@@ -429,6 +430,7 @@ export function PromptLab({
           </div>
           <p className="field-help">How the model chooses <code>low</code>, <code>medium</code> and <code>high</code>. Test runs report how often each level was actually right.</p>
           <textarea id="confidence-prompt" className="prompt-textarea" value={draftSettings.prompts.confidence_prompt} onChange={(event) => setPrompt("confidence_prompt", event.target.value)} />
+        </div>
         </div>
 
         <div className="prompt-preview">
