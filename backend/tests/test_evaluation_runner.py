@@ -52,12 +52,9 @@ def fake_client(returns):
 
 
 def default_steps(max_pages: int = 1):
-    return build_steps(
-        PipelineDefinition.default(),
-        prompts=PromptConfiguration(entities=ENTITIES),
-        entities=ENTITIES,
-        max_pages_to_analyze=max_pages,
-    )
+    definition = PipelineDefinition.default()
+    definition.page_limit = max_pages
+    return build_steps(definition, prompts=PromptConfiguration(entities=ENTITIES), entities=ENTITIES)
 
 
 async def execute(datasets, evaluations, evaluation_id, cancelled=None):

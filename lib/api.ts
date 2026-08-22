@@ -108,6 +108,8 @@ export const api = {
     request<SavedPipeline>("/api/pipelines/check", json("POST", definition)),
   savePipeline: (definition: PipelineDefinition) =>
     request<SavedPipeline>(`/api/pipelines/${segment(definition.name)}`, json("PUT", definition)),
+  renamePipeline: (name: string, newName: string) =>
+    request<SavedPipeline>(`/api/pipelines/${segment(name)}`, json("PATCH", { name: newName })),
   deletePipeline: (name: string) =>
     request<void>(`/api/pipelines/${segment(name)}`, { method: "DELETE" }),
 

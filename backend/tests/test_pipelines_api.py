@@ -16,6 +16,9 @@ class FakeClient:
     def __init__(self, base_url: str) -> None:
         pass
 
+    async def list_models(self, excluded_model_ids=None):
+        return [READY_MODEL]
+
     async def list_vision_models(self, excluded_model_ids=None):
         return [READY_MODEL]
 
@@ -25,7 +28,10 @@ def api(tmp_path, monkeypatch):
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="vision-model"))
     monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "pipeline_store", PipelineStore(tmp_path / "pipelines"))
+    pipelines = PipelineStore(tmp_path / "pipelines")
+    # The app writes the starting point out at startup; so does this.
+    pipelines.seed_default()
+    monkeypatch.setattr(main, "pipeline_store", pipelines)
     monkeypatch.setattr(main, "LMStudioClient", FakeClient)
     with TestClient(main.app) as client:
         yield client
@@ -35,6 +41,7 @@ def body(name: str = "ocr-then-llm", **overrides) -> dict:
     payload = {
         "name": name,
         "description": "",
+        "page_limit": 10,
         "steps": [{"kind": "render_pages", "config": {}}, {"kind": "llm_extract", "config": {}}],
     }
     payload.update(overrides)
@@ -183,3 +190,40 @@ def test_the_selected_pipeline_is_what_actually_runs(api, monkeypatch, tmp_path)
     assert response.status_code == 200, response.text
     assert response.json()["data"]["document_number"]["value"] == "FE02-28569"
     assert main.run_store.get_run(response.json()["run_id"]).pipeline == "tidy"
+
+
+def test_a_pipeline_can_be_renamed(api) -> None:
+    api.put("/api/pipelines/ocr-then-llm", json=body())
+
+    response = api.patch("/api/pipelines/ocr-then-llm", json={"name": "layout first"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "layout first"
+    assert api.get("/api/pipelines/ocr-then-llm").status_code == 404
+
+
+def test_renaming_the_pipeline_in_use_keeps_it_in_use(api) -> None:
+    api.put("/api/pipelines/ocr-then-llm", json=body())
+    settings = api.get("/api/settings").json()
+    settings["pipeline"] = "ocr-then-llm"
+    api.put("/api/settings", json=settings)
+
+    api.patch("/api/pipelines/ocr-then-llm", json={"name": "layout first"})
+
+    assert api.get("/api/settings").json()["pipeline"] == "layout first"
+
+
+def test_renaming_onto_an_existing_name_is_refused(api) -> None:
+    api.put("/api/pipelines/ocr-then-llm", json=body())
+
+    response = api.patch("/api/pipelines/ocr-then-llm", json={"name": DEFAULT_NAME})
+
+    assert response.status_code == 400
+    assert api.get("/api/pipelines/ocr-then-llm").status_code == 200
+
+
+def test_the_page_limit_belongs_to_the_pipeline(api) -> None:
+    response = api.put("/api/pipelines/short", json=body("short", page_limit=2))
+
+    assert response.status_code == 200
+    assert api.get("/api/pipelines/short").json()["page_limit"] == 2

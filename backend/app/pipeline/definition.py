@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -90,6 +92,10 @@ class PipelineDefinition(BaseModel):
 
     name: str
     description: str = ""
+    # How many of the first pages this pipeline looks at. It belongs to the
+    # pipeline, not to the app: an OCR pipeline and a vision pipeline pay very
+    # different prices per page and rarely want the same number.
+    page_limit: Annotated[int, Field(ge=1, le=100)] = 10
     steps: list[PipelineStep] = Field(default_factory=list)
 
     @field_validator("name")
@@ -110,6 +116,20 @@ class PipelineDefinition(BaseModel):
                 PipelineStep(kind=StepKind.llm_extract, config={}),
             ],
         )
+
+
+def requires_vision(pipeline: PipelineDefinition) -> bool:
+    """True when a model in this pipeline is handed page images.
+
+    A pipeline that reads OCR text can use a text-only model, so this is what
+    decides whether a model without vision may be selected.
+    """
+    available: set[Artifact] = {Artifact.pdf}
+    for step in pipeline.steps:
+        if step.kind is StepKind.llm_extract and Artifact.images in available:
+            return True
+        available.update(contract_for(step.kind).produces)
+    return False
 
 
 def describe_problems(pipeline: PipelineDefinition) -> list[str]:

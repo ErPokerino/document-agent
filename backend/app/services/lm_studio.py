@@ -86,15 +86,23 @@ class LMStudioClient:
         self,
         excluded_model_ids: list[str] | None = None,
     ) -> list[ModelInfo]:
+        """Only the models that can read a page image."""
+        return [model for model in await self.list_models(excluded_model_ids) if model.vision]
+
+    async def list_models(
+        self,
+        excluded_model_ids: list[str] | None = None,
+    ) -> list[ModelInfo]:
+        """Every installed LLM, each saying whether it can see.
+
+        Text-only models are listed because a pipeline that reads OCR text has
+        no use for vision, and paying for it would be waste.
+        """
         excluded = set(excluded_model_ids or [])
         models: list[ModelInfo] = []
         for item in await self._fetch_model_items():
             capabilities = item.get("capabilities") or {}
-            if (
-                item.get("type") != "llm"
-                or not capabilities.get("vision", False)
-                or item.get("key") in excluded
-            ):
+            if item.get("type") != "llm" or item.get("key") in excluded:
                 continue
             loaded_instances = item.get("loaded_instances") or []
             loaded_config = (loaded_instances[0].get("config") or {}) if loaded_instances else {}
@@ -117,6 +125,7 @@ class LMStudioClient:
                         or parallel == SAFE_PROFILE_PARALLEL
                     ),
                     loaded=bool(loaded_instances),
+                    vision=bool(capabilities.get("vision", False)),
                 )
             )
         models.sort(
@@ -137,28 +146,29 @@ class LMStudioClient:
         entities: list[EntityDefinition] | None = None,
     ) -> dict[str, int | str | bool]:
         items = await self._fetch_model_items()
-        vision_items = [
-            item
-            for item in items
-            if item.get("type") == "llm"
-            and (item.get("capabilities") or {}).get("vision", False)
-        ]
-        if model not in {item.get("key") for item in vision_items}:
-            raise LMStudioError("Select an installed vision-capable model")
-        selected_item = next(item for item in vision_items if item.get("key") == model)
+        llm_items = [item for item in items if item.get("type") == "llm"]
+        if model not in {item.get("key") for item in llm_items}:
+            raise LMStudioError("Select a model installed in LM Studio")
+        selected_item = next(item for item in llm_items if item.get("key") == model)
+        has_vision = bool((selected_item.get("capabilities") or {}).get("vision", False))
         quantization = ((selected_item.get("quantization") or {}).get("name") or "").upper()
         size_bytes = int(selected_item.get("size_bytes") or 0)
         large_model = requires_cpu_safe_profile(quantization, size_bytes)
         profile = "compatibility" if large_model else "default"
-        warmup_mode = (
-            "vision" if size_bytes >= LARGE_MODEL_THRESHOLD_BYTES else "vision_and_schema"
-        )
+        # A model without vision has no projector to initialize, so the only
+        # thing worth warming is the structured-output path.
+        if not has_vision:
+            warmup_mode = "schema"
+        elif size_bytes >= LARGE_MODEL_THRESHOLD_BYTES:
+            warmup_mode = "vision"
+        else:
+            warmup_mode = "vision_and_schema"
         selected_instances = selected_item.get("loaded_instances") or []
         already_loaded = bool(selected_instances)
 
         started = time.perf_counter()
         unloaded_models = 0
-        for item in vision_items:
+        for item in llm_items:
             if item.get("key") == model:
                 continue
             for instance in item.get("loaded_instances") or []:
@@ -222,7 +232,8 @@ class LMStudioClient:
                     await self._warm_up_structured_output(
                         model,
                         entities or default_entities(),
-                        include_schema=warmup_mode == "vision_and_schema",
+                        include_schema=warmup_mode != "vision",
+                        include_image=has_vision,
                     )
                     warmup_ms += round((time.perf_counter() - warmup_started) * 1000)
                     break
@@ -348,6 +359,7 @@ class LMStudioClient:
         entities: list[EntityDefinition],
         *,
         include_schema: bool = True,
+        include_image: bool = True,
     ) -> None:
         # A single generated token is enough to initialize the vision projector.
         # Running a full structured generation here can itself get stuck and is
@@ -380,11 +392,12 @@ class LMStudioClient:
             "max_tokens": 1,
             "stream": False,
         }
-        await self._post_json(
-            "/v1/chat/completions",
-            vision_payload,
-            timeout=VISION_PREPARATION_TIMEOUT_SECONDS,
-        )
+        if include_image:
+            await self._post_json(
+                "/v1/chat/completions",
+                vision_payload,
+                timeout=VISION_PREPARATION_TIMEOUT_SECONDS,
+            )
 
         if not include_schema:
             return

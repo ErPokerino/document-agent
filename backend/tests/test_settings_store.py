@@ -30,9 +30,17 @@ def test_corrupted_settings_file_is_kept_for_inspection(tmp_path) -> None:
 
 def test_settings_that_no_longer_validate_fall_back_to_defaults(tmp_path) -> None:
     path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"max_pages_to_analyze": 9000}), encoding="utf-8")
+    path.write_text(json.dumps({"theme": "chartreuse"}), encoding="utf-8")
 
-    assert SettingsStore(path).read().max_pages_to_analyze == AppSettings().max_pages_to_analyze
+    assert SettingsStore(path).read().theme == AppSettings().theme
+
+
+def test_the_page_limit_that_moved_to_pipelines_does_not_invalidate_the_file(tmp_path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"model": "kept", "max_pages_to_analyze": 3}), encoding="utf-8")
+
+    # Dropping the key must not take the rest of the settings with it.
+    assert SettingsStore(path).read().model == "kept"
 
 
 def test_a_failed_write_leaves_the_previous_settings_readable(tmp_path, monkeypatch) -> None:

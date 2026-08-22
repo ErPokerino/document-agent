@@ -35,6 +35,7 @@ import { Datasets } from "./datasets";
 import { Lab } from "./lab";
 import { Models, formatBytes, modelStateLabels } from "./models";
 import { Pipelines } from "./pipeline";
+import { Settings } from "./settings";
 import { stepLabels } from "../lib/pipeline-editor";
 import { Prompts } from "./prompts";
 import { buildReviewedExport } from "../lib/review";
@@ -51,14 +52,15 @@ import type {
   GeminiKeyStatus,
 } from "../lib/types";
 
-type View = "workspace" | "prompts" | "pipeline" | "datasets" | "lab" | "models";
+type View = "workspace" | "prompts" | "pipelines" | "datasets" | "lab" | "models" | "settings";
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
   prompts: { eyebrow: "Extraction target", title: "Prompts" },
-  pipeline: { eyebrow: "How a document is processed", title: "Pipeline" },
+  pipelines: { eyebrow: "How a document is processed", title: "Pipelines" },
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
   lab: { eyebrow: "Extraction quality", title: "Lab" },
   models: { eyebrow: "Configuration", title: "Models" },
+  settings: { eyebrow: "Preferences", title: "Settings" },
 };
 
 type ProcessState = "idle" | "ready" | "processing" | "complete" | "error";
@@ -107,7 +109,6 @@ export default function Home() {
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
   const [modelLoadState, setModelLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [modelLoadReport, setModelLoadReport] = useState<ModelLoadResponse | null>(null);
-  const [pageLimitInput, setPageLimitInput] = useState("");
   const [reviewState, setReviewState] = useState<"idle" | "saving" | "saved">("idle");
   const [geminiKey, setGeminiKey] = useState("");
   const [keyStatus, setKeyStatus] = useState<GeminiKeyStatus | null>(null);
@@ -125,7 +126,6 @@ export default function Home() {
       if (resolved.settings) {
         setSettings(resolved.settings);
         setDraftSettings(resolved.settings);
-        setPageLimitInput(String(resolved.settings.max_pages_to_analyze));
       }
       if (resolved.error) {
         setSettingsError(resolved.error);
@@ -135,6 +135,14 @@ export default function Home() {
     }
     bootstrap();
   }, []);
+
+  // "system" means no attribute at all, so the media query in the stylesheet
+  // decides and keeps deciding while the app is open.
+  useEffect(() => {
+    const theme = draftSettings?.theme ?? "system";
+    if (theme === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+  }, [draftSettings?.theme]);
 
   // The strip below the result describes the pipeline in use, so it has to be
   // read back whenever that choice changes.
@@ -258,7 +266,7 @@ export default function Home() {
 
   function validateDraft() {
     if (!draftSettings) return "Settings have not been loaded from the backend yet.";
-    return validateSettingsDraft(draftSettings.prompts, pageLimitInput);
+    return validateSettingsDraft(draftSettings.prompts);
   }
 
   async function usePipeline(name: string) {
@@ -288,7 +296,6 @@ export default function Home() {
       // sends the real key back, so the draft always carries a blank.
       const settingsToSave = {
         ...draftSettings,
-        max_pages_to_analyze: Number(pageLimitInput),
         gemini: { ...draftSettings.gemini, api_key: geminiKey },
       };
       const saved = await api.saveSettings(settingsToSave);
@@ -323,7 +330,6 @@ export default function Home() {
     try {
       const settingsToSave = {
         ...draftSettings,
-        max_pages_to_analyze: Number(pageLimitInput),
         gemini: { ...draftSettings.gemini, api_key: geminiKey },
       };
       const saved = await api.saveSettings(settingsToSave);
@@ -522,8 +528,8 @@ export default function Home() {
           <button className={`nav-item ${view === "prompts" ? "active" : ""}`} onClick={() => setView("prompts")}>
             <Braces size={17} /> Prompts
           </button>
-          <button className={`nav-item ${view === "pipeline" ? "active" : ""}`} onClick={() => setView("pipeline")}>
-            <Workflow size={17} /> Pipeline
+          <button className={`nav-item ${view === "pipelines" ? "active" : ""}`} onClick={() => setView("pipelines")}>
+            <Workflow size={17} /> Pipelines
           </button>
           <button className={`nav-item ${view === "datasets" ? "active" : ""}`} onClick={() => setView("datasets")}>
             <Database size={17} /> Datasets
@@ -533,6 +539,9 @@ export default function Home() {
           </button>
           <button className={`nav-item ${view === "models" ? "active" : ""}`} onClick={() => setView("models")}>
             <Cpu size={17} /> Models
+          </button>
+          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
+            <SlidersHorizontal size={17} /> Settings
           </button>
         </nav>
 
@@ -559,10 +568,16 @@ export default function Home() {
             <p className="eyebrow">{sectionCopy[view].eyebrow}</p>
             <h1>{sectionCopy[view].title}</h1>
           </div>
-          <div className="model-chip" title="Change the model in Settings">
-            <span className="model-icon"><Cpu size={15} /></span>
-            <div><small>{activeModelStatus}</small><strong>{activeModelName}</strong></div>
-            <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />
+          <div className="topbar-chips">
+            <button className="model-chip" onClick={() => setView("pipelines")} title="Change it in Pipelines">
+              <span className="model-icon"><Workflow size={15} /></span>
+              <div><small>Pipeline</small><strong>{settings?.pipeline ?? "—"}</strong></div>
+            </button>
+            <button className="model-chip" onClick={() => setView("models")} title="Change it in Models">
+              <span className="model-icon"><Cpu size={15} /></span>
+              <div><small>{activeModelStatus}</small><strong>{activeModelName}</strong></div>
+              <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />
+            </button>
           </div>
         </header>
 
@@ -685,11 +700,19 @@ export default function Home() {
             settingsState={settingsState}
             settingsError={settingsError}
           />
-        ) : view === "pipeline" ? (
+        ) : view === "pipelines" ? (
           <Pipelines
             draftSettings={draftSettings}
             entities={configuredEntities}
             onUse={usePipeline}
+          />
+        ) : view === "settings" ? (
+          <Settings
+            draftSettings={draftSettings}
+            setDraftSettings={setDraftSettings}
+            onSave={saveSettings}
+            settingsState={settingsState}
+            settingsError={settingsError}
           />
         ) : view === "datasets" ? (
           <Datasets savedEntities={configuredEntities} isModelReady={isModelReady} />
@@ -718,8 +741,6 @@ export default function Home() {
             setModelLoadReport={setModelLoadReport}
             modelsRefreshing={modelsRefreshing}
             isConnected={isConnected}
-            pageLimitInput={pageLimitInput}
-            setPageLimitInput={setPageLimitInput}
             processState={processState}
           />
         )}

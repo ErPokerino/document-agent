@@ -80,3 +80,15 @@ export function stepLabels(
 ): string[] {
   return steps.map((step) => catalogue.find((entry) => entry.kind === step.kind)?.label ?? step.kind);
 }
+
+export const MIN_PAGES = 1;
+export const MAX_PAGES = 100;
+
+/** Mirrors the Pydantic bound on PipelineDefinition.page_limit. */
+export function pageLimitProblem(input: string): string | null {
+  const value = Number(input);
+  if (!/^\d+$/.test(input) || value < MIN_PAGES || value > MAX_PAGES) {
+    return `The page limit must be a whole number between ${MIN_PAGES} and ${MAX_PAGES}.`;
+  }
+  return null;
+}

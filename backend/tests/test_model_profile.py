@@ -1,18 +1,33 @@
+import json
+
 import pytest
 
 from app.services.lm_studio import LMStudioClient, requires_cpu_safe_profile
 
 
-def item(key: str, quantization: str, size_gb: float, instances: list | None = None) -> dict:
+def item(
+    key: str,
+    quantization: str = "Q4_K_M",
+    size_gb: float = 1.0,
+    instances: list | None = None,
+    vision: bool = True,
+) -> dict:
     return {
         "type": "llm",
         "key": key,
         "display_name": key,
         "quantization": {"name": quantization},
         "size_bytes": int(size_gb * 1024**3),
-        "capabilities": {"vision": True},
+        "capabilities": {"vision": vision},
         "loaded_instances": instances or [],
     }
+
+
+def make_items(*items: dict):
+    async def fetch(self):
+        return list(items)
+
+    return fetch
 
 
 def loaded(parallel: int, context_length: int = 8192) -> list:
@@ -123,3 +138,54 @@ async def test_an_iq_quant_below_the_threshold_is_loaded_through_the_cli(monkeyp
 
     assert used_cli == ["qwen3.8-27b@iq2_xxs"]
     assert result["profile"] == "compatibility"
+
+
+@pytest.mark.asyncio
+async def test_a_text_only_model_is_listed_and_marked_as_such(monkeypatch) -> None:
+    """OCR pipelines can use a model without vision, so it has to be offered."""
+    monkeypatch.setattr(
+        LMStudioClient,
+        "_fetch_model_items",
+        make_items(
+            item("vision-one", vision=True),
+            item("text-one", vision=False),
+        ),
+    )
+
+    listed = await LMStudioClient("http://localhost:1234").list_models()
+
+    assert {model.id: model.vision for model in listed} == {
+        "vision-one": True,
+        "text-one": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_text_only_model_is_warmed_up_without_an_image(monkeypatch) -> None:
+    """Sending an image to a model without vision is an error, not a warm-up."""
+    client = LMStudioClient("http://localhost:1234")
+    monkeypatch.setattr(
+        LMStudioClient, "_fetch_model_items", make_items(item("text-one", vision=False))
+    )
+
+    posted: list[dict] = []
+
+    from app.domain.models import PromptConfiguration
+
+    entities = PromptConfiguration().entities
+    answer = json.dumps({entity.name: None for entity in entities} | {"c": "l" * len(entities)})
+
+    async def fake_post(self, path, payload, timeout=None):
+        posted.append(payload)
+        return {"load_time_seconds": 0.1, "choices": [{"message": {"content": answer}}]}
+
+    monkeypatch.setattr(LMStudioClient, "_post_json", fake_post)
+
+    report = await client.load_and_warm_model("text-one")
+
+    assert report["warmup_mode"] == "schema"
+    sent_content = [message["content"] for payload in posted for message in payload.get("messages", [])]
+    assert not any(
+        isinstance(content, list) and any(part.get("type") == "image_url" for part in content)
+        for content in sent_content
+    )

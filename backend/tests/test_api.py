@@ -24,11 +24,14 @@ class FakeClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url
 
-    async def list_vision_models(self, excluded_model_ids: list[str] | None = None) -> list[ModelInfo]:
+    async def list_models(self, excluded_model_ids: list[str] | None = None) -> list[ModelInfo]:
         if FakeClient.list_error is not None:
             raise FakeClient.list_error
         excluded = set(excluded_model_ids or [])
         return [model for model in FakeClient.models if model.id not in excluded]
+
+    async def list_vision_models(self, excluded_model_ids: list[str] | None = None) -> list[ModelInfo]:
+        return [model for model in await self.list_models(excluded_model_ids) if model.vision]
 
     async def load_and_warm_model(self, model: str, **kwargs) -> dict:
         if FakeClient.load_gate is not None:

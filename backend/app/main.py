@@ -32,6 +32,7 @@ from app.domain.models import (
     ModelLoadResponse,
     ProcessingInfo,
     PromoteRunRequest,
+    PipelineRenameRequest,
     PromptPreview,
     PromptPreviewRequest,
     SavedPipeline,
@@ -42,12 +43,18 @@ from app.evaluation.export import evaluation_to_csv
 from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
 from app.pipeline.compiler import PipelineError, build_steps
-from app.pipeline.definition import CONTRACTS, PipelineDefinition, describe_problems
+from app.pipeline.definition import (
+    CONTRACTS,
+    PipelineDefinition,
+    describe_problems,
+    requires_vision,
+)
 from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.store import InvalidPipelineName, PipelineStore, UnknownPipeline
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
 from app.services.lm_studio import LMStudioClient, LMStudioError
 from app.services.run_store import RunStore
+from app.services.migrations import adopt_legacy_page_limit
 from app.services.settings_store import SettingsStore
 
 
@@ -72,6 +79,11 @@ run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
 dataset_store = DatasetStore(DATASETS_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
+# The page limit used to be one number for the whole app; carry an existing
+# install's value into the pipeline that inherits the job, then write the
+# starting point out so it is an ordinary editable file.
+adopt_legacy_page_limit(SETTINGS_PATH, pipeline_store)
+pipeline_store.seed_default()
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
 active_model_operation: str | None = None
@@ -254,7 +266,7 @@ async def models() -> list[ModelInfo]:
     settings = settings_store.read()
     hosted = _hosted_models(settings)
     try:
-        discovered = await LMStudioClient(settings.lm_studio_url).list_vision_models(
+        discovered = await LMStudioClient(settings.lm_studio_url).list_models(
             settings.excluded_model_ids
         )
     except LMStudioError as exc:
@@ -394,7 +406,7 @@ async def clear_gemini_key() -> Response:
 async def update_settings(settings: AppSettings) -> AppSettings:
     previous_settings = settings_store.read()
     try:
-        pipeline_store.read(settings.pipeline)
+        chosen_pipeline = pipeline_store.read(settings.pipeline)
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if settings.model in settings.excluded_model_ids:
@@ -427,11 +439,27 @@ async def update_settings(settings: AppSettings) -> AppSettings:
         provider_changed = settings.provider != previous_settings.provider
         if settings.model != previous_settings.model or endpoint_changed or provider_changed:
             try:
-                available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+                available = await LMStudioClient(settings.lm_studio_url).list_models()
             except LMStudioError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
-            if settings.model not in {model.id for model in available}:
-                raise HTTPException(status_code=400, detail="Select a vision-capable model")
+            chosen = next(
+                (model for model in available if model.id == settings.model), None
+            )
+            if chosen is None:
+                raise HTTPException(
+                    status_code=400, detail="Select a model installed in LM Studio"
+                )
+            # Vision is only required by a pipeline that hands the model page
+            # images; one that reads OCR text is better off without it.
+            if requires_vision(chosen_pipeline) and not chosen.vision:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"'{chosen_pipeline.name}' sends page images to the model, and "
+                        f"{settings.model} has no vision. Pick a vision model, or a "
+                        "pipeline that reads text."
+                    ),
+                )
     saved = settings_store.write(settings)
     previous_schema = [
         (entity.name, entity.format) for entity in previous_settings.prompts.entities
@@ -447,6 +475,13 @@ async def update_settings(settings: AppSettings) -> AppSettings:
 
 
 
+def _selected_pipeline(settings: AppSettings) -> PipelineDefinition:
+    try:
+        return pipeline_store.read(settings.pipeline)
+    except (UnknownPipeline, InvalidPipelineName) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
     """The configured pipeline, compiled. Anything unusable is refused here.
 
@@ -457,10 +492,9 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
     try:
         return DocumentPipeline(
             build_steps(
-                pipeline_store.read(settings.pipeline),
+                _selected_pipeline(settings),
                 prompts=settings.prompts,
                 entities=settings.prompts.entities,
-                max_pages_to_analyze=settings.max_pages_to_analyze,
             )
         )
     except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
@@ -583,6 +617,7 @@ def _saved_pipeline(definition: PipelineDefinition) -> SavedPipeline:
     return SavedPipeline(
         name=definition.name,
         description=definition.description,
+        page_limit=definition.page_limit,
         steps=definition.steps,
         problems=describe_problems(definition),
     )
@@ -601,7 +636,6 @@ def _refuse_unusable(definition: PipelineDefinition) -> None:
             definition,
             prompts=settings.prompts,
             entities=settings.prompts.entities,
-            max_pages_to_analyze=settings.max_pages_to_analyze,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -656,6 +690,26 @@ async def save_pipeline(name: str, definition: PipelineDefinition) -> SavedPipel
         return _saved_pipeline(pipeline_store.save(definition))
     except InvalidPipelineName as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/pipelines/{name}", response_model=SavedPipeline)
+async def rename_pipeline(name: str, request: PipelineRenameRequest) -> SavedPipeline:
+    """Rename in place, carrying the selection with it.
+
+    A rename that quietly left the app running the old name would be worse than
+    refusing one, so the setting follows the file.
+    """
+    try:
+        renamed = pipeline_store.rename(name, request.name)
+    except InvalidPipelineName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UnknownPipeline as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    settings = settings_store.read()
+    if settings.pipeline == name:
+        settings_store.write(settings.model_copy(update={"pipeline": renamed.name}))
+    return _saved_pipeline(renamed)
 
 
 @app.delete("/api/pipelines/{name}", status_code=204, response_class=Response)
@@ -960,6 +1014,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
 
     # Compiled before anything is claimed: a pipeline that cannot run must
     # not leave the backend marked busy.
+    pipeline_definition = _selected_pipeline(settings)
     steps = _document_pipeline(settings).steps
 
     await _ensure_model_ready(settings)
@@ -970,7 +1025,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         model=settings.model,
         prompts=settings.prompts,
         total_documents=len(documents),
-        max_pages=settings.max_pages_to_analyze,
+        max_pages=pipeline_definition.page_limit,
         pipeline=settings.pipeline,
     )
     evaluation_cancelled = asyncio.Event()
@@ -991,7 +1046,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 provider=settings.provider,
                 gemini_api_key=settings.gemini.api_key,
                 gemini_thinking_level=settings.gemini.thinking_level,
-                max_pages=settings.max_pages_to_analyze,
+                max_pages=pipeline_definition.page_limit,
                 steps=steps,
                 pipeline_name=settings.pipeline,
                 cancelled=cancelled,
@@ -1046,13 +1101,15 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 "so the retried documents are scored the same way as the rest of the run."
             ),
         )
-    page_limit = detail.max_pages or settings.max_pages_to_analyze
     try:
+        # The run's own page limit, not the one the pipeline carries today.
+        definition = pipeline_store.read(detail.pipeline)
+        page_limit = detail.max_pages or definition.page_limit
+        definition.page_limit = page_limit
         steps = build_steps(
-            pipeline_store.read(detail.pipeline),
+            definition,
             prompts=detail.prompts,
             entities=detail.prompts.entities,
-            max_pages_to_analyze=page_limit,
         )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(

@@ -8,6 +8,7 @@ import {
   moveStep,
   removeStep,
   rulesOf,
+  pageLimitProblem,
   setStepConfig,
   stepLabels,
   summarizeStep,
@@ -84,4 +85,13 @@ test("step labels come from the catalogue, and fall back to the raw kind", () =>
     stepLabels([{ kind: "render_pages", config: {} }, { kind: "llm_extract", config: {} }], catalogue),
     ["Render pages", "llm_extract"],
   );
+});
+
+test("the page limit must be a whole number inside the backend range", () => {
+  assert.equal(pageLimitProblem("1"), null);
+  assert.equal(pageLimitProblem("100"), null);
+  assert.match(pageLimitProblem("0") ?? "", /between 1 and 100/);
+  assert.match(pageLimitProblem("101") ?? "", /between 1 and 100/);
+  assert.match(pageLimitProblem("2.5") ?? "", /between 1 and 100/);
+  assert.match(pageLimitProblem("") ?? "", /between 1 and 100/);
 });

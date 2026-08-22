@@ -67,13 +67,68 @@ def test_a_saved_pipeline_may_override_the_default(tmp_path) -> None:
     assert len(pipelines.list()) == 1
 
 
-def test_a_deleted_pipeline_is_gone(tmp_path) -> None:
+def test_the_default_is_a_starting_point_not_a_fixture(tmp_path) -> None:
     pipelines = store(tmp_path)
     pipelines.save(a_pipeline())
 
+    # Once something is saved, the built-in default stops being offered: it is
+    # where an empty install starts, not a pipeline that always exists.
+    assert [p.name for p in pipelines.list()] == ["ocr-then-llm"]
+    with pytest.raises(UnknownPipeline):
+        pipelines.read(PipelineDefinition.default().name)
+
+
+def test_the_default_is_written_out_once_so_it_can_be_edited(tmp_path) -> None:
+    pipelines = store(tmp_path)
+
+    pipelines.seed_default()
+
+    assert (tmp_path / "pipelines" / f"{PipelineDefinition.default().name}.json").exists()
+
+
+def test_seeding_never_overwrites_what_is_already_there(tmp_path) -> None:
+    pipelines = store(tmp_path)
+    pipelines.save(a_pipeline())
+
+    pipelines.seed_default()
+
+    assert [p.name for p in pipelines.list()] == ["ocr-then-llm"]
+
+
+def test_a_pipeline_can_be_renamed(tmp_path) -> None:
+    pipelines = store(tmp_path)
+    pipelines.save(a_pipeline())
+
+    renamed = pipelines.rename("ocr-then-llm", "layout first")
+
+    assert renamed.name == "layout first"
+    assert [p.name for p in pipelines.list()] == ["layout first"]
+    with pytest.raises(UnknownPipeline):
+        pipelines.read("ocr-then-llm")
+
+
+def test_renaming_onto_a_name_that_is_taken_is_refused(tmp_path) -> None:
+    pipelines = store(tmp_path)
+    pipelines.save(a_pipeline())
+    pipelines.save(a_pipeline("other"))
+
+    with pytest.raises(ValueError, match="already"):
+        pipelines.rename("other", "ocr-then-llm")
+
+
+def test_renaming_something_that_is_not_there_says_so(tmp_path) -> None:
+    with pytest.raises(UnknownPipeline):
+        store(tmp_path).rename("absent", "whatever")
+
+
+def test_a_deleted_pipeline_is_gone(tmp_path) -> None:
+    pipelines = store(tmp_path)
+    pipelines.save(a_pipeline())
+    pipelines.save(a_pipeline("other"))
+
     pipelines.delete("ocr-then-llm")
 
-    assert [p.name for p in pipelines.list()] == [PipelineDefinition.default().name]
+    assert [p.name for p in pipelines.list()] == ["other"]
 
 
 def test_deleting_something_that_is_not_there_says_so(tmp_path) -> None:
@@ -84,6 +139,15 @@ def test_deleting_something_that_is_not_there_says_so(tmp_path) -> None:
 def test_a_name_that_would_escape_the_folder_is_refused(tmp_path) -> None:
     with pytest.raises(ValueError):
         store(tmp_path).read("../../settings")
+
+
+def test_emptying_the_store_brings_the_starting_point_back(tmp_path) -> None:
+    pipelines = store(tmp_path)
+    pipelines.save(a_pipeline())
+
+    pipelines.delete("ocr-then-llm")
+
+    assert [p.name for p in pipelines.list()] == [PipelineDefinition.default().name]
 
 
 def test_a_corrupt_file_does_not_take_the_whole_list_down(tmp_path) -> None:

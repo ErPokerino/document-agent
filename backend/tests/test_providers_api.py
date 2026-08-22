@@ -19,10 +19,13 @@ class FakeLMStudio:
     def __init__(self, base_url: str) -> None:
         pass
 
-    async def list_vision_models(self, excluded_model_ids=None):
+    async def list_models(self, excluded_model_ids=None):
         if FakeLMStudio.error is not None:
             raise FakeLMStudio.error
         return [LOCAL_MODEL]
+
+    async def list_vision_models(self, excluded_model_ids=None):
+        return [model for model in await self.list_models(excluded_model_ids) if model.vision]
 
 
 def pdf_bytes() -> bytes:
@@ -133,11 +136,11 @@ def test_saving_settings_without_a_key_keeps_the_stored_one(api) -> None:
     client, store = api
     set_key(store, "keep-me")
 
-    response = save(api, max_pages_to_analyze=4)
+    response = save(api, theme="dark")
 
     assert response.status_code == 200
     assert store.read().gemini.api_key == "keep-me"
-    assert store.read().max_pages_to_analyze == 4
+    assert store.read().theme == "dark"
 
 
 def test_sending_a_new_key_replaces_the_stored_one(api) -> None:
@@ -270,6 +273,9 @@ def test_a_model_loaded_with_the_wrong_profile_is_refused_with_a_way_out(api, mo
         def __init__(self, base_url: str) -> None:
             pass
 
+        async def list_models(self, excluded_model_ids=None):
+            return [MISMATCHED_MODEL]
+
         async def list_vision_models(self, excluded_model_ids=None):
             return [MISMATCHED_MODEL]
 
@@ -294,6 +300,9 @@ def test_a_mismatched_model_is_never_reported_as_ready(api, monkeypatch) -> None
     class WrongProfile:
         def __init__(self, base_url: str) -> None:
             pass
+
+        async def list_models(self, excluded_model_ids=None):
+            return [MISMATCHED_MODEL]
 
         async def list_vision_models(self, excluded_model_ids=None):
             return [MISMATCHED_MODEL]

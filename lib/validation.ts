@@ -1,19 +1,14 @@
 import type { PromptConfiguration } from "./types";
 
-// Mirrors the Pydantic bounds: EntityDefinition.name pattern and
-// AppSettings.max_pages_to_analyze ge=1 le=100.
+// Mirrors the Pydantic bound on EntityDefinition.name. The page limit moved
+// to the pipeline, and is validated where it is edited.
 const ENTITY_NAME = /^[a-z][a-z0-9_]*$/;
-const MIN_PAGES = 1;
-const MAX_PAGES = 100;
 
 /**
  * Client-side copy of the backend validation, so the user sees the problem
  * before a round trip. The backend stays the authority: it re-validates.
  */
-export function validateSettingsDraft(
-  prompts: PromptConfiguration,
-  pageLimitInput: string,
-): string | null {
+export function validateSettingsDraft(prompts: PromptConfiguration): string | null {
   const names = prompts.entities.map((entity) => entity.name);
 
   if (names.some((name) => !ENTITY_NAME.test(name))) {
@@ -33,9 +28,5 @@ export function validateSettingsDraft(
     return "Prompts cannot be empty.";
   }
 
-  const pageLimit = Number(pageLimitInput);
-  if (!/^\d+$/.test(pageLimitInput) || pageLimit < MIN_PAGES || pageLimit > MAX_PAGES) {
-    return `Maximum pages must be an integer between ${MIN_PAGES} and ${MAX_PAGES}.`;
-  }
   return null;
 }

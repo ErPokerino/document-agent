@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from app.pipeline.definition import (
     Artifact,
@@ -7,6 +8,7 @@ from app.pipeline.definition import (
     StepKind,
     contract_for,
     describe_problems,
+    requires_vision,
 )
 
 
@@ -22,8 +24,8 @@ def regex(**config) -> PipelineStep:
     return PipelineStep(kind=StepKind.regex_refine, config={"rules": [], **config})
 
 
-def pipeline(*steps: PipelineStep, name: str = "test") -> PipelineDefinition:
-    return PipelineDefinition(name=name, steps=list(steps))
+def pipeline(*steps: PipelineStep, name: str = "test", **extra) -> PipelineDefinition:
+    return PipelineDefinition(name=name, steps=list(steps), **extra)
 
 
 def test_the_document_itself_is_what_a_pipeline_starts_from() -> None:
@@ -104,3 +106,27 @@ def test_a_step_kind_that_does_not_exist_is_refused() -> None:
 def test_a_pipeline_name_must_be_usable_as_a_file_name() -> None:
     with pytest.raises(ValueError):
         PipelineDefinition(name="../escape", steps=[render(), extract()])
+
+
+def test_a_pipeline_carries_its_own_page_limit() -> None:
+    assert PipelineDefinition.default().page_limit == 10
+    assert pipeline(render(), extract(), page_limit=3).page_limit == 3
+
+
+def test_a_page_limit_outside_what_a_single_call_can_hold_is_refused() -> None:
+    for refused in (0, 101):
+        with pytest.raises(ValidationError):
+            pipeline(render(), extract(), page_limit=refused)
+
+
+def test_a_pipeline_that_sends_images_to_the_model_needs_a_vision_model() -> None:
+    assert requires_vision(PipelineDefinition.default()) is True
+
+
+def test_a_pipeline_that_only_sends_text_does_not_need_a_vision_model() -> None:
+    text_only = pipeline(
+        PipelineStep(kind=StepKind.llm_extract),
+        name="text-only",
+    )
+    # Nothing produces images before the model call, so a text model is enough.
+    assert requires_vision(text_only) is False

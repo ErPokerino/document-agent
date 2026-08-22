@@ -8,18 +8,24 @@ import {
   CheckCircle2,
   Copy,
   LoaderCircle,
+  Pencil,
   Plus,
   Save,
+  Scissors,
   Trash2,
   Workflow,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
+import { InfoHint } from "./info-hint";
 import {
+  MAX_PAGES,
+  MIN_PAGES,
   addStep,
   emptyRule,
   moveStep,
+  pageLimitProblem,
   removeStep,
   rulesOf,
   setStepConfig,
@@ -61,6 +67,9 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
   const [openedAs, setOpenedAs] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [pageLimitInput, setPageLimitInput] = useState("10");
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -107,7 +116,13 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
   }, [draft]);
 
   function open(pipeline: SavedPipeline) {
-    setDraft({ name: pipeline.name, description: pipeline.description, steps: pipeline.steps });
+    setDraft({
+      name: pipeline.name,
+      description: pipeline.description,
+      page_limit: pipeline.page_limit,
+      steps: pipeline.steps,
+    });
+    setPageLimitInput(String(pipeline.page_limit));
     setOpenedAs(pipeline.name);
     setProblems(pipeline.problems);
     setError(null);
@@ -122,11 +137,13 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     setDraft({
       name,
       description: "",
+      page_limit: 10,
       steps: [
         { kind: "render_pages", config: { scale: 1.35 } },
         { kind: "llm_extract", config: {} },
       ],
     });
+    setPageLimitInput("10");
     setOpenedAs(null);
     setError(null);
   }
@@ -169,6 +186,30 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
+  }
+
+  async function rename(name: string) {
+    const next = renameValue.trim();
+    setRenaming(null);
+    if (!next || next === name) return;
+    setError(null);
+    try {
+      const renamed = await api.renamePipeline(name, next);
+      await refresh();
+      if (openedAs === name) open(renamed);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  function duplicate(pipeline: SavedPipeline) {
+    const existing = new Set(pipelines.map((candidate) => candidate.name));
+    let name = `${pipeline.name} copy`;
+    let suffix = 1;
+    while (existing.has(name)) name = `${pipeline.name} copy ${++suffix}`;
+    // Opened, not saved: a copy nobody wanted should leave nothing behind.
+    open({ ...pipeline, name });
+    setOpenedAs(null);
   }
 
   async function use(name: string) {
@@ -218,6 +259,19 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                 <button className="secondary-button small ghost" onClick={() => setConfirmingDelete(null)}>Cancel</button>
                 <button className="secondary-button small danger" onClick={() => void remove(pipeline.name)}><Trash2 size={13} /> Delete</button>
               </div>
+              ) : renaming === pipeline.name ? (
+              <form
+                className="rename-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void rename(pipeline.name);
+                }}
+              >
+                {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+                <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={`New name for ${pipeline.name}`} />
+                <button type="submit" className="secondary-button small"><Check size={13} /> Save</button>
+                <button type="button" className="secondary-button small ghost" onClick={() => setRenaming(null)}>Cancel</button>
+              </form>
               ) : (
               <>
               <button className="flow-open" onClick={() => open(pipeline)}>
@@ -239,6 +293,22 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                   <Check size={13} /> Use
                 </button>
               )}
+              <button
+                className="icon-button neutral"
+                aria-label={`Rename ${pipeline.name}`}
+                title="Rename"
+                onClick={() => { setRenaming(pipeline.name); setRenameValue(pipeline.name); }}
+              >
+                <Pencil size={15} />
+              </button>
+              <button
+                className="icon-button neutral"
+                aria-label={`Duplicate ${pipeline.name}`}
+                title="Duplicate"
+                onClick={() => duplicate(pipeline)}
+              >
+                <Copy size={15} />
+              </button>
               <button
                 className="icon-button"
                 aria-label={`Delete ${pipeline.name}`}
@@ -285,10 +355,33 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
             </div>
+            <div>
+              <label className="input-label" htmlFor="pipeline-pages">
+                <Scissors size={12} /> Pages
+                <InfoHint text="How many of the first pages this pipeline looks at. Pages 1–N go out in one call; the app never merges separate page extractions." />
+              </label>
+              <input
+                id="pipeline-pages"
+                className="text-input"
+                type="number"
+                min={MIN_PAGES}
+                max={MAX_PAGES}
+                step={1}
+                value={pageLimitInput}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setPageLimitInput(value);
+                  if (pageLimitProblem(value) === null) setDraft({ ...draft, page_limit: Number(value) });
+                }}
+                onBlur={() => {
+                  if (pageLimitProblem(pageLimitInput) !== null) setPageLimitInput(String(draft.page_limit));
+                }}
+              />
+            </div>
           </div>
 
           {savedUnderAnotherName && (
-            <p className="field-help"><Copy size={12} /> Saving now creates a copy called <strong>{draft.name}</strong>; <strong>{openedAs}</strong> stays as it is.</p>
+            <p className="field-help"><Copy size={12} /> Saving now creates a copy called <strong>{draft.name}</strong>; <strong>{openedAs}</strong> stays as it is. To rename instead, use the pencil in the list above.</p>
           )}
 
           <div className="flow-steps">
@@ -311,7 +404,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                   {step.kind === "render_pages" && (
                     <div className="flow-step-body">
                       <label className="flow-field">
-                        <span>Zoom</span>
+                        <span>Zoom<InfoHint text="How large the page is drawn before it is sent. 1.35 is about 130 DPI." /></span>
                         <input
                           type="number"
                           min={0.5}
@@ -321,7 +414,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                           onChange={(event) => setSteps(setStepConfig(draft.steps, index, { scale: Number(event.target.value) }))}
                         />
                       </label>
-                      <p className="field-help">Higher zoom reads small print better and costs more memory and time. How many pages are rendered comes from the page limit in Models.</p>
+                      <p className="field-help">Higher zoom reads small print better, and costs more memory and time.</p>
                     </div>
                   )}
 
@@ -354,25 +447,42 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                                   {Object.entries(whenLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                                 </select>
                               </label>
-                              <label><span>Pattern</span>
+                              <label><span>Find
+                                <InfoHint text="A regular expression. Round brackets mark a part you can keep on its own, for example Invoice (INV-\d+)." />
+                              </span>
                                 <input value={rule.pattern} placeholder="\s*-\s*" onChange={(event) => update({ pattern: event.target.value })} />
                               </label>
-                              <label><span>Capture group</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  placeholder="none"
-                                  value={rule.group ?? ""}
-                                  onChange={(event) => update({ group: event.target.value === "" ? null : Number(event.target.value) })}
-                                />
+                              <label><span>Then
+                                <InfoHint text="Replace rewrites the matched text and leaves the rest. Keep throws the rest away and keeps only the match, or the part in brackets you choose." align="end" />
+                              </span>
+                                <select
+                                  value={rule.group === null ? "replace" : "keep"}
+                                  onChange={(event) => update(event.target.value === "replace" ? { group: null } : { group: 1, replacement: "" })}
+                                >
+                                  <option value="replace">Replace what matched</option>
+                                  <option value="keep">Keep only what matched</option>
+                                </select>
                               </label>
-                              <label><span>Replace with</span>
-                                <input
-                                  value={rule.replacement}
-                                  disabled={rule.group !== null}
-                                  onChange={(event) => update({ replacement: event.target.value })}
-                                />
-                              </label>
+                              {rule.group === null ? (
+                                <label><span>With</span>
+                                  <input
+                                    value={rule.replacement}
+                                    placeholder="(nothing)"
+                                    onChange={(event) => update({ replacement: event.target.value })}
+                                  />
+                                </label>
+                              ) : (
+                                <label><span>Which part
+                                  <InfoHint text="0 keeps the whole match. 1 keeps what the first pair of brackets matched, 2 the second, and so on." align="end" />
+                                </span>
+                                  <select value={rule.group} onChange={(event) => update({ group: Number(event.target.value) })}>
+                                    <option value={0}>The whole match</option>
+                                    <option value={1}>1st bracket</option>
+                                    <option value={2}>2nd bracket</option>
+                                    <option value={3}>3rd bracket</option>
+                                  </select>
+                                </label>
+                              )}
                               <button className="icon-button" aria-label="Remove rule" onClick={() => setRules(index, rules.filter((_, position) => position !== ruleIndex))}><Trash2 size={14} /></button>
                             </div>
                           );
@@ -383,8 +493,8 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                           <Plus size={13} /> Add rule
                         </button>
                         <p className="field-help">
-                          A capture group takes that part of the match; leave it empty to substitute across the match instead.
-                          The result is checked against the field format, exactly like a model answer.
+                          Rules run in order, and the result is checked against the field format exactly
+                          like a model answer: a rule cannot put an unusable value into a field.
                         </p>
                       </div>
                     </div>

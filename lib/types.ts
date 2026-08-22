@@ -18,8 +18,8 @@ export type AppSettings = {
   excluded_model_ids: string[];
   gemini: GeminiSettings;
   lm_studio_url: string;
-  max_pages_to_analyze: number;
   pipeline: string;
+  theme: "system" | "light" | "dark";
   prompts: PromptConfiguration;
 };
 
@@ -263,7 +263,12 @@ export type ModelPricing = {
 export type PipelineDefinition = {
   name: string;
   description: string;
+  page_limit: number;
   steps: PipelineStep[];
+};
+
+export type PipelineRenameRequest = {
+  name: string;
 };
 
 export type PipelineStep = {
@@ -312,6 +317,7 @@ export type PromptPreviewRequest = {
 export type SavedPipeline = {
   name: string;
   description: string;
+  page_limit: number;
   steps: PipelineStep[];
   problems: string[];
 };

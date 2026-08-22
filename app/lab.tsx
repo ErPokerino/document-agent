@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Cpu,
   Download,
   Eye,
   FilterX,
@@ -18,11 +19,13 @@ import {
   RefreshCw,
   Square,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
+import { InfoHint } from "./info-hint";
 import { estimateCost, formatUsd } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
@@ -174,6 +177,12 @@ export function Lab({ draftSettings, isModelReady }: Props) {
       <div><h3>Run a test</h3><p>Every labelled document in the dataset is extracted with the saved prompts and scored.</p></div>
         </div>
 
+        <div className="run-target">
+          <span><Workflow size={13} /> Pipeline <strong>{draftSettings.pipeline}</strong></span>
+          <span><Cpu size={13} /> Model <strong>{draftSettings.model}</strong></span>
+          <InfoHint text="A run always uses the pipeline and model selected right now, and records both, so two runs can be compared afterwards." />
+        </div>
+
         <div className="run-controls">
       <select value={selectedDataset ?? ""} onChange={(event) => setSelectedDataset(event.target.value || null)}>
         <option value="">Choose a dataset…</option>
@@ -189,7 +198,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
         </button>
       )}
         </div>
-        {!isModelReady && <p className="field-help">Load and warm up the model in Settings before running a test.</p>}
+        {!isModelReady && <p className="field-help">Load and warm up the model in Models before running a test.</p>}
         {running && (
       <div className="run-progress">
         <LoaderCircle className="spin" size={15} />

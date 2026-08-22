@@ -180,8 +180,8 @@ class AppSettings(BaseModel):
     excluded_model_ids: list[str] = Field(default_factory=list)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     lm_studio_url: str = "http://127.0.0.1:1234"
-    max_pages_to_analyze: Annotated[int, Field(ge=1, le=100)] = 10
     pipeline: str = DEFAULT_PIPELINE_NAME
+    theme: Literal["system", "light", "dark"] = "system"
     prompts: PromptConfiguration = Field(default_factory=PromptConfiguration)
 
 
@@ -378,6 +378,12 @@ class EvaluationDetail(Evaluation):
     documents: list[EvaluationDocumentResult]
 
 
+class PipelineRenameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=64)]
+
+
 class StepCatalogueEntry(BaseModel):
     kind: str
     label: str
@@ -390,6 +396,7 @@ class StepCatalogueEntry(BaseModel):
 class SavedPipeline(BaseModel):
     name: str
     description: str
+    page_limit: int
     steps: list[PipelineStep]
     # Empty when the pipeline can run. The UI shows these instead of letting
     # someone start a run that would fail on the first document.

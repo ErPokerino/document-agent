@@ -17,6 +17,9 @@ class FakeClient:
     def __init__(self, base_url: str) -> None:
         pass
 
+    async def list_models(self, excluded_model_ids=None):
+        return [READY_MODEL]
+
     async def list_vision_models(self, excluded_model_ids=None):
         return [READY_MODEL]
 
@@ -325,8 +328,9 @@ def test_the_page_limit_is_recorded_on_the_evaluation(api, monkeypatch) -> None:
         json={"labels": {"currency": "EUR"}},
     )
     main.model_runtime_states["vision-model"] = "ready"
-    settings = main.settings_store.read()
-    main.settings_store.write(settings.model_copy(update={"max_pages_to_analyze": 7}))
+    definition = main.pipeline_store.read(main.settings_store.read().pipeline)
+    definition.page_limit = 7
+    main.pipeline_store.save(definition)
 
     class Idle:
         def __init__(self, base_url: str) -> None:

@@ -13,7 +13,7 @@ const prompts = {
 const draft = (overrides = {}) => ({ ...prompts, ...overrides });
 
 test("a well formed draft has no error", () => {
-  assert.equal(validateSettingsDraft(draft(), "10"), null);
+  assert.equal(validateSettingsDraft(draft()), null);
 });
 
 test("an entity name that is not a valid JSON key is rejected", () => {
@@ -27,7 +27,7 @@ test("an entity name that is not a valid JSON key is rejected", () => {
 
 test("duplicate entity names are rejected", () => {
   const entity = { name: "total_amount", format: "decimal", description: "x" };
-  const error = validateSettingsDraft(draft({ entities: [entity, { ...entity }] }), "10");
+  const error = validateSettingsDraft(draft({ entities: [entity, { ...entity }] }));
 
   assert.match(error ?? "", /unique/);
 });
@@ -42,14 +42,5 @@ test("an entity without a description is rejected", () => {
 });
 
 test("an empty prompt is rejected", () => {
-  assert.match(validateSettingsDraft(draft({ system_prompt: "   " }), "10") ?? "", /Prompts/);
-});
-
-test("the page limit must be an integer inside the backend range", () => {
-  assert.equal(validateSettingsDraft(draft(), "1"), null);
-  assert.equal(validateSettingsDraft(draft(), "100"), null);
-  assert.match(validateSettingsDraft(draft(), "0") ?? "", /between 1 and 100/);
-  assert.match(validateSettingsDraft(draft(), "101") ?? "", /between 1 and 100/);
-  assert.match(validateSettingsDraft(draft(), "2.5") ?? "", /between 1 and 100/);
-  assert.match(validateSettingsDraft(draft(), "") ?? "", /between 1 and 100/);
+  assert.match(validateSettingsDraft(draft({ system_prompt: "   " })) ?? "", /Prompts/);
 });

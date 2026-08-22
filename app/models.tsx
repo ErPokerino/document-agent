@@ -6,21 +6,32 @@ import {
   Check,
   CheckCircle2,
   CircleDot,
+  Cloud,
   Cpu,
   Eye,
+  FilterX,
+  HardDrive,
   KeyRound,
   LoaderCircle,
   Power,
   RefreshCw,
   Save,
-  Scissors,
   Server,
   ShieldCheck,
-  Sparkles,
   Trash2,
+  Type,
 } from "lucide-react";
+import { useState } from "react";
 
 import { api } from "../lib/api";
+import { InfoHint } from "./info-hint";
+import {
+  filterModels,
+  sizeBuckets,
+  type RunsFilter,
+  type SizeFilter,
+  type VisionFilter,
+} from "../lib/model-filter";
 import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelRuntimeState } from "../lib/types";
 
 export const modelStateLabels: Record<ModelRuntimeState, string> = {
@@ -75,8 +86,6 @@ type Props = {
   setModelLoadReport: (report: ModelLoadResponse | null) => void;
   modelsRefreshing: boolean;
   isConnected: boolean;
-  pageLimitInput: string;
-  setPageLimitInput: (value: string) => void;
   processState: string;
 };
 
@@ -104,10 +113,19 @@ export function Models(props: Props) {
     setModelLoadReport,
     modelsRefreshing,
     isConnected,
-    pageLimitInput,
-    setPageLimitInput,
     processState,
   } = props;
+
+  const [runsFilter, setRunsFilter] = useState<RunsFilter>("any");
+  const [visionFilter, setVisionFilter] = useState<VisionFilter>("any");
+  const [sizeFilter, setSizeFilter] = useState<SizeFilter>("any");
+
+  const visibleModels = filterModels(models, {
+    runs: runsFilter,
+    vision: visionFilter,
+    size: sizeFilter,
+  });
+  const filtered = visibleModels.length !== models.length;
 
   const selectedDraftModel = models.find((model) => model.id === draftSettings.model);
   const selectedRuntimeState = selectedDraftModel?.runtime_state ?? "not_loaded";
@@ -136,19 +154,60 @@ export function Models(props: Props) {
       <div className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Cpu size={18} /></span>
-          <div><h3>Vision model</h3><p>Local models come from LM Studio, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
+          <div><h3>Extraction model<InfoHint text="A pipeline that renders page images needs a model that can see. One that reads OCR text does not, and a text-only model is usually faster and cheaper." /></h3><p>Local models come from LM Studio, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
           <span className="connection-badge"><RefreshCw className={modelsRefreshing ? "spin" : ""} size={12} /> Auto refresh</span>
         </div>
+
+        <div className="model-filters">
+          <label>
+            <span>Runs</span>
+            <select value={runsFilter} onChange={(event) => setRunsFilter(event.target.value as RunsFilter)}>
+              <option value="any">Anywhere</option>
+              <option value="local">On this machine</option>
+              <option value="api">Through an API</option>
+            </select>
+          </label>
+          <label>
+            <span>Reads</span>
+            <select value={visionFilter} onChange={(event) => setVisionFilter(event.target.value as VisionFilter)}>
+              <option value="any">Images or text</option>
+              <option value="vision">Page images</option>
+              <option value="text">Text only</option>
+            </select>
+          </label>
+          <label>
+            <span>On disk</span>
+            <select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value as SizeFilter)}>
+              {sizeBuckets.map((bucket) => (
+                <option key={bucket.value} value={bucket.value}>{bucket.label}</option>
+              ))}
+            </select>
+          </label>
+          {filtered && (
+            <button className="link-button" onClick={() => { setRunsFilter("any"); setVisionFilter("any"); setSizeFilter("any"); }}>
+              <FilterX size={13} /> Clear · {visibleModels.length} of {models.length}
+            </button>
+          )}
+        </div>
+
         <div className="model-list">
           {models.length === 0 ? (
-            <div className="models-empty"><AlertCircle size={18} /><span>No vision model detected. Make sure LM Studio is running.</span></div>
-          ) : models.map((model) => {
+            <div className="models-empty"><AlertCircle size={18} /><span>No model detected. Make sure LM Studio is running.</span></div>
+          ) : visibleModels.length === 0 ? (
+            <div className="models-empty"><FilterX size={18} /><span>No model matches these filters.</span></div>
+          ) : visibleModels.map((model) => {
             const selected = draftSettings?.model === model.id;
             return (
               <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id, provider: model.provider }); setModelLoadState("idle"); setModelLoadReport(null); }}>
-                <span className="radio">{selected && <span />}</span><span className="model-option-icon">{model.provider === "gemini" ? <Sparkles size={17} /> : <Eye size={17} />}</span>
+                <span className="radio">{selected && <span />}</span>
+                <span className={`model-option-icon ${model.provider === "gemini" ? "hosted" : "local"}`} title={model.provider === "gemini" ? "Runs on Google's servers" : "Runs on this machine"}>
+                  {model.provider === "gemini" ? <Cloud size={17} /> : <HardDrive size={17} />}
+                </span>
                 <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
                 <span className={`provider-tag ${model.provider}`}>{model.provider === "gemini" ? "Google API" : "Local"}</span>
+                <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
+                  {model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
+                </span>
                 <span className="model-specs">{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
               </button>
             );
@@ -287,20 +346,6 @@ export function Models(props: Props) {
           read from Google: published prices change, and Gemini 3.7 Flash is already scheduled to
           double on 1 January 2027. Thinking tokens are billed at the output rate.
         </p>
-      </div>
-
-      <div className="settings-card">
-        <div className="settings-card-heading">
-          <span className="settings-card-icon"><Scissors size={18} /></span>
-          <div><h3>Single-call limit</h3><p>Control how many initial pages can be sent together in one extraction request.</p></div>
-        </div>
-        <div className="limit-grid single">
-          <label className="limit-field" htmlFor="max-pages">
-            <span>Maximum pages per extraction</span>
-            <input id="max-pages" type="number" min="1" max="100" step="1" value={pageLimitInput} onChange={(event) => { const value = event.target.value; setPageLimitInput(value); const parsed = Number(value); if (/^\d+$/.test(value) && parsed >= 1 && parsed <= 100) setDraftSettings({ ...draftSettings, max_pages_to_analyze: parsed }); }} onBlur={() => { if (!/^\d+$/.test(pageLimitInput) || Number(pageLimitInput) < 1 || Number(pageLimitInput) > 100) setPageLimitInput(String(draftSettings.max_pages_to_analyze)); }} />
-            <small>The app always sends pages 1–N in one model call; it never merges independent page extractions.</small>
-          </label>
-        </div>
       </div>
 
       <div className="settings-actions sticky-actions">

@@ -53,7 +53,6 @@ def build_steps(
     *,
     prompts: PromptConfiguration,
     entities: list[EntityDefinition],
-    max_pages_to_analyze: int,
     max_pages: int | None = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
@@ -62,7 +61,7 @@ def build_steps(
         raise PipelineError(" ".join(problems))
 
     steps: list[Any] = [
-        InspectPdf(max_pages_to_analyze=max_pages_to_analyze, max_pages=max_pages)
+        InspectPdf(max_pages_to_analyze=definition.page_limit, max_pages=max_pages)
     ]
     for index, step in enumerate(definition.steps, start=1):
         try:

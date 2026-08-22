@@ -48,6 +48,10 @@ class SettingsStore:
     def _migrate_defaults(data: dict) -> dict:
         """Translate only untouched legacy defaults, preserving user customizations."""
         data.pop("input_token_budget", None)
+        # The page limit belongs to a pipeline now. app.services.migrations moves
+        # the value across at startup; this only stops the stale key from
+        # invalidating the whole file.
+        data.pop("max_pages_to_analyze", None)
         prompts = data.get("prompts")
         if not isinstance(prompts, dict):
             return data

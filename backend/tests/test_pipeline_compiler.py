@@ -12,13 +12,7 @@ PROMPTS = PromptConfiguration(entities=ENTITIES)
 
 
 def compile_it(definition: PipelineDefinition, **kwargs):
-    return build_steps(
-        definition,
-        prompts=PROMPTS,
-        entities=ENTITIES,
-        max_pages_to_analyze=kwargs.pop("max_pages_to_analyze", 3),
-        **kwargs,
-    )
+    return build_steps(definition, prompts=PROMPTS, entities=ENTITIES, **kwargs)
 
 
 def test_the_default_pipeline_compiles_to_inspect_render_extract() -> None:
@@ -27,10 +21,11 @@ def test_the_default_pipeline_compiles_to_inspect_render_extract() -> None:
     assert [type(step) for step in steps] == [InspectPdf, RenderPages, ExtractEntities]
 
 
-def test_the_page_limit_comes_from_the_settings_not_the_pipeline() -> None:
-    steps = compile_it(PipelineDefinition.default(), max_pages_to_analyze=7)
+def test_the_page_limit_comes_from_the_pipeline() -> None:
+    default = PipelineDefinition.default()
+    default.page_limit = 7
 
-    assert steps[0].max_pages_to_analyze == 7
+    assert compile_it(default)[0].max_pages_to_analyze == 7
 
 
 def test_the_render_scale_is_taken_from_the_step_configuration() -> None:

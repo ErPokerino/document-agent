@@ -28,8 +28,8 @@ def test_default_invoice_entities_are_present() -> None:
 
 def test_default_processing_limits_are_explicit() -> None:
     settings = AppSettings()
-    assert settings.max_pages_to_analyze == 10
     assert settings.excluded_model_ids == []
+    assert settings.theme == "system"
 
 
 def test_entity_names_must_be_unique() -> None:
@@ -402,7 +402,7 @@ async def test_large_standard_model_uses_low_memory_vision_profile(monkeypatch) 
     assert result["warmup_mode"] == "vision"
     assert result["load_ms"] == 1250
     assert cli_loads == ["target"]
-    assert warmup_options == {"include_schema": False}
+    assert warmup_options == {"include_schema": False, "include_image": True}
 
 
 @pytest.mark.asyncio
