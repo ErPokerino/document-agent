@@ -215,7 +215,7 @@ export type GeminiKeyStatus = {
 
 export type GeminiSettings = {
   api_key: string;
-  thinking_level: "minimal" | "low" | "medium" | "high";
+  thinking_level: "low" | "medium" | "high";
   pricing: Record<string, ModelPricing>;
   pricing_checked_on: string;
 };

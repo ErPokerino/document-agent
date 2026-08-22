@@ -20,15 +20,17 @@ import httpx
 
 from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, PromptConfiguration
 from app.services.field_validation import validate_result
+from app.services.lm_studio import DOCUMENT_TEXT_HEADER
 
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 REQUEST_TIMEOUT_SECONDS = 300
 CONFIDENCE_LEVELS = ["low", "medium", "high"]
-THINKING_LEVELS = ("minimal", "low", "medium", "high")
-
-
-from app.services.lm_studio import DOCUMENT_TEXT_HEADER
+# The API also defines MINIMAL, but gemini-3.7-flash answers
+# "Thinking level MINIMAL is not supported for this model", so offering it
+# would only produce a 400 on every document. Measured on 2026-08-22: low
+# spends about 60 thinking tokens on a small question, medium 190, high 230.
+THINKING_LEVELS = ("low", "medium", "high")
 
 
 class GeminiError(RuntimeError):
@@ -112,7 +114,7 @@ class GeminiClient:
 
     def _headers(self) -> dict[str, str]:
         if not self.api_key:
-            raise GeminiError("No Gemini API key is configured. Add one in Settings.")
+            raise GeminiError("No Gemini API key is configured. Add one in Models.")
         # Never the `?key=` query form: keys do not belong in URLs, which end up
         # in logs and in browser history.
         return {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}

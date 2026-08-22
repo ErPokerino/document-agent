@@ -307,14 +307,14 @@ export function Models(props: Props) {
           value={draftSettings.gemini.thinking_level}
           onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, thinking_level: event.target.value as AppSettings["gemini"]["thinking_level"] } })}
         >
-          <option value="minimal">Minimal</option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
         </select>
         <p className="field-help">
           Gemini 3 defaults to <code>high</code>, which an extraction rarely needs and always pays for.
-          Ignored by models without thinking, such as Flash Lite.
+          Thinking tokens are billed at the output rate. Ignored by models without thinking, such as
+          Flash Lite.
         </p>
 
         <p className="input-label prompt-label">Price per million tokens (USD)</p>

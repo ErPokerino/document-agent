@@ -80,3 +80,20 @@ def test_entity_without_a_description_does_not_break_the_store(tmp_path) -> None
     settings = SettingsStore(path).read()
 
     assert settings.model == AppSettings().model
+
+
+def test_a_thinking_level_no_model_accepts_is_migrated_rather_than_lost(tmp_path) -> None:
+    """The API knows MINIMAL; Gemini 3.7 Flash answers 400 for it.
+
+    A stored "minimal" would fail every extraction, and dropping the whole
+    settings file over one stale value would be worse.
+    """
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps({"model": "kept", "gemini": {"thinking_level": "minimal"}}), encoding="utf-8"
+    )
+
+    settings = SettingsStore(path).read()
+
+    assert settings.gemini.thinking_level == "low"
+    assert settings.model == "kept"

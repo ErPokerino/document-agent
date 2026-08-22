@@ -167,7 +167,7 @@ class GeminiSettings(BaseModel):
 
     # Write-only over HTTP: the API masks it on the way out.
     api_key: str = ""
-    thinking_level: Literal["minimal", "low", "medium", "high"] = "low"
+    thinking_level: Literal["low", "medium", "high"] = "low"
     pricing: dict[str, ModelPricing] = Field(default_factory=default_gemini_pricing)
     pricing_checked_on: str = "2026-08-21"
 

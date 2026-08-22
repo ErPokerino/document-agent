@@ -52,6 +52,10 @@ class SettingsStore:
         # the value across at startup; this only stops the stale key from
         # invalidating the whole file.
         data.pop("max_pages_to_analyze", None)
+        # No model we support accepts MINIMAL; keeping it would fail every call.
+        gemini = data.get("gemini")
+        if isinstance(gemini, dict) and gemini.get("thinking_level") == "minimal":
+            gemini["thinking_level"] = "low"
         prompts = data.get("prompts")
         if not isinstance(prompts, dict):
             return data
