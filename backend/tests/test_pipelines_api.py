@@ -151,7 +151,7 @@ def test_the_selected_pipeline_is_what_actually_runs(api, monkeypatch, tmp_path)
         def __init__(self, base_url: str) -> None:
             pass
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             return {"document_number": FieldExtraction(value="FE02 - 28569", confidence="high")}
 
     monkeypatch.setattr(step_module, "LMStudioClient", FakeExtraction)

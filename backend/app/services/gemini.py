@@ -28,6 +28,9 @@ CONFIDENCE_LEVELS = ["low", "medium", "high"]
 THINKING_LEVELS = ("minimal", "low", "medium", "high")
 
 
+from app.services.lm_studio import DOCUMENT_TEXT_HEADER
+
+
 class GeminiError(RuntimeError):
     pass
 
@@ -136,6 +139,7 @@ class GeminiClient:
         page_range: str,
         total_pages: int,
         processed_pages: int,
+        document_text: str = "",
     ) -> dict[str, FieldExtraction]:
         headers = self._headers()
         page_note = (
@@ -145,8 +149,10 @@ class GeminiClient:
             if processed_pages < total_pages
             else "All pages of the document are supplied."
         )
-        user_text = prompts.user_prompt.replace("{page_range}", page_range).strip()
-        parts: list[dict[str, Any]] = [{"text": f"{user_text}\n\n{page_note}"}]
+        user_text = f"{prompts.user_prompt.replace('{page_range}', page_range).strip()}\n\n{page_note}"
+        if document_text.strip():
+            user_text = f"{user_text}\n\n{DOCUMENT_TEXT_HEADER}\n\n{document_text.strip()}"
+        parts: list[dict[str, Any]] = [{"text": user_text}]
         parts.extend(
             {"inlineData": {"mimeType": "image/png", "data": image}} for image in images
         )

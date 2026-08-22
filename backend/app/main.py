@@ -5,6 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+import pymupdf
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,6 +23,7 @@ from app.domain.models import (
     ExtractionResponse,
     ExtractionRun,
     ExtractionRunDetail,
+    GcpKeyStatus,
     GeminiKeyStatus,
     HealthStatus,
     LabelsRequest,
@@ -51,6 +53,7 @@ from app.pipeline.definition import (
 )
 from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.store import InvalidPipelineName, PipelineStore, UnknownPipeline
+from app.services.document_ai import DocumentAiClient, DocumentAiError, ServiceAccount
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
 from app.services.lm_studio import LMStudioClient, LMStudioError
 from app.services.run_store import RunStore
@@ -64,6 +67,8 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 DATABASE_PATH = DATA_DIR / "docuflow.db"
 DATASETS_PATH = DATA_DIR / "datasets"
 PIPELINES_PATH = DATA_DIR / "pipelines"
+# One fixed location, so the instructions in Settings can name a real path.
+GCP_CREDENTIALS_PATH = DATA_DIR / "gcp-service-account.json"
 
 app = FastAPI(title="DocuFlow API", version="0.1.0")
 app.add_middleware(
@@ -216,6 +221,9 @@ def _pipeline_context(settings: AppSettings, filename: str, content: bytes) -> P
         provider=settings.provider,
         gemini_api_key=settings.gemini.api_key,
         gemini_thinking_level=settings.gemini.thinking_level,
+        gcp_credentials_path=str(GCP_CREDENTIALS_PATH),
+        gcp_project_id=settings.gcp.project_id,
+        gcp_location=settings.gcp.location,
     )
 
 
@@ -495,6 +503,7 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
                 _selected_pipeline(settings),
                 prompts=settings.prompts,
                 entities=settings.prompts.entities,
+                gcp=settings.gcp,
             )
         )
     except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
@@ -601,6 +610,8 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "average_elapsed_ms",
                 "prompt_tokens",
                 "completion_tokens",
+                "ocr_pages",
+                "layout_pages",
             )
         },
         metrics=_metrics_model(detail.metrics),
@@ -636,9 +647,75 @@ def _refuse_unusable(definition: PipelineDefinition) -> None:
             definition,
             prompts=settings.prompts,
             entities=settings.prompts.entities,
+            gcp=settings.gcp,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _gcp_status(settings: AppSettings) -> GcpKeyStatus:
+    try:
+        account = ServiceAccount.load(GCP_CREDENTIALS_PATH)
+    except DocumentAiError as exc:
+        return GcpKeyStatus(configured=False, path=str(GCP_CREDENTIALS_PATH), problem=str(exc))
+    return GcpKeyStatus(
+        configured=True,
+        path=str(GCP_CREDENTIALS_PATH),
+        client_email=account.client_email,
+        project_id=settings.gcp.project_id or account.project_id,
+    )
+
+
+@app.get("/api/settings/gcp", response_model=GcpKeyStatus)
+async def gcp_key_status() -> GcpKeyStatus:
+    """What the backend can say about the key file, and never its contents."""
+    return _gcp_status(settings_store.read())
+
+
+@app.post("/api/settings/gcp/verify", response_model=GcpKeyStatus)
+async def verify_gcp_key() -> GcpKeyStatus:
+    """Send one blank page to each configured processor and report who answered.
+
+    A real call, because a key that parses is not a key that is allowed to use
+    these processors. It costs one page per processor.
+    """
+    settings = settings_store.read()
+    status = _gcp_status(settings)
+    if not status.configured:
+        return status
+
+    client = DocumentAiClient(
+        GCP_CREDENTIALS_PATH, settings.gcp.project_id, settings.gcp.location
+    )
+    configured = [
+        ("OCR", settings.gcp.ocr_processor_id),
+        ("Layout Parser", settings.gcp.layout_processor_id),
+    ]
+    verified: list[str] = []
+    problems: list[str] = []
+    probe = _blank_page_pdf()
+    for label, processor_id in configured:
+        if not processor_id.strip():
+            problems.append(f"No {label} processor id is configured.")
+            continue
+        try:
+            await client.process(processor_id, probe)
+            verified.append(processor_id)
+        except DocumentAiError as exc:
+            problems.append(str(exc))
+
+    return status.model_copy(
+        update={"verified_processors": verified, "problem": " ".join(problems)}
+    )
+
+
+def _blank_page_pdf() -> bytes:
+    document = pymupdf.open()
+    document.new_page().insert_text((72, 72), "DocuFlow connection check")
+    try:
+        return document.tobytes()
+    finally:
+        document.close()
 
 
 @app.get("/api/pipelines/steps", response_model=list[StepCatalogueEntry])
@@ -1110,6 +1187,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
             definition,
             prompts=detail.prompts,
             entities=detail.prompts.entities,
+            gcp=settings.gcp,
         )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(

@@ -31,6 +31,8 @@ def detail(documents) -> EvaluationDetail:
         average_elapsed_ms=1000,
         prompt_tokens=0,
         completion_tokens=0,
+        ocr_pages=0,
+        layout_pages=0,
         metrics=EvaluationMetrics(),
         prompts=PromptConfiguration(),
         documents=documents,

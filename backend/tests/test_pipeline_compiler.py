@@ -1,6 +1,12 @@
 import pytest
 
-from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, PromptConfiguration
+from app.domain.models import (
+    EntityDefinition,
+    EntityFormat,
+    FieldExtraction,
+    GcpSettings,
+    PromptConfiguration,
+)
 from app.pipeline.compiler import PipelineError, build_steps
 from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.pipeline.engine import DocumentPipeline, PipelineContext
@@ -101,7 +107,7 @@ async def test_the_compiled_default_pipeline_extracts_a_document(monkeypatch, tm
         def __init__(self, base_url: str) -> None:
             pass
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             assert images, "the render step must have produced page images"
             return {"document_number": FieldExtraction(value="INV 7", confidence="high")}
 
@@ -131,3 +137,61 @@ async def test_the_compiled_default_pipeline_extracts_a_document(monkeypatch, tm
 
     # The rule ran after the model, on what the model returned.
     assert result.artifacts["extraction"]["document_number"].value == "INV-7"
+
+
+GCP = GcpSettings(
+    project_id="a-project",
+    location="eu",
+    ocr_processor_id="ocr-id",
+    layout_processor_id="layout-id",
+)
+
+
+def test_the_readers_are_built_with_the_processor_their_kind_names() -> None:
+    definition = PipelineDefinition(
+        name="ocr and layout",
+        steps=[
+            PipelineStep(kind=StepKind.document_ai_ocr),
+            PipelineStep(kind=StepKind.document_ai_layout),
+            PipelineStep(kind=StepKind.llm_extract),
+        ],
+    )
+
+    steps = build_steps(definition, prompts=PROMPTS, entities=ENTITIES, gcp=GCP)
+
+    assert [step.processor_id for step in steps[1:3]] == ["ocr-id", "layout-id"]
+
+
+def test_a_step_may_name_its_own_processor() -> None:
+    definition = PipelineDefinition(
+        name="another processor",
+        steps=[
+            PipelineStep(kind=StepKind.document_ai_ocr, config={"processor_id": "special"}),
+            PipelineStep(kind=StepKind.llm_extract),
+        ],
+    )
+
+    assert build_steps(definition, prompts=PROMPTS, entities=ENTITIES, gcp=GCP)[1].processor_id == "special"
+
+
+@pytest.mark.asyncio
+async def test_the_text_a_reader_produced_reaches_the_model(monkeypatch) -> None:
+    from app.pipeline import steps as step_module
+
+    seen: dict[str, str] = {}
+
+    class FakeClient:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
+            seen["text"] = document_text
+            return {"document_number": FieldExtraction(value="INV-7", confidence="high")}
+
+    monkeypatch.setattr(step_module, "LMStudioClient", FakeClient)
+
+    context = PipelineContext(filename="a.pdf", content=b"", model="m", lm_studio_url="http://x")
+    context.artifacts.update({"page_count": 1, "processed_pages": 1, "text": "ACME LTD"})
+    await step_module.ExtractEntities(PROMPTS).run(context)
+
+    assert seen["text"] == "ACME LTD"

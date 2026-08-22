@@ -39,7 +39,7 @@ def fake_client(returns):
         def __init__(self, base_url: str) -> None:
             pass
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             FakeClient.calls += 1
             value = returns(FakeClient.calls)
             if isinstance(value, Exception):
@@ -168,7 +168,7 @@ async def test_the_token_usage_of_each_document_reaches_the_store(workspace, mon
         def __init__(self, base_url: str) -> None:
             self.last_prediction_stats = {"prompt_tokens": 1500, "completion_tokens": 90}
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             return {"currency": FieldExtraction(value="EUR", confidence="high")}
 
     monkeypatch.setattr("app.pipeline.steps.LMStudioClient", CountingClient)

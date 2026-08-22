@@ -383,3 +383,26 @@ def test_a_run_from_before_pipelines_existed_reads_as_the_default(tmp_path) -> N
         connection.execute("UPDATE evaluations SET pipeline = NULL WHERE id = ?", (evaluation_id,))
 
     assert EvaluationStore(path).get_evaluation(evaluation_id).pipeline == PipelineDefinition.default().name
+
+
+def test_pages_sent_to_document_ai_are_recorded_and_totalled(store) -> None:
+    evaluation_id = start(store, total=2)
+
+    store.record_document(
+        evaluation_id, "a.pdf", outcomes("EUR", 1.0), 100, ocr_pages=2, layout_pages=2
+    )
+    store.record_document(
+        evaluation_id, "b.pdf", outcomes("EUR", 1.0), 100, ocr_pages=3, layout_pages=0
+    )
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.ocr_pages == 5
+    assert detail.layout_pages == 2
+    assert detail.documents[0].ocr_pages == 2
+
+
+def test_a_run_that_never_touched_document_ai_counts_no_pages(store) -> None:
+    evaluation_id = start(store, total=1)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 1.0), 100)
+
+    assert store.get_evaluation(evaluation_id).ocr_pages == 0

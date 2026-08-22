@@ -26,6 +26,13 @@ from app.domain.models import (
 )
 
 
+# Prefixed to the text an OCR or layout step produced, so the model knows
+# where it came from and that it may trust it over its own reading.
+DOCUMENT_TEXT_HEADER = (
+    "A previous step read the document. Use this text as the source of truth for anything it contains:"
+)
+
+
 class LMStudioError(RuntimeError):
     pass
 
@@ -467,6 +474,7 @@ class LMStudioClient:
         page_range: str,
         total_pages: int,
         processed_pages: int,
+        document_text: str = "",
     ) -> dict[str, FieldExtraction]:
         page_note = (
             f"Only the first {processed_pages} of {total_pages} pages are supplied. "
@@ -477,6 +485,8 @@ class LMStudioClient:
         )
         user_text = prompts.user_prompt.replace("{page_range}", page_range)
         user_text = f"{user_text.strip()}\n\n{page_note}"
+        if document_text.strip():
+            user_text = f"{user_text}\n\n{DOCUMENT_TEXT_HEADER}\n\n{document_text.strip()}"
         content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
         content.extend(
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image}"}}

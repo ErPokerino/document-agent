@@ -11,6 +11,9 @@ class PipelineContext:
     provider: str = "lm_studio"
     gemini_api_key: str = ""
     gemini_thinking_level: str = "low"
+    gcp_credentials_path: str = ""
+    gcp_project_id: str = ""
+    gcp_location: str = "eu"
     artifacts: dict[str, Any] = field(default_factory=dict)
 
 

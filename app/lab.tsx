@@ -26,7 +26,7 @@ import { useEffect, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
 import { InfoHint } from "./info-hint";
-import { estimateCost, formatUsd } from "../lib/cost";
+import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import {
@@ -68,10 +68,15 @@ export function Lab({ draftSettings, isModelReady }: Props) {
   );
 
   function runCost(evaluation: Evaluation): number | null {
-    return estimateCost(
-      evaluation.prompt_tokens,
-      evaluation.completion_tokens,
+    return totalCost(
+      {
+        promptTokens: evaluation.prompt_tokens,
+        completionTokens: evaluation.completion_tokens,
+        ocrPages: evaluation.ocr_pages,
+        layoutPages: evaluation.layout_pages,
+      },
       draftSettings.gemini.pricing[evaluation.model],
+      draftSettings.gcp,
     );
   }
 
@@ -354,8 +359,15 @@ export function Lab({ draftSettings, isModelReady }: Props) {
             {openEvaluation.prompt_tokens.toLocaleString()} in / {openEvaluation.completion_tokens.toLocaleString()} out tokens
           </span>
         )}
+        {openEvaluation.ocr_pages + openEvaluation.layout_pages > 0 && (
+          <span className="pages-tag">
+            {openEvaluation.ocr_pages > 0 && `${openEvaluation.ocr_pages} OCR`}
+            {openEvaluation.ocr_pages > 0 && openEvaluation.layout_pages > 0 && " / "}
+            {openEvaluation.layout_pages > 0 && `${openEvaluation.layout_pages} layout`} pages
+          </span>
+        )}
         {runCost(openEvaluation) !== null && (
-          <span className="cost-tag" title="Derived from the token counts and the rate configured in Settings, not from what Google billed">
+          <span className="cost-tag" title="Derived from the token and page counts and the rates configured in Models, not from what Google billed">
             {formatUsd(runCost(openEvaluation))}
           </span>
         )}

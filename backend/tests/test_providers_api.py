@@ -198,7 +198,7 @@ class FakeGemini:
     def __init__(self, api_key, thinking_level="low") -> None:
         self.last_prediction_stats = FakeGemini.stats
 
-    async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+    async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
         return {entity.name: FieldExtraction(value=None, confidence="low") for entity in prompts.entities}
 
 

@@ -77,7 +77,7 @@ async def test_extraction_uses_one_call_for_all_processed_pages(monkeypatch) -> 
         def __init__(self, base_url: str) -> None:
             self.base_url = base_url
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             calls.append(
                 {
                     "model": model,
@@ -142,7 +142,7 @@ async def test_a_document_within_the_image_budget_is_rendered(monkeypatch) -> No
         def __init__(self, base_url: str) -> None:
             pass
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             return {entity.name: FieldExtraction(value=None, confidence="low") for entity in prompts.entities}
 
     monkeypatch.setattr(steps, "MAX_TOTAL_IMAGE_BYTES", 64 * 1024 * 1024)

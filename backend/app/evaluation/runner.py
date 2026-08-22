@@ -79,6 +79,7 @@ async def run_evaluation(
 
             # The extraction step leaves whatever the provider reported here.
             stats = result.artifacts.get("inference_stats") or {}
+            pages = result.artifacts.get("document_ai_pages") or {}
             evaluations.record_document(
                 evaluation_id,
                 name,
@@ -86,6 +87,8 @@ async def run_evaluation(
                 elapsed_ms,
                 prompt_tokens=stats.get("prompt_tokens"),
                 completion_tokens=stats.get("completion_tokens"),
+                ocr_pages=pages.get("document_ai_ocr"),
+                layout_pages=pages.get("document_ai_layout"),
             )
             if run_store is not None:
                 run_store.record_run(

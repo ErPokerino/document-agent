@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { estimateCost, formatUsd } from "../lib/cost.ts";
+import { documentAiCost, estimateCost, formatUsd, totalCost } from "../lib/cost.ts";
 
 const rate = { input_per_million: 0.3, output_per_million: 2.5 };
 
@@ -47,4 +47,31 @@ test("larger amounts read as ordinary money", () => {
 
 test("no value formats as a dash, never as zero", () => {
   assert.equal(formatUsd(null), "—");
+});
+
+test("pages sent to Document AI are priced per thousand", () => {
+  const gcp = { ocr_per_thousand_pages: 1.5, layout_per_thousand_pages: 10 };
+
+  assert.equal(documentAiCost(1000, 0, gcp), 1.5);
+  assert.equal(documentAiCost(0, 100, gcp), 1);
+  assert.equal(documentAiCost(10, 10, gcp), 0.015 + 0.1);
+});
+
+test("a run that touched no processor costs nothing to say", () => {
+  assert.equal(documentAiCost(0, 0, { ocr_per_thousand_pages: 1.5, layout_per_thousand_pages: 10 }), null);
+});
+
+test("a missing rate is not the same as free", () => {
+  assert.equal(documentAiCost(10, 0, { ocr_per_thousand_pages: null, layout_per_thousand_pages: 10 }), null);
+  assert.equal(documentAiCost(10, 0, null), null);
+});
+
+test("the total adds what the model cost to what the pages cost", () => {
+  const pricing = { input_per_million: 1, output_per_million: 2 };
+  const gcp = { ocr_per_thousand_pages: 1.5, layout_per_thousand_pages: 10 };
+
+  assert.equal(totalCost({ promptTokens: 1_000_000, completionTokens: 0, ocrPages: 1000, layoutPages: 0 }, pricing, gcp), 2.5);
+  // Only one of the two known: the total is still what is known, not null.
+  assert.equal(totalCost({ promptTokens: 0, completionTokens: 0, ocrPages: 1000, layoutPages: 0 }, null, gcp), 1.5);
+  assert.equal(totalCost({ promptTokens: 0, completionTokens: 0, ocrPages: 0, layoutPages: 0 }, pricing, gcp), null);
 });

@@ -78,6 +78,14 @@ test("a step is summarized by what it does, not by its kind", () => {
   assert.match(summarizeStep({ kind: "llm_extract", config: {} }), /model/i);
 });
 
+test("every kind of step describes itself, not the one after it", () => {
+  // A step with no case of its own used to fall through and describe rules
+  // it does not have.
+  assert.match(summarizeStep({ kind: "document_ai_ocr", config: {} }), /OCR/i);
+  assert.match(summarizeStep({ kind: "document_ai_layout", config: {} }), /layout/i);
+  assert.doesNotMatch(summarizeStep({ kind: "document_ai_ocr", config: {} }), /rule/i);
+});
+
 test("step labels come from the catalogue, and fall back to the raw kind", () => {
   const catalogue = [{ kind: "render_pages", label: "Render pages" }];
 

@@ -5,6 +5,12 @@ import pymupdf
 from app.domain.models import PromptConfiguration
 from app.pipeline.engine import PipelineContext
 from app.pipeline.regex_refine import apply_rules
+from app.services.document_ai import (
+    DocumentAiClient,
+    DocumentAiError,
+    markdown_from_layout,
+    text_from_ocr,
+)
 from app.services.gemini import GeminiClient
 from app.services.lm_studio import LMStudioClient
 
@@ -112,6 +118,7 @@ class ExtractEntities:
         page_count: int = context.artifacts["page_count"]
         processed_pages: int = context.artifacts["processed_pages"]
         images: list[str] = context.artifacts.get("images") or []
+        document_text: str = context.artifacts.get("text") or ""
 
         client = build_extraction_client(context)
         page_range = "1" if processed_pages == 1 else f"1-{processed_pages}"
@@ -122,6 +129,7 @@ class ExtractEntities:
             page_range,
             total_pages=page_count,
             processed_pages=processed_pages,
+            document_text=document_text,
         )
         context.artifacts["inference_stats"] = getattr(client, "last_prediction_stats", None) or {}
 
@@ -158,3 +166,62 @@ class ExtractConfiguredEntities:
     async def run(self, context: PipelineContext) -> None:
         await self.render.run(context)
         await self.extract.run(context)
+
+
+class ReadWithDocumentAi:
+    """Have Google read the document, and leave what it read behind.
+
+    Both processors are the same request with a different id, so they are the
+    same step: OCR leaves plain text, the Layout Parser leaves markdown that
+    keeps the headings and tables, plus the raw structure for anything later.
+    """
+
+    def __init__(self, kind: str, processor_id: str) -> None:
+        self.kind = kind
+        self.processor_id = processor_id
+
+    def _client(self, context: PipelineContext) -> DocumentAiClient:
+        return DocumentAiClient(
+            context.gcp_credentials_path, context.gcp_project_id, context.gcp_location
+        )
+
+    async def run(self, context: PipelineContext) -> None:
+        if not self.processor_id.strip():
+            raise DocumentAiError(
+                f"No processor id is configured for {self.kind.replace('_', ' ')}. "
+                "Add it in Settings."
+            )
+        processed_pages: int = context.artifacts["processed_pages"]
+        # Document AI charges per page, so the pipeline's page limit has to be
+        # applied before the document leaves this machine, not after.
+        content = _first_pages(context.content, processed_pages)
+
+        answer = await self._client(context).process(self.processor_id, content)
+        document = answer.get("document") or {}
+
+        if self.kind == "document_ai_layout":
+            layout = document.get("documentLayout") or {}
+            context.artifacts["layout"] = layout
+            context.artifacts["text"] = markdown_from_layout(layout)
+        else:
+            context.artifacts["text"] = text_from_ocr(document)
+
+        counted = dict(context.artifacts.get("document_ai_pages") or {})
+        counted[self.kind] = counted.get(self.kind, 0) + processed_pages
+        context.artifacts["document_ai_pages"] = counted
+
+
+def _first_pages(content: bytes, pages: int) -> bytes:
+    """A copy of the PDF holding only the first `pages` pages."""
+    source = pymupdf.open(stream=content, filetype="pdf")
+    try:
+        if pages >= source.page_count:
+            return content
+        trimmed = pymupdf.open()
+        try:
+            trimmed.insert_pdf(source, from_page=0, to_page=pages - 1)
+            return trimmed.tobytes()
+        finally:
+            trimmed.close()
+    finally:
+        source.close()

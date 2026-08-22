@@ -26,6 +26,8 @@ export const DEFAULT_RENDER_SCALE = 1.35;
 export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
   if (kind === "render_pages") return { scale: DEFAULT_RENDER_SCALE };
   if (kind === "regex_refine") return { rules: [] };
+  // A Document AI step takes its processor from Settings unless it is told
+  // otherwise, so it starts with nothing of its own.
   return {};
 }
 
@@ -68,9 +70,14 @@ export function summarizeStep(step: PipelineStep): string {
     const scale = Number((step.config as { scale?: number }).scale ?? DEFAULT_RENDER_SCALE);
     return `Page images at ${scale}× zoom`;
   }
+  if (step.kind === "document_ai_ocr") return "OCR text from Document AI";
+  if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
   if (step.kind === "llm_extract") return "One call to the configured model";
-  const count = rulesOf(step).length;
-  return count === 1 ? "1 rule" : `${count} rules`;
+  if (step.kind === "regex_refine") {
+    const count = rulesOf(step).length;
+    return count === 1 ? "1 rule" : `${count} rules`;
+  }
+  return step.kind;
 }
 
 /** The human names of a pipeline's steps, for showing the shape of a run. */

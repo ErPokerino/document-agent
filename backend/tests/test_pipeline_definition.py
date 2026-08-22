@@ -130,3 +130,37 @@ def test_a_pipeline_that_only_sends_text_does_not_need_a_vision_model() -> None:
     )
     # Nothing produces images before the model call, so a text model is enough.
     assert requires_vision(text_only) is False
+
+
+def ocr(**config) -> PipelineStep:
+    return PipelineStep(kind=StepKind.document_ai_ocr, config=config)
+
+
+def layout(**config) -> PipelineStep:
+    return PipelineStep(kind=StepKind.document_ai_layout, config=config)
+
+
+def test_ocr_reads_the_pdf_and_leaves_text_behind() -> None:
+    contract = contract_for(StepKind.document_ai_ocr)
+
+    assert contract.requires_all == (Artifact.pdf,)
+    assert contract.produces == (Artifact.text,)
+
+
+def test_the_layout_parser_leaves_the_structure_as_well_as_the_text() -> None:
+    contract = contract_for(StepKind.document_ai_layout)
+
+    assert contract.produces == (Artifact.text, Artifact.layout)
+
+
+def test_ocr_before_the_model_is_a_pipeline_that_can_run() -> None:
+    assert describe_problems(pipeline(ocr(), extract(), name="ocr first")) == []
+
+
+def test_a_pipeline_that_reads_text_does_not_need_a_vision_model() -> None:
+    assert requires_vision(pipeline(layout(), extract(), name="layout first")) is False
+
+
+def test_a_pipeline_that_renders_and_ocrs_still_needs_vision() -> None:
+    # Both artifacts are there, and the model is handed the images.
+    assert requires_vision(pipeline(ocr(), render(), extract(), name="both")) is True

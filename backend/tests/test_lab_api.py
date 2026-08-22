@@ -295,7 +295,7 @@ def test_draft_labels_are_proposed_by_the_model_and_not_saved(api, monkeypatch) 
         def __init__(self, base_url: str) -> None:
             pass
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             return {
                 "currency": FieldExtraction(value="EUR", confidence="high"),
                 "total_amount": FieldExtraction(value=125.31, confidence="low"),
@@ -446,7 +446,7 @@ def test_retrying_reprocesses_only_the_documents_that_did_not_succeed(api, monke
         def __init__(self, base_url: str) -> None:
             pass
 
-        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
             return {"currency": FieldExtraction(value="EUR", confidence="high")}
 
     monkeypatch.setattr("app.pipeline.steps.LMStudioClient", Recovered)

@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS evaluation_documents (
     error             TEXT,
     elapsed_ms        INTEGER,
     prompt_tokens     INTEGER,
+    ocr_pages         INTEGER,
+    layout_pages      INTEGER,
     completion_tokens INTEGER,
     PRIMARY KEY (evaluation_id, document)
 );
@@ -79,6 +81,8 @@ class EvaluationDocument:
     items: list[EvaluationItem]
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    ocr_pages: int | None = None
+    layout_pages: int | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +107,9 @@ class EvaluationSummary:
     # derived at display time and a rate change carries history with it.
     prompt_tokens: int
     completion_tokens: int
+    # Pages sent to Document AI, which is billed per page rather than per token.
+    ocr_pages: int
+    layout_pages: int
     metrics: EvaluationMetrics
 
 
@@ -147,7 +154,7 @@ class EvaluationStore:
         document_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
         }
-        for column in ("prompt_tokens", "completion_tokens"):
+        for column in ("prompt_tokens", "completion_tokens", "ocr_pages", "layout_pages"):
             if column not in document_columns:
                 connection.execute(
                     f"ALTER TABLE evaluation_documents ADD COLUMN {column} INTEGER"
@@ -259,21 +266,34 @@ class EvaluationStore:
         elapsed_ms: int,
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
+        ocr_pages: int | None = None,
+        layout_pages: int | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO evaluation_documents
-                    (evaluation_id, document, status, elapsed_ms, prompt_tokens, completion_tokens)
-                VALUES (?, ?, 'ok', ?, ?, ?)
+                    (evaluation_id, document, status, elapsed_ms, prompt_tokens,
+                     completion_tokens, ocr_pages, layout_pages)
+                VALUES (?, ?, 'ok', ?, ?, ?, ?, ?)
                 ON CONFLICT(evaluation_id, document) DO UPDATE SET
                     status = 'ok',
                     elapsed_ms = excluded.elapsed_ms,
                     prompt_tokens = excluded.prompt_tokens,
                     completion_tokens = excluded.completion_tokens,
+                    ocr_pages = excluded.ocr_pages,
+                    layout_pages = excluded.layout_pages,
                     error = NULL
                 """,
-                (evaluation_id, document, elapsed_ms, prompt_tokens, completion_tokens),
+                (
+                    evaluation_id,
+                    document,
+                    elapsed_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    ocr_pages,
+                    layout_pages,
+                ),
             )
             connection.executemany(
                 """
@@ -386,6 +406,8 @@ class EvaluationStore:
                     items=by_document.get(document["document"], []),
                     prompt_tokens=document["prompt_tokens"],
                     completion_tokens=document["completion_tokens"],
+                    ocr_pages=document["ocr_pages"],
+                    layout_pages=document["layout_pages"],
                 )
                 for document in documents
             ],
@@ -401,7 +423,9 @@ class EvaluationStore:
                    COALESCE(SUM(elapsed_ms), 0) AS total_ms,
                    AVG(elapsed_ms) AS average_ms,
                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                   COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+                   COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                   COALESCE(SUM(ocr_pages), 0) AS ocr_pages,
+                   COALESCE(SUM(layout_pages), 0) AS layout_pages
             FROM evaluation_documents WHERE evaluation_id = ?
             """,
             (row["id"],),
@@ -440,5 +464,7 @@ class EvaluationStore:
             average_elapsed_ms=round(progress["average_ms"]) if progress["average_ms"] else None,
             prompt_tokens=int(progress["prompt_tokens"] or 0),
             completion_tokens=int(progress["completion_tokens"] or 0),
+            ocr_pages=int(progress["ocr_pages"] or 0),
+            layout_pages=int(progress["layout_pages"] or 0),
             metrics=aggregate(outcomes),
         )

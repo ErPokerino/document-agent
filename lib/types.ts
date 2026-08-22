@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
 
-export type StepKind = "render_pages" | "llm_extract" | "regex_refine";
+export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "llm_extract" | "regex_refine";
 
 export type Confidence = FieldExtraction["confidence"];
 
@@ -17,6 +17,7 @@ export type AppSettings = {
   model: string;
   excluded_model_ids: string[];
   gemini: GeminiSettings;
+  gcp: GcpSettings;
   lm_studio_url: string;
   pipeline: string;
   theme: "system" | "light" | "dark";
@@ -85,6 +86,8 @@ export type Evaluation = {
   average_elapsed_ms: number | null;
   prompt_tokens: number;
   completion_tokens: number;
+  ocr_pages: number;
+  layout_pages: number;
   metrics: Metrics;
 };
 
@@ -107,6 +110,8 @@ export type EvaluationDetail = {
   average_elapsed_ms: number | null;
   prompt_tokens: number;
   completion_tokens: number;
+  ocr_pages: number;
+  layout_pages: number;
   metrics: Metrics;
   prompts: PromptConfiguration;
   documents: EvaluationDocumentResult[];
@@ -183,6 +188,25 @@ export type FieldExtraction = {
   warning: string | null;
 };
 
+export type GcpKeyStatus = {
+  configured: boolean;
+  path: string;
+  client_email: string;
+  project_id: string;
+  problem: string;
+  verified_processors: string[];
+};
+
+export type GcpSettings = {
+  project_id: string;
+  location: string;
+  ocr_processor_id: string;
+  layout_processor_id: string;
+  ocr_per_thousand_pages: number | null;
+  layout_per_thousand_pages: number | null;
+  pricing_checked_on: string;
+};
+
 export type GeminiKeyStatus = {
   configured: boolean;
   hint: string;
@@ -251,7 +275,7 @@ export type ModelLoadResponse = {
   profile: "default" | "compatibility";
   already_loaded: boolean;
   already_ready: boolean;
-  warmup_mode: "vision" | "vision_and_schema";
+  warmup_mode: "vision" | "schema" | "vision_and_schema";
   preparation_attempts: number;
 };
 

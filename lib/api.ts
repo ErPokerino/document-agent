@@ -8,6 +8,7 @@ import type {
   EvaluationDetail,
   ExtractionResponse,
   ExtractionRun,
+  GcpKeyStatus,
   GeminiKeyStatus,
   HealthStatus,
   ModelInfo,
@@ -67,6 +68,8 @@ export const api = {
   geminiKeyStatus: () => request<GeminiKeyStatus>("/api/settings/gemini"),
   verifyGeminiKey: () => request<GeminiKeyStatus>("/api/settings/gemini/verify", { method: "POST" }),
   clearGeminiKey: () => request<void>("/api/settings/gemini", { method: "DELETE" }),
+  gcpKeyStatus: () => request<GcpKeyStatus>("/api/settings/gcp"),
+  verifyGcpKey: () => request<GcpKeyStatus>("/api/settings/gcp/verify", { method: "POST" }),
 
   runs: (validatedOnly = false) =>
     request<ExtractionRun[]>(`/api/runs?validated_only=${validatedOnly}`),

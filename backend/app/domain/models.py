@@ -136,7 +136,7 @@ class ModelLoadResponse(BaseModel):
     profile: Literal["default", "compatibility"]
     already_loaded: bool = False
     already_ready: bool = False
-    warmup_mode: Literal["vision", "vision_and_schema"]
+    warmup_mode: Literal["vision", "schema", "vision_and_schema"]
     preparation_attempts: int = 0
 
 
@@ -172,6 +172,25 @@ class GeminiSettings(BaseModel):
     pricing_checked_on: str = "2026-08-21"
 
 
+class GcpSettings(BaseModel):
+    """Where Document AI lives and which processors to call.
+
+    No credentials here: the key is a file on disk, and nothing about it is
+    ever sent to the browser.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = ""
+    location: str = "eu"
+    ocr_processor_id: str = ""
+    layout_processor_id: str = ""
+    # USD per 1000 pages, editable for the same reason the Gemini rates are.
+    ocr_per_thousand_pages: float | None = 1.5
+    layout_per_thousand_pages: float | None = 10.0
+    pricing_checked_on: str = "2026-08-22"
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -179,6 +198,7 @@ class AppSettings(BaseModel):
     model: str = "qwen/qwen3.8-27b"
     excluded_model_ids: list[str] = Field(default_factory=list)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    gcp: GcpSettings = Field(default_factory=GcpSettings)
     lm_studio_url: str = "http://127.0.0.1:1234"
     pipeline: str = DEFAULT_PIPELINE_NAME
     theme: Literal["system", "light", "dark"] = "system"
@@ -352,6 +372,8 @@ class Evaluation(BaseModel):
     average_elapsed_ms: int | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    ocr_pages: int = 0
+    layout_pages: int = 0
     metrics: Metrics
 
 
@@ -401,3 +423,14 @@ class SavedPipeline(BaseModel):
     # Empty when the pipeline can run. The UI shows these instead of letting
     # someone start a run that would fail on the first document.
     problems: list[str] = Field(default_factory=list)
+
+
+class GcpKeyStatus(BaseModel):
+    """What the backend can say about the key file without revealing it."""
+
+    configured: bool
+    path: str
+    client_email: str = ""
+    project_id: str = ""
+    problem: str = ""
+    verified_processors: list[str] = Field(default_factory=list)

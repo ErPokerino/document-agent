@@ -36,6 +36,8 @@ class Artifact(str, Enum):
 
 class StepKind(str, Enum):
     render_pages = "render_pages"
+    document_ai_ocr = "document_ai_ocr"
+    document_ai_layout = "document_ai_layout"
     llm_extract = "llm_extract"
     regex_refine = "regex_refine"
 
@@ -58,6 +60,20 @@ CONTRACTS: dict[StepKind, StepContract] = {
         description="Turn the first pages of the PDF into images for a vision model.",
         requires_all=(Artifact.pdf,),
         produces=(Artifact.images,),
+    ),
+    StepKind.document_ai_ocr: StepContract(
+        kind=StepKind.document_ai_ocr,
+        label="Document AI OCR",
+        description="Read the page text with Google's OCR processor, including scans.",
+        requires_all=(Artifact.pdf,),
+        produces=(Artifact.text,),
+    ),
+    StepKind.document_ai_layout: StepContract(
+        kind=StepKind.document_ai_layout,
+        label="Document AI Layout Parser",
+        description="Read the text and keep the headings, tables and lists around it.",
+        requires_all=(Artifact.pdf,),
+        produces=(Artifact.text, Artifact.layout),
     ),
     StepKind.llm_extract: StepContract(
         kind=StepKind.llm_extract,
