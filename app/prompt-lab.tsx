@@ -18,6 +18,8 @@ import {
   Play,
   Plus,
   RefreshCw,
+  ArrowDown,
+  ArrowUp,
   Save,
   Sparkles,
   Square,
@@ -31,6 +33,8 @@ import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
 import { filterByName } from "../lib/document-filter";
+import { estimateCost, formatUsd } from "../lib/cost";
+import { nextSort, sortEvaluations, type Sort, type SortKey } from "../lib/run-sort";
 import {
   draftFromModel,
   draftToLabels,
@@ -55,6 +59,7 @@ import type {
   EvaluationDetail,
   ExtractionRun,
   MetricTally,
+  PromptPreview,
 } from "../lib/types";
 
 type LabTab = "prompts" | "datasets" | "runs";
@@ -138,12 +143,27 @@ export function PromptLab({
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [openEvaluation, setOpenEvaluation] = useState<EvaluationDetail | null>(null);
   const [filters, setFilters] = useState<EvaluationFilters>(emptyFilters);
+  const [sort, setSort] = useState<Sort>({ key: "id", direction: "desc" });
+  const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
-  const visibleEvaluations = filterEvaluations(evaluations, filters);
+  const visibleEvaluations = sortEvaluations(
+    filterEvaluations(evaluations, filters),
+    sort.key,
+    sort.direction,
+  );
+
+  function runCost(evaluation: Evaluation): number | null {
+    return estimateCost(
+      evaluation.prompt_tokens,
+      evaluation.completion_tokens,
+      draftSettings.gemini.pricing[evaluation.model],
+    );
+  }
   const visibleDocuments = filterByName(documents, documentQuery);
 
   async function refreshDatasets() {
@@ -233,6 +253,13 @@ export function PromptLab({
       else next.add(name);
       return next;
     });
+  }
+
+  function refreshPreview() {
+    void api
+      .previewPrompt(draftSettings.prompts, draftSettings.provider)
+      .then(setPromptPreview)
+      .catch(() => setPromptPreview(null));
   }
 
   function openRun(evaluationId: number) {
@@ -377,14 +404,68 @@ export function PromptLab({
           <span className="settings-card-icon"><Sparkles size={18} /></span>
           <div><h3>Global prompts</h3><p>Control the agent, the single document request and the confidence rubric.</p></div>
         </div>
-        <label className="input-label" htmlFor="system-prompt">System prompt</label>
-        <textarea id="system-prompt" className="prompt-textarea large" value={draftSettings.prompts.system_prompt} onChange={(event) => setPrompt("system_prompt", event.target.value)} />
-        <label className="input-label prompt-label" htmlFor="user-prompt">Extraction instructions</label>
-        <textarea id="user-prompt" className="prompt-textarea" value={draftSettings.prompts.user_prompt} onChange={(event) => setPrompt("user_prompt", event.target.value)} />
-        <p className="field-help">Use <code>{"{page_range}"}</code> to insert the pages included in the single model call.</p>
-        <label className="input-label prompt-label" htmlFor="confidence-prompt">Confidence instructions</label>
-        <textarea id="confidence-prompt" className="prompt-textarea" value={draftSettings.prompts.confidence_prompt} onChange={(event) => setPrompt("confidence_prompt", event.target.value)} />
-        <p className="field-help">Define how the model assigns <code>low</code>, <code>medium</code> and <code>high</code> to every extracted value.</p>
+        <div className="prompt-field">
+          <div className="prompt-field-head">
+            <label className="input-label" htmlFor="system-prompt">System prompt</label>
+            <small className={draftSettings.prompts.system_prompt.length > 8000 ? "over" : ""}>{draftSettings.prompts.system_prompt.length} / 8000</small>
+          </div>
+          <p className="field-help">Who the model is and what it must never do. The entity list and the format rules are appended automatically.</p>
+          <textarea id="system-prompt" className="prompt-textarea large" value={draftSettings.prompts.system_prompt} onChange={(event) => setPrompt("system_prompt", event.target.value)} />
+        </div>
+
+        <div className="prompt-field">
+          <div className="prompt-field-head">
+            <label className="input-label" htmlFor="user-prompt">Extraction instructions</label>
+            <small className={draftSettings.prompts.user_prompt.length > 4000 ? "over" : ""}>{draftSettings.prompts.user_prompt.length} / 4000</small>
+          </div>
+          <p className="field-help">Sent with the page images. <code>{"{page_range}"}</code> is replaced with the pages in the call.</p>
+          <textarea id="user-prompt" className="prompt-textarea" value={draftSettings.prompts.user_prompt} onChange={(event) => setPrompt("user_prompt", event.target.value)} />
+        </div>
+
+        <div className="prompt-field">
+          <div className="prompt-field-head">
+            <label className="input-label" htmlFor="confidence-prompt">Confidence instructions</label>
+            <small className={draftSettings.prompts.confidence_prompt.length > 4000 ? "over" : ""}>{draftSettings.prompts.confidence_prompt.length} / 4000</small>
+          </div>
+          <p className="field-help">How the model chooses <code>low</code>, <code>medium</code> and <code>high</code>. Test runs report how often each level was actually right.</p>
+          <textarea id="confidence-prompt" className="prompt-textarea" value={draftSettings.prompts.confidence_prompt} onChange={(event) => setPrompt("confidence_prompt", event.target.value)} />
+        </div>
+
+        <div className="prompt-preview">
+          <button
+            className="prompt-preview-toggle"
+            aria-expanded={previewOpen}
+            onClick={() => {
+              const opening = !previewOpen;
+              setPreviewOpen(opening);
+              if (opening) refreshPreview();
+            }}
+          >
+            {previewOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <strong>What the model actually receives</strong>
+            <small>assembled by the backend</small>
+          </button>
+          {previewOpen && (
+            <div className="prompt-preview-body">
+              <p className="field-help">
+                Your text above is only the opening. This is the whole system message and the schema
+                the answer is constrained to, for <code>{draftSettings.provider === "gemini" ? "Gemini" : "LM Studio"}</code>.
+                <button className="link-button" onClick={refreshPreview}>Refresh</button>
+              </p>
+              {promptPreview ? (
+                <>
+                  <pre className="prompt-preview-text">{promptPreview.system_prompt}</pre>
+                  <details>
+                    <summary>Response schema{promptPreview.output_token_budget ? ` · ${promptPreview.output_token_budget} output token budget` : ""}</summary>
+                    <pre className="prompt-preview-text">{promptPreview.generation_schema}</pre>
+                  </details>
+                </>
+              ) : (
+                <p className="field-help">Save the prompts first, or check that the backend is running.</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="settings-card entity-card">
@@ -732,14 +813,24 @@ export function PromptLab({
             <table className="runs-table">
               <thead>
                 <tr>
-                  <th>Status</th>
-                  <th>Run</th>
-                  <th>Date</th>
-                  <th>Model</th>
-                  <th className="numeric">Docs</th>
-                  <th className="numeric">Total time</th>
-                  <th className="numeric">Max pages</th>
-                  <th className="numeric">Accuracy</th>
+                  {([
+                    ["status", "Status", false],
+                    ["id", "Run", false],
+                    ["created_at", "Date", false],
+                    ["model", "Model", false],
+                    ["total_documents", "Docs", true],
+                    ["total_elapsed_ms", "Total time", true],
+                    ["max_pages", "Max pages", true],
+                    ["accuracy", "Accuracy", true],
+                  ] as [SortKey, string, boolean][]).map(([key, label, numeric]) => (
+                    <th key={key} className={numeric ? "numeric" : ""} aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                      <button className="sort-button" onClick={() => setSort(nextSort(sort, key))}>
+                        {label}
+                        {sort.key === key && (sort.direction === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+                      </button>
+                    </th>
+                  ))}
+                  <th className="numeric">Cost</th>
                   <th aria-label="Actions" />
                 </tr>
               </thead>
@@ -770,6 +861,7 @@ export function PromptLab({
                       {percent(evaluation.metrics.accuracy)}
                       <small>{evaluation.metrics.matched}/{evaluation.metrics.total}</small>
                     </td>
+                    <td className="numeric cost-cell">{formatUsd(runCost(evaluation))}</td>
                     <td className="row-actions" onClick={(event) => event.stopPropagation()}>
                       {confirmingRun === evaluation.id ? (
                         <span className="row-confirm compact">
@@ -825,6 +917,16 @@ export function PromptLab({
             <span className="model-tag">{openEvaluation.model}</span>
             <span className="pages-tag">{openEvaluation.max_pages || "?"} pages per extraction</span>
             <span className="pages-tag">{openEvaluation.prompts.entities.length} entities</span>
+            {openEvaluation.prompt_tokens > 0 && (
+              <span className="pages-tag">
+                {openEvaluation.prompt_tokens.toLocaleString()} in / {openEvaluation.completion_tokens.toLocaleString()} out tokens
+              </span>
+            )}
+            {runCost(openEvaluation) !== null && (
+              <span className="cost-tag" title="Derived from the token counts and the rate configured in Settings, not from what Google billed">
+                {formatUsd(runCost(openEvaluation))}
+              </span>
+            )}
           </div>
 
           {openEvaluation.error && <div className="alert error-alert"><AlertCircle size={17} /><span>{openEvaluation.error}</span></div>}

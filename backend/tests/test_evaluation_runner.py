@@ -148,3 +148,33 @@ async def test_labels_naming_an_unconfigured_entity_fail_only_that_document(work
     detail = evaluations.get_evaluation(evaluation_id)
     assert len(detail.failures) == 1
     assert detail.metrics.total == 1
+
+
+async def test_the_token_usage_of_each_document_reaches_the_store(workspace, monkeypatch) -> None:
+    datasets, evaluations = workspace
+
+    class CountingClient:
+        def __init__(self, base_url: str) -> None:
+            self.last_prediction_stats = {"prompt_tokens": 1500, "completion_tokens": 90}
+
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages):
+            return {"currency": FieldExtraction(value="EUR", confidence="high")}
+
+    monkeypatch.setattr("app.pipeline.steps.LMStudioClient", CountingClient)
+    evaluation_id = evaluations.start(dataset="invoices", model="m", prompts=PromptConfiguration(), total_documents=2)
+
+    await execute(datasets, evaluations, evaluation_id)
+
+    detail = evaluations.get_evaluation(evaluation_id)
+    assert detail.prompt_tokens == 3000
+    assert detail.completion_tokens == 180
+
+
+async def test_a_provider_that_reports_nothing_leaves_the_counts_empty(workspace, monkeypatch) -> None:
+    datasets, evaluations = workspace
+    monkeypatch.setattr("app.pipeline.steps.LMStudioClient", fake_client(lambda n: "EUR"))
+    evaluation_id = evaluations.start(dataset="invoices", model="m", prompts=PromptConfiguration(), total_documents=2)
+
+    await execute(datasets, evaluations, evaluation_id)
+
+    assert evaluations.get_evaluation(evaluation_id).prompt_tokens == 0

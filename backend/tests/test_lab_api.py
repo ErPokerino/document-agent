@@ -554,3 +554,45 @@ def test_a_run_can_be_exported_as_csv(api) -> None:
 
 def test_exporting_an_unknown_run_is_a_404(api) -> None:
     assert api.get("/api/evaluations/999/export.csv").status_code == 404
+
+
+def test_the_prompt_preview_shows_what_the_local_model_will_receive(api) -> None:
+    prompts = PromptConfiguration()
+
+    body = api.post(
+        "/api/prompts/preview",
+        json={"prompts": prompts.model_dump(mode="json"), "provider": "lm_studio"},
+    ).json()
+
+    # The assembled prompt carries the entity list the user never typed.
+    assert "supplier_name" in body["system_prompt"]
+    assert prompts.system_prompt.strip() in body["system_prompt"]
+    assert '"c"' in body["generation_schema"]
+    assert body["output_token_budget"] > 0
+
+
+def test_the_preview_reflects_the_provider(api) -> None:
+    prompts = PromptConfiguration()
+
+    body = api.post(
+        "/api/prompts/preview",
+        json={"prompts": prompts.model_dump(mode="json"), "provider": "gemini"},
+    ).json()
+
+    # Gemini gets a different schema, and the preview must say so rather than
+    # showing the local one.
+    assert "pattern" not in body["generation_schema"]
+    assert "confidence" in body["generation_schema"]
+    assert body["output_token_budget"] is None
+
+
+def test_a_preview_of_an_edited_prompt_uses_the_edit(api) -> None:
+    prompts = PromptConfiguration()
+    prompts.system_prompt = "A completely different instruction"
+
+    body = api.post(
+        "/api/prompts/preview",
+        json={"prompts": prompts.model_dump(mode="json"), "provider": "lm_studio"},
+    ).json()
+
+    assert "A completely different instruction" in body["system_prompt"]

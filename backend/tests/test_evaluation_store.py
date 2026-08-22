@@ -314,3 +314,47 @@ def test_reclassifying_does_not_resurrect_a_cancelled_run(store, tmp_path) -> No
     EvaluationStore(tmp_path / "docuflow.db")
 
     assert store.get_evaluation(evaluation_id).status == "cancelled"
+
+
+def test_token_usage_is_recorded_per_document(store) -> None:
+    evaluation_id = start(store)
+
+    store.record_document(
+        evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1000,
+        prompt_tokens=1500, completion_tokens=90,
+    )
+
+    document = store.get_evaluation(evaluation_id).documents[0]
+    assert document.prompt_tokens == 1500
+    assert document.completion_tokens == 90
+
+
+def test_token_usage_is_summed_over_the_run(store) -> None:
+    evaluation_id = start(store)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1, prompt_tokens=1000, completion_tokens=50)
+    store.record_document(evaluation_id, "b.pdf", outcomes("EUR", 125.31), elapsed_ms=1, prompt_tokens=1200, completion_tokens=70)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.prompt_tokens == 2200
+    assert detail.completion_tokens == 120
+
+
+def test_a_run_without_token_counts_reports_zero(store) -> None:
+    evaluation_id = start(store)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.prompt_tokens == 0
+    assert detail.completion_tokens == 0
+    assert detail.documents[0].prompt_tokens is None
+
+
+def test_a_retried_document_replaces_its_token_counts(store) -> None:
+    evaluation_id = start(store, total=1)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1, prompt_tokens=999, completion_tokens=9)
+
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), elapsed_ms=1, prompt_tokens=100, completion_tokens=5)
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.prompt_tokens == 100
+    assert detail.completion_tokens == 5

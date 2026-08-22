@@ -32,6 +32,8 @@ from app.domain.models import (
     ModelLoadResponse,
     ProcessingInfo,
     PromoteRunRequest,
+    PromptPreview,
+    PromptPreviewRequest,
 )
 from app.evaluation.datasets import DatasetStore, InvalidName
 from app.evaluation.export import evaluation_to_csv
@@ -319,6 +321,41 @@ async def get_settings() -> AppSettings:
     return _masked(settings_store.read())
 
 
+@app.post("/api/prompts/preview", response_model=PromptPreview)
+async def preview_prompt(request: PromptPreviewRequest) -> PromptPreview:
+    """Show exactly what the model will be sent.
+
+    The prompt a user writes is only the opening: the app appends the entity
+    list, the confidence rubric and the format rules, and builds a schema from
+    the entities. Assembling it here rather than in the browser means the
+    preview cannot drift away from what actually goes out.
+    """
+    import json as _json
+
+    # Imported here, not through the module-level names: this is pure prompt
+    # assembly with no network in it, and it must show the real formatting even
+    # when the network clients are substituted.
+    from app.services.gemini import GeminiClient as Gemini
+    from app.services.lm_studio import LMStudioClient as LMStudio
+
+    if request.provider == "gemini":
+        return PromptPreview(
+            provider="gemini",
+            system_prompt=Gemini._system_prompt(request.prompts),
+            generation_schema=_json.dumps(
+                Gemini.generation_schema(request.prompts.entities), indent=2
+            ),
+        )
+    return PromptPreview(
+        provider="lm_studio",
+        system_prompt=LMStudio._system_prompt(request.prompts),
+        generation_schema=_json.dumps(
+            LMStudio._generation_schema(request.prompts.entities), indent=2
+        ),
+        output_token_budget=LMStudio._output_token_budget(request.prompts.entities),
+    )
+
+
 @app.get("/api/settings/gemini", response_model=GeminiKeyStatus)
 async def gemini_key_status() -> GeminiKeyStatus:
     return _key_status(settings_store.read())
@@ -502,6 +539,8 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "pending_documents",
                 "total_elapsed_ms",
                 "average_elapsed_ms",
+                "prompt_tokens",
+                "completion_tokens",
             )
         },
         metrics=_metrics_model(detail.metrics),

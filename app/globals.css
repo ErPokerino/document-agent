@@ -577,3 +577,32 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 
 .model-loader.profile_mismatch { border-color: #e7c2bd; background: #fdf1ef; }
 .model-specs em.mismatch { background: #fbe9e7; color: #9c3b2e; }
+
+/* --- sortable columns, cost, provider-aware copy, prompt preview --- */
+.sort-button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; }
+.sort-button:hover { color: var(--ink); }
+.runs-table th[aria-sort]:not([aria-sort="none"]) .sort-button { color: var(--accent); }
+.runs-table .numeric .sort-button { justify-content: flex-end; width: 100%; }
+.runs-table .cost-cell { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.cost-tag { background: #e2f4ec; color: #1d7a56; border-radius: 20px; padding: 3px 10px; font: 600 10px var(--font-mono), monospace; white-space: nowrap; }
+
+.privacy-note.hosted { background: #eaf1fa; border-color: #cddff2; }
+.privacy-note.hosted svg { color: #1d5a97; }
+.session-privacy.hosted { color: #1d5a97; }
+
+.prompt-field { padding-bottom: 4px; }
+.prompt-field + .prompt-field { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.prompt-field-head { display: flex; align-items: baseline; justify-content: space-between; }
+.prompt-field-head small { color: var(--muted); font: 400 10px var(--font-mono), monospace; }
+.prompt-field-head small.over { color: #9c3b2e; font-weight: 700; }
+.prompt-field .field-help { margin: 2px 0 8px; }
+
+.prompt-preview { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 16px; }
+.prompt-preview-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; color: var(--ink); }
+.prompt-preview-toggle strong { font-size: 12.5px; }
+.prompt-preview-toggle small { color: var(--muted); font-size: 10px; }
+.prompt-preview-body { margin-top: 12px; }
+.prompt-preview-body .link-button { margin-left: 8px; }
+.prompt-preview-text { margin: 0 0 10px; padding: 13px 15px; border-radius: 10px; background: #f7f9f8; border: 1px solid var(--line); font: 400 11px/1.6 var(--font-mono), monospace; white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto; }
+.prompt-preview-body details summary { cursor: pointer; font-size: 11px; color: var(--muted); margin-bottom: 8px; }

@@ -79,6 +79,8 @@ export type Evaluation = {
   pending_documents: number;
   total_elapsed_ms: number;
   average_elapsed_ms: number | null;
+  prompt_tokens: number;
+  completion_tokens: number;
   metrics: Metrics;
 };
 
@@ -98,6 +100,8 @@ export type EvaluationDetail = {
   pending_documents: number;
   total_elapsed_ms: number;
   average_elapsed_ms: number | null;
+  prompt_tokens: number;
+  completion_tokens: number;
   metrics: Metrics;
   prompts: PromptConfiguration;
   documents: EvaluationDocumentResult[];
@@ -108,6 +112,8 @@ export type EvaluationDocumentResult = {
   status: string;
   error: string | null;
   elapsed_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
   items: EvaluationFieldResult[];
 };
 
@@ -269,4 +275,16 @@ export type PromptConfiguration = {
   user_prompt: string;
   confidence_prompt: string;
   entities: EntityDefinition[];
+};
+
+export type PromptPreview = {
+  provider: string;
+  system_prompt: string;
+  generation_schema: string;
+  output_token_budget: number | null;
+};
+
+export type PromptPreviewRequest = {
+  prompts: PromptConfiguration;
+  provider: "lm_studio" | "gemini";
 };

@@ -182,6 +182,20 @@ class AppSettings(BaseModel):
     prompts: PromptConfiguration = Field(default_factory=PromptConfiguration)
 
 
+class PromptPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompts: PromptConfiguration
+    provider: Literal["lm_studio", "gemini"] = "lm_studio"
+
+
+class PromptPreview(BaseModel):
+    provider: str
+    system_prompt: str
+    generation_schema: str
+    output_token_budget: int | None = None
+
+
 class GeminiKeyStatus(BaseModel):
     configured: bool
     hint: str = ""
@@ -330,6 +344,8 @@ class Evaluation(BaseModel):
     pending_documents: int
     total_elapsed_ms: int
     average_elapsed_ms: int | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     metrics: Metrics
 
 
@@ -346,6 +362,8 @@ class EvaluationDocumentResult(BaseModel):
     status: str
     error: str | None = None
     elapsed_ms: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     items: list[EvaluationFieldResult]
 
 

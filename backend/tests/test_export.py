@@ -28,6 +28,8 @@ def detail(documents) -> EvaluationDetail:
         pending_documents=0,
         total_elapsed_ms=1000,
         average_elapsed_ms=1000,
+        prompt_tokens=0,
+        completion_tokens=0,
         metrics=EvaluationMetrics(),
         prompts=PromptConfiguration(),
         documents=documents,
@@ -129,3 +131,16 @@ def test_a_run_with_no_documents_still_has_a_header() -> None:
 
     assert text.splitlines()[0].startswith("run_id,")
     assert rows(text) == []
+
+
+def test_token_usage_is_exported_per_document() -> None:
+    document = EvaluationDocument(
+        name="invoice.pdf", status="ok", error=None, elapsed_ms=2500,
+        prompt_tokens=1500, completion_tokens=90,
+        items=[EvaluationItem(entity="currency", expected="EUR", actual="EUR", confidence="high", matched=True)],
+    )
+
+    row = rows(evaluation_to_csv(detail([document])))[0]
+
+    assert row["prompt_tokens"] == "1500"
+    assert row["completion_tokens"] == "90"

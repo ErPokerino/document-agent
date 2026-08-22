@@ -12,6 +12,8 @@ import type {
   HealthStatus,
   ModelInfo,
   ModelLoadResponse,
+  PromptConfiguration,
+  PromptPreview,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -57,6 +59,8 @@ export const api = {
   saveSettings: (settings: AppSettings) => request<AppSettings>("/api/settings", json("PUT", settings)),
   extract: (file: File) => request<ExtractionResponse>("/api/documents/extract", upload(file)),
 
+  previewPrompt: (prompts: PromptConfiguration, provider: AppSettings["provider"]) =>
+    request<PromptPreview>("/api/prompts/preview", json("POST", { prompts, provider })),
   geminiKeyStatus: () => request<GeminiKeyStatus>("/api/settings/gemini"),
   verifyGeminiKey: () => request<GeminiKeyStatus>("/api/settings/gemini/verify", { method: "POST" }),
   clearGeminiKey: () => request<void>("/api/settings/gemini", { method: "DELETE" }),

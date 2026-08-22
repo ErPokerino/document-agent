@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDot,
+  Cloud,
   Cpu,
   Download,
   ExternalLink,
@@ -399,6 +400,13 @@ export default function Home() {
   }
 
   const settingsLoaded = settings !== null && draftSettings !== null;
+  // Where documents actually go. Saying "local" while pages are being uploaded
+  // to Google would be the worst kind of wrong copy.
+  const usingHostedModel = settings?.provider === "gemini";
+  const privacyHeading = usingHostedModel ? "Sent to Google" : "Private processing";
+  const privacyDetail = usingHostedModel
+    ? "Page images are uploaded to the Gemini API for extraction."
+    : "Files and data are processed exclusively by the local model.";
   const configuredEntities = settings?.prompts.entities ?? [];
   const activeModelName = settings ? formatModelName(settings.model, models) : "No model selected";
   const isConnected = health?.lm_studio === true;
@@ -415,7 +423,7 @@ export default function Home() {
   const extractionPanel = (
     <section className={`schema-panel review-schema ${processState === "processing" ? "processing" : ""}`}>
       <div className="panel-heading">
-        <div><span className="step">02</span><h2>Extracted data</h2></div>
+        <div><h2>Extracted data</h2></div>
         <span className={`result-badge ${unresolvedWarningCount ? "warning" : processState}`}>
           {processState === "processing" && <LoaderCircle className="spin" size={10} />}
           {processState === "complete" && unresolvedWarningCount === 0 && <Check size={10} />}
@@ -512,10 +520,17 @@ export default function Home() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className={`local-status ${isConnected ? "online" : "offline"}`}>
+          <div className={`local-status ${usingHostedModel ? (keyStatus?.configured ? "online" : "offline") : isConnected ? "online" : "offline"}`}>
             <span className="status-dot" />
-            <div><strong>LM Studio</strong><small>Local inference</small></div>
-            <span className="status-pill">{isConnected ? "Online" : "Offline"}</span>
+            <div>
+              <strong>{usingHostedModel ? "Google Gemini" : "LM Studio"}</strong>
+              <small>{usingHostedModel ? "Hosted API" : "Local inference"}</small>
+            </div>
+            <span className="status-pill">
+              {usingHostedModel
+                ? keyStatus?.configured ? "Key set" : "No key"
+                : isConnected ? "Online" : "Offline"}
+            </span>
           </div>
           <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
             <Settings size={17} /> Settings
@@ -553,7 +568,7 @@ export default function Home() {
               <div className="content-grid">
                 <section className="upload-panel">
                   <div className="panel-heading">
-                    <div><span className="step">01</span><h2>Upload invoice</h2></div>
+                    <div><h2>Upload invoice</h2></div>
                     <span className="format-badge">PDF</span>
                   </div>
 
@@ -571,7 +586,7 @@ export default function Home() {
                     <small>Maximum 20 MB · Large files follow the configured page limit</small>
                   </div>
                   <input ref={fileInput} type="file" accept="application/pdf,.pdf" onChange={handleFileInput} hidden />
-                  <div className="privacy-note"><ShieldCheck size={16} /><p><strong>Private processing</strong> Files and data are processed exclusively by the local model.</p></div>
+                  <div className={`privacy-note ${usingHostedModel ? "hosted" : ""}`}>{usingHostedModel ? <Cloud size={16} /> : <ShieldCheck size={16} />}<p><strong>{privacyHeading}</strong> {privacyDetail}</p></div>
                 </section>
                 {extractionPanel}
               </div>
@@ -582,7 +597,7 @@ export default function Home() {
                     <div className="document-preview"><FileText size={22} /><span>PDF</span></div>
                     <div className="document-details"><small>Selected document</small><h3>{file.name}</h3><p>{formatBytes(file.size)}</p></div>
                   </div>
-                  <div className="session-privacy"><ShieldCheck size={15} /><span>Processed locally</span></div>
+                  <div className={`session-privacy ${usingHostedModel ? "hosted" : ""}`}>{usingHostedModel ? <Cloud size={15} /> : <ShieldCheck size={15} />}<span>{usingHostedModel ? "Sent to Google" : "Processed locally"}</span></div>
                   <div className="session-actions">
                     {processState === "complete" ? (
                       <button className="secondary-button session-process" disabled={!isModelReady} onClick={processDocument}><RotateCcw size={15} /> Process again</button>
@@ -718,7 +733,7 @@ export default function Home() {
                       </button>
                     </div>
                   )}
-                  <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends the dynamic entity JSON Schema with every extraction request; the LM Studio desktop field does not need to be filled manually.</span></div></div>
+                  <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends a schema built from your entities with every request, in the shape each provider accepts. Nothing has to be configured in LM Studio or in Google AI Studio.</span></div></div>
                 </div>
 
                 <div className="settings-card">

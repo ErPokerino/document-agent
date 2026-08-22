@@ -34,9 +34,11 @@ CREATE TABLE IF NOT EXISTS evaluations (
 CREATE TABLE IF NOT EXISTS evaluation_documents (
     evaluation_id INTEGER NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
     document      TEXT    NOT NULL,
-    status        TEXT    NOT NULL,
-    error         TEXT,
-    elapsed_ms    INTEGER,
+    status            TEXT    NOT NULL,
+    error             TEXT,
+    elapsed_ms        INTEGER,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
     PRIMARY KEY (evaluation_id, document)
 );
 
@@ -73,6 +75,8 @@ class EvaluationDocument:
     error: str | None
     elapsed_ms: int | None
     items: list[EvaluationItem]
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,10 @@ class EvaluationSummary:
     pending_documents: int
     total_elapsed_ms: int
     average_elapsed_ms: int | None
+    # Facts, not money: the price to apply to them is a setting, so cost is
+    # derived at display time and a rate change carries history with it.
+    prompt_tokens: int
+    completion_tokens: int
     metrics: EvaluationMetrics
 
 
@@ -129,6 +137,15 @@ class EvaluationStore:
             connection.execute(
                 "ALTER TABLE evaluations ADD COLUMN max_pages INTEGER NOT NULL DEFAULT 0"
             )
+
+        document_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
+        }
+        for column in ("prompt_tokens", "completion_tokens"):
+            if column not in document_columns:
+                connection.execute(
+                    f"ALTER TABLE evaluation_documents ADD COLUMN {column} INTEGER"
+                )
 
         # Runs finished before "partial" existed were all stored as "completed",
         # including ones where most documents never reached the model. Their
@@ -231,16 +248,23 @@ class EvaluationStore:
         document: str,
         outcomes: list[FieldOutcome],
         elapsed_ms: int,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO evaluation_documents (evaluation_id, document, status, elapsed_ms)
-                VALUES (?, ?, 'ok', ?)
-                ON CONFLICT(evaluation_id, document) DO UPDATE
-                    SET status = 'ok', elapsed_ms = excluded.elapsed_ms, error = NULL
+                INSERT INTO evaluation_documents
+                    (evaluation_id, document, status, elapsed_ms, prompt_tokens, completion_tokens)
+                VALUES (?, ?, 'ok', ?, ?, ?)
+                ON CONFLICT(evaluation_id, document) DO UPDATE SET
+                    status = 'ok',
+                    elapsed_ms = excluded.elapsed_ms,
+                    prompt_tokens = excluded.prompt_tokens,
+                    completion_tokens = excluded.completion_tokens,
+                    error = NULL
                 """,
-                (evaluation_id, document, elapsed_ms),
+                (evaluation_id, document, elapsed_ms, prompt_tokens, completion_tokens),
             )
             connection.executemany(
                 """
@@ -351,6 +375,8 @@ class EvaluationStore:
                     error=document["error"],
                     elapsed_ms=document["elapsed_ms"],
                     items=by_document.get(document["document"], []),
+                    prompt_tokens=document["prompt_tokens"],
+                    completion_tokens=document["completion_tokens"],
                 )
                 for document in documents
             ],
@@ -364,7 +390,9 @@ class EvaluationStore:
                    COALESCE(SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END), 0) AS succeeded,
                    COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
                    COALESCE(SUM(elapsed_ms), 0) AS total_ms,
-                   AVG(elapsed_ms) AS average_ms
+                   AVG(elapsed_ms) AS average_ms,
+                   COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                   COALESCE(SUM(completion_tokens), 0) AS completion_tokens
             FROM evaluation_documents WHERE evaluation_id = ?
             """,
             (row["id"],),
@@ -400,5 +428,7 @@ class EvaluationStore:
             pending_documents=max(row["total_documents"] - completed, 0),
             total_elapsed_ms=int(progress["total_ms"] or 0),
             average_elapsed_ms=round(progress["average_ms"]) if progress["average_ms"] else None,
+            prompt_tokens=int(progress["prompt_tokens"] or 0),
+            completion_tokens=int(progress["completion_tokens"] or 0),
             metrics=aggregate(outcomes),
         )

@@ -79,7 +79,16 @@ async def run_evaluation(
                 evaluations.record_document_failure(evaluation_id, name, str(exc))
                 continue
 
-            evaluations.record_document(evaluation_id, name, outcomes, elapsed_ms)
+            # The extraction step leaves whatever the provider reported here.
+            stats = result.artifacts.get("inference_stats") or {}
+            evaluations.record_document(
+                evaluation_id,
+                name,
+                outcomes,
+                elapsed_ms,
+                prompt_tokens=stats.get("prompt_tokens"),
+                completion_tokens=stats.get("completion_tokens"),
+            )
             if run_store is not None:
                 run_store.record_run(
                     filename=name,

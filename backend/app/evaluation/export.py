@@ -21,6 +21,8 @@ COLUMNS = (
     "document",
     "document_status",
     "elapsed_ms",
+    "prompt_tokens",
+    "completion_tokens",
     "entity",
     "expected",
     "actual",
@@ -59,6 +61,8 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
             "document": document.name,
             "document_status": document.status,
             "elapsed_ms": document.elapsed_ms,
+            "prompt_tokens": document.prompt_tokens,
+            "completion_tokens": document.completion_tokens,
             "error": document.error,
         }
         if not document.items:
