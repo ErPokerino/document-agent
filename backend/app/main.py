@@ -187,7 +187,7 @@ async def _ensure_model_ready(settings: AppSettings) -> None:
         if not settings.gemini.api_key.strip():
             raise HTTPException(
                 status_code=409,
-                detail="No Gemini API key is configured. Add one in Settings.",
+                detail="No Gemini API key is configured. Add one in Models.",
             )
         return
 
@@ -293,7 +293,7 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
         raise HTTPException(
             status_code=400,
             detail="This model runs on Google's servers and does not need loading. "
-            "Add an API key in Settings and it is ready.",
+            "Add an API key in Models and it is ready.",
         )
     if request.model in settings.excluded_model_ids:
         raise HTTPException(
@@ -311,7 +311,7 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
             model_runtime_states[request.model] = phase
 
         try:
-            discovered = await client.list_vision_models()
+            discovered = await client.list_models()
             selected = next((model for model in discovered if model.id == request.model), None)
             already_ready = bool(
                 selected
@@ -323,6 +323,7 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
                 skip_warmup=already_ready,
                 phase_callback=update_phase,
                 entities=settings.prompts.entities,
+                warm_vision=requires_vision(_selected_pipeline(settings)),
             )
             for model_id in list(model_runtime_states):
                 if model_id != request.model:
@@ -794,7 +795,7 @@ async def delete_pipeline(name: str) -> Response:
     if settings_store.read().pipeline == name:
         raise HTTPException(
             status_code=409,
-            detail="That pipeline is in use. Select another one in Settings before deleting it.",
+            detail="That pipeline is in use. Select another one in Pipelines before deleting it.",
         )
     try:
         pipeline_store.delete(name)
@@ -1172,7 +1173,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"This run used {detail.model}. Select and warm up that model in Settings, "
+                f"This run used {detail.model}. Select and warm up that model in Models, "
                 "so the retried documents are scored the same way as the rest of the run."
             ),
         )

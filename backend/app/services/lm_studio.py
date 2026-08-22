@@ -40,6 +40,9 @@ class LMStudioError(RuntimeError):
 INFERENCE_TIMEOUT_SECONDS = 600
 VISION_PREPARATION_TIMEOUT_SECONDS = 600
 LARGE_MODEL_THRESHOLD_BYTES = 8 * 1024**3
+# A model this big cannot be given to the integrated GPU on this device
+# whatever its file weighs: the runtime allocates for the parameter count.
+LARGE_MODEL_THRESHOLD_BILLIONS = 20
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # What the CPU-safe profile looks like once applied. LM Studio's own default is
 # four parallel slots, so `parallel` tells our instance apart from one it loaded
@@ -48,15 +51,44 @@ SAFE_PROFILE_PARALLEL = 1
 SAFE_PROFILE_CONTEXT_LENGTH = 8192
 
 
-def requires_cpu_safe_profile(quantization: str | None, size_bytes: int | None) -> bool:
+def parameter_billions(params_string: str | None) -> float | None:
+    """LM Studio's `params_string` as a number of billions, or None.
+
+    It writes things like "27B", "0.8B", "8x7B" and "700M". The last number
+    before the unit is the size of one expert, which is what has to fit.
+    """
+    if not params_string:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*([BM])\b", str(params_string).upper())
+    if match is None:
+        return None
+    value = float(match.group(1))
+    return value if match.group(2) == "B" else value / 1000
+
+
+def requires_cpu_safe_profile(
+    quantization: str | None,
+    size_bytes: int | None,
+    params_string: str | None = None,
+) -> bool:
     """Whether this model must be kept off the integrated GPU on this device.
 
-    Both signals used to select a "compatibility" profile, but only the size one
-    actually reached the CLI path that disables GPU offload; an IQ quant under
-    the threshold was loaded through REST with the GPU still on, which is the
-    configuration that raises vk::Queue::submit: ErrorDeviceLost.
+    Three signals, because each one alone missed a model that then lost the
+    Vulkan device mid-run:
+
+    - an IQ quant, whose codebook lookups are the configuration that first
+      raised vk::Queue::submit: ErrorDeviceLost;
+    - a large file, which cannot fit whatever it contains;
+    - a large parameter count, because bonsai-27b is 27B in a 4.4 GB Q1_0
+      file: the file says "small" and the runtime still allocates
+      activations, KV cache and a vision projector for 27 billion parameters.
     """
-    return (quantization or "").upper().startswith("IQ") or int(size_bytes or 0) >= LARGE_MODEL_THRESHOLD_BYTES
+    parameters = parameter_billions(params_string)
+    return (
+        (quantization or "").upper().startswith("IQ")
+        or int(size_bytes or 0) >= LARGE_MODEL_THRESHOLD_BYTES
+        or (parameters is not None and parameters >= LARGE_MODEL_THRESHOLD_BILLIONS)
+    )
 
 
 @lru_cache(maxsize=1)
@@ -114,7 +146,9 @@ class LMStudioClient:
             loaded_instances = item.get("loaded_instances") or []
             loaded_config = (loaded_instances[0].get("config") or {}) if loaded_instances else {}
             quantization = (item.get("quantization") or {}).get("name")
-            needs_safe = requires_cpu_safe_profile(quantization, item.get("size_bytes"))
+            needs_safe = requires_cpu_safe_profile(
+                quantization, item.get("size_bytes"), item.get("params_string")
+            )
             parallel = loaded_config.get("parallel")
             models.append(
                 ModelInfo(
@@ -151,6 +185,10 @@ class LMStudioClient:
         skip_warmup: bool = False,
         phase_callback: Callable[[str], None] | None = None,
         entities: list[EntityDefinition] | None = None,
+        # False when the pipeline in use reads text rather than page images.
+        # Some models answer text and kill the runtime on any image, so warming
+        # up for vision they will never be asked for makes them unloadable.
+        warm_vision: bool = True,
     ) -> dict[str, int | str | bool]:
         items = await self._fetch_model_items()
         llm_items = [item for item in items if item.get("type") == "llm"]
@@ -160,10 +198,13 @@ class LMStudioClient:
         has_vision = bool((selected_item.get("capabilities") or {}).get("vision", False))
         quantization = ((selected_item.get("quantization") or {}).get("name") or "").upper()
         size_bytes = int(selected_item.get("size_bytes") or 0)
-        large_model = requires_cpu_safe_profile(quantization, size_bytes)
+        large_model = requires_cpu_safe_profile(
+            quantization, size_bytes, selected_item.get("params_string")
+        )
         profile = "compatibility" if large_model else "default"
         # A model without vision has no projector to initialize, so the only
         # thing worth warming is the structured-output path.
+        has_vision = has_vision and warm_vision
         if not has_vision:
             warmup_mode = "schema"
         elif size_bytes >= LARGE_MODEL_THRESHOLD_BYTES:
@@ -285,7 +326,13 @@ class LMStudioClient:
         return await self._load_large_model_with_cli(model)
 
     async def _load_large_model_with_cli(self, model: str) -> int:
-        """Load a large local model without GPU-layer offload."""
+        """Load a large local model without GPU-layer offload.
+
+        Nothing here is model-specific on purpose. This used to also pass
+        --speculative-draft-mtp, which a model without a bundled MTP head
+        rejects outright, so the safe profile was unavailable to exactly the
+        large models that need it most.
+        """
         from urllib.parse import urlparse
 
         if urlparse(self.base_url).hostname not in LOCAL_HOSTS:
@@ -310,7 +357,6 @@ class LMStudioClient:
             str(SAFE_PROFILE_PARALLEL),
             "--identifier",
             model,
-            "--speculative-draft-mtp",
             "-y",
         ]
         started = time.perf_counter()
@@ -601,12 +647,12 @@ class LMStudioClient:
         if "ErrorDeviceLost" in detail or "DeviceLost" in detail:
             return (
                 "The GPU/Vulkan device was lost during inference. Reload the model from "
-                "Settings; DocuFlow will use a conservative single-model profile."
+                "Models; DocuFlow will keep it off the GPU."
             )
         if "failed to process image" in detail.lower():
             return (
                 "LM Studio stopped while processing the document image. Reload the model from "
-                "Settings; large models will use the low-memory single-request profile."
+                "Models; large models will use the low-memory single-request profile."
             )
         if "exited before becoming healthy" in detail:
             return (

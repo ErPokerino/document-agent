@@ -189,3 +189,125 @@ async def test_a_text_only_model_is_warmed_up_without_an_image(monkeypatch) -> N
         isinstance(content, list) and any(part.get("type") == "image_url" for part in content)
         for content in sent_content
     )
+
+
+def test_a_27b_model_needs_the_safe_profile_however_small_its_file_is() -> None:
+    """bonsai-27b is 27B parameters in a 4.4 GB Q1_0 file.
+
+    The file size says "small"; the runtime allocates activations, KV cache and
+    a vision projector for 27B parameters, and the Vulkan device is lost part
+    way through a run. The parameter count is the honest signal.
+    """
+    assert requires_cpu_safe_profile("Q1_0", int(4.41 * 1024**3), "27B") is True
+
+
+def test_a_small_model_is_still_left_on_the_gpu() -> None:
+    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), "4B") is False
+    assert requires_cpu_safe_profile("Q8_0", int(0.95 * 1024**3), "0.8B") is False
+
+
+def test_an_unreadable_parameter_count_falls_back_to_the_other_signals() -> None:
+    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), None) is False
+    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), "who knows") is False
+    assert requires_cpu_safe_profile("IQ2_M", int(2.6 * 1024**3), "who knows") is True
+
+
+def test_parameter_counts_are_read_the_way_lm_studio_writes_them() -> None:
+    from app.services.lm_studio import parameter_billions
+
+    assert parameter_billions("27B") == 27
+    assert parameter_billions("0.8B") == 0.8
+    assert parameter_billions("8x7B") == 7
+    assert parameter_billions("700M") == 0.7
+    assert parameter_billions(None) is None
+    assert parameter_billions("unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_a_big_model_in_a_small_file_is_loaded_through_the_safe_path(monkeypatch) -> None:
+    client = LMStudioClient("http://localhost:1234")
+    cli_loads: list[str] = []
+
+    monkeypatch.setattr(
+        LMStudioClient,
+        "_fetch_model_items",
+        make_items({**item("bonsai-27b", "Q1_0", 4.41), "params_string": "27B"}),
+    )
+
+    async def fake_cli_load(self, model):
+        cli_loads.append(model)
+        return 1250
+
+    monkeypatch.setattr(LMStudioClient, "_load_large_model_with_cli", fake_cli_load)
+    monkeypatch.setattr(LMStudioClient, "_warm_up_structured_output", lambda self, *a, **k: _noop())
+
+    report = await client.load_and_warm_model("bonsai-27b")
+
+    assert report["profile"] == "compatibility"
+    assert cli_loads == ["bonsai-27b"]
+
+
+async def _noop() -> None:
+    return None
+
+
+@pytest.mark.asyncio
+async def test_the_safe_load_asks_for_nothing_a_model_might_not_have(monkeypatch) -> None:
+    """The CLI load used to demand MTP speculative decoding from every model.
+
+    bonsai-27b has no MTP head, so the load failed outright with "MTP
+    speculative decoding requires a GGUF model with a bundled supported MTP
+    head" — the model could not be loaded at all through the safe path.
+    """
+    import subprocess
+
+    client = LMStudioClient("http://127.0.0.1:1234")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr("app.services.lm_studio.shutil.which", lambda name: "lms")
+    monkeypatch.setattr("app.services.lm_studio.asyncio.sleep", lambda seconds: _noop())
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("app.services.lm_studio.subprocess.run", fake_run)
+
+    await client._load_large_model_with_cli("bonsai-27b")
+
+    assert "--speculative-draft-mtp" not in commands[0]
+    # What the profile is actually for stays: no GPU layers, one request.
+    assert "--gpu" in commands[0] and "off" in commands[0]
+    assert "--parallel" in commands[0]
+
+
+@pytest.mark.asyncio
+async def test_a_pipeline_that_sends_no_images_warms_up_without_one(monkeypatch) -> None:
+    """bonsai-27b answers text and dies on any image, even entirely on CPU.
+
+    Warming it up for vision made it unloadable, although it is perfectly
+    usable behind an OCR step. The warm-up now asks for what the pipeline
+    will actually ask for.
+    """
+    client = LMStudioClient("http://localhost:1234")
+    monkeypatch.setattr(
+        LMStudioClient, "_fetch_model_items", make_items(item("sees", vision=True))
+    )
+    options: dict = {}
+
+    async def fake_warmup(self, model, entities, **kwargs):
+        options.update(kwargs)
+
+    monkeypatch.setattr(LMStudioClient, "_warm_up_structured_output", fake_warmup)
+    monkeypatch.setattr(
+        LMStudioClient, "_post_json", lambda self, *a, **k: _load_answer()
+    )
+
+    report = await client.load_and_warm_model("sees", warm_vision=False)
+
+    assert options["include_image"] is False
+    assert report["warmup_mode"] == "schema"
+
+
+async def _load_answer() -> dict:
+    return {"load_time_seconds": 0.1}

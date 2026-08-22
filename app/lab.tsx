@@ -31,11 +31,13 @@ import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import {
   distinctModels,
+  distinctPipelines,
   emptyFilters,
   filterEvaluations,
   hasActiveFilters,
   type EvaluationFilters,
 } from "../lib/run-filters";
+import { runsToCsv } from "../lib/runs-csv";
 import { nextSort, sortEvaluations, type Sort, type SortKey } from "../lib/run-sort";
 import type { AppSettings, Dataset, Evaluation, EvaluationDetail, MetricTally } from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
@@ -78,6 +80,17 @@ export function Lab({ draftSettings, isModelReady }: Props) {
       draftSettings.gemini.pricing[evaluation.model],
       draftSettings.gcp,
     );
+  }
+
+  /** What you exported is what you were looking at: same rows, same order. */
+  function downloadRunsCsv() {
+    const csv = runsToCsv(visibleEvaluations, draftSettings);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `docuflow-runs-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function refreshEvaluations() {
@@ -207,7 +220,10 @@ export function Lab({ draftSettings, isModelReady }: Props) {
         {running && (
       <div className="run-progress">
         <LoaderCircle className="spin" size={15} />
-        <span>{running.dataset} · {running.completed_documents} of {running.total_documents} documents</span>
+        <span>
+          {running.dataset} · {running.succeeded_documents} of {running.total_documents} documents
+          {running.failed_documents > 0 && ` · ${running.failed_documents} failed`}
+        </span>
         <span className="run-progress-bar"><i style={{ width: `${(running.completed_documents / Math.max(running.total_documents, 1)) * 100}%` }} /></span>
       </div>
         )}
@@ -227,6 +243,12 @@ export function Lab({ draftSettings, isModelReady }: Props) {
           {distinctModels(evaluations).map((model) => <option key={model} value={model}>{model}</option>)}
         </select>
       </label>
+      <label><span>Pipeline</span>
+        <select value={filters.pipeline} onChange={(event) => setFilters({ ...filters, pipeline: event.target.value })}>
+          <option value="">Any</option>
+          {distinctPipelines(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
       <label><span>From</span>
         <input type="date" value={filters.since} onChange={(event) => setFilters({ ...filters, since: event.target.value })} />
       </label>
@@ -236,6 +258,14 @@ export function Lab({ draftSettings, isModelReady }: Props) {
       <label><span>Min documents</span>
         <input type="number" min="0" placeholder="Any" value={filters.minDocuments} onChange={(event) => setFilters({ ...filters, minDocuments: event.target.value })} />
       </label>
+      <button
+        className="secondary-button small"
+        disabled={visibleEvaluations.length === 0}
+        title="One row per run: pipeline, model, accuracy, timing, tokens, pages and cost"
+        onClick={() => downloadRunsCsv()}
+      >
+        <Download size={13} /> Export {visibleEvaluations.length} runs
+      </button>
       <button className="secondary-button small" disabled={!hasActiveFilters(filters)} onClick={() => setFilters(emptyFilters)}>
         <FilterX size={13} /> Clear
       </button>
@@ -391,7 +421,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
           <button
             className="secondary-button"
             disabled={busy || !!running || !isModelReady}
-            title={running ? "Another run is in progress" : !isModelReady ? "Load and warm up the model in Settings first" : "Process the documents this run did not score"}
+            title={running ? "Another run is in progress" : !isModelReady ? "Load and warm up the model in Models first" : "Process the documents this run did not score"}
             onClick={() => guard(async () => {
               await api.retryEvaluation(openEvaluation.id);
               await refreshEvaluations();

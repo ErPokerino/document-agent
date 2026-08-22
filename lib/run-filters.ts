@@ -2,6 +2,7 @@ import type { Evaluation } from "./types";
 
 export type EvaluationFilters = {
   model: string;
+  pipeline: string;
   since: string;
   minAccuracy: string;
   minDocuments: string;
@@ -9,6 +10,7 @@ export type EvaluationFilters = {
 
 export const emptyFilters: EvaluationFilters = {
   model: "",
+  pipeline: "",
   since: "",
   minAccuracy: "",
   minDocuments: "",
@@ -29,6 +31,7 @@ export function filterEvaluations(
 
   return evaluations.filter((evaluation) => {
     if (filters.model && evaluation.model !== filters.model) return false;
+    if (filters.pipeline && evaluation.pipeline !== filters.pipeline) return false;
     // created_at is ISO, so a date-only prefix compares correctly as text.
     if (filters.since && evaluation.created_at.slice(0, 10) < filters.since) return false;
     if (minAccuracy !== null) {
@@ -42,6 +45,10 @@ export function filterEvaluations(
 
 export function distinctModels(evaluations: Evaluation[]): string[] {
   return [...new Set(evaluations.map((evaluation) => evaluation.model))].sort();
+}
+
+export function distinctPipelines(evaluations: Evaluation[]): string[] {
+  return [...new Set(evaluations.map((evaluation) => evaluation.pipeline))].sort();
 }
 
 export function hasActiveFilters(filters: EvaluationFilters): boolean {

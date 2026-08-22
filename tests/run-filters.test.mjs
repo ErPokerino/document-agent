@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { distinctModels, emptyFilters, filterEvaluations } from "../lib/run-filters.ts";
+import {
+  distinctModels,
+  distinctPipelines,
+  emptyFilters,
+  filterEvaluations,
+} from "../lib/run-filters.ts";
 
 const evaluation = (overrides) => ({
   id: 1,
@@ -9,6 +14,7 @@ const evaluation = (overrides) => ({
   finished_at: null,
   dataset: "invoices",
   model: "qwen/qwen2.5-vl-7b",
+  pipeline: "Vision extraction",
   status: "completed",
   total_documents: 5,
   completed_documents: 5,
@@ -101,4 +107,25 @@ test("the model list is deduplicated and sorted", () => {
   const runs = [evaluation({ model: "b" }), evaluation({ model: "a" }), evaluation({ model: "b" })];
 
   assert.deepEqual(distinctModels(runs), ["a", "b"]);
+});
+
+test("runs can be narrowed to one pipeline", () => {
+  const runs = [
+    evaluation({ id: 1, pipeline: "Vision extraction" }),
+    evaluation({ id: 2, pipeline: "OCR then model" }),
+  ];
+
+  const filtered = filterEvaluations(runs, { ...emptyFilters, pipeline: "OCR then model" });
+
+  assert.deepEqual(filtered.map((run) => run.id), [2]);
+});
+
+test("the pipelines to choose from are the ones that actually ran", () => {
+  const runs = [
+    evaluation({ pipeline: "Vision extraction" }),
+    evaluation({ pipeline: "OCR then model" }),
+    evaluation({ pipeline: "Vision extraction" }),
+  ];
+
+  assert.deepEqual(distinctPipelines(runs), ["OCR then model", "Vision extraction"]);
 });

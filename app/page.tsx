@@ -639,7 +639,7 @@ export default function Home() {
                     <button className="icon-button" onClick={resetDocument} aria-label="Remove document"><Trash2 size={16} /></button>
                   </div>
                   {!isConnected && <small className="session-warning">Start LM Studio to process this document</small>}
-                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("models")}>Prepare the active model in Settings before processing</button>}
+                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("models")}>Prepare the active model in Models before processing</button>}
                 </section>
                 <div className="review-grid">
                   {previewUrl && (
