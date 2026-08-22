@@ -12,8 +12,11 @@ import type {
   HealthStatus,
   ModelInfo,
   ModelLoadResponse,
+  PipelineDefinition,
   PromptConfiguration,
   PromptPreview,
+  SavedPipeline,
+  StepCatalogueEntry,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -98,6 +101,15 @@ export const api = {
       `/api/datasets/${segment(name)}/documents/${segment(document)}/draft-labels`,
       { method: "POST" },
     ),
+
+  pipelines: () => request<SavedPipeline[]>("/api/pipelines"),
+  pipelineSteps: () => request<StepCatalogueEntry[]>("/api/pipelines/steps"),
+  checkPipeline: (definition: PipelineDefinition) =>
+    request<SavedPipeline>("/api/pipelines/check", json("POST", definition)),
+  savePipeline: (definition: PipelineDefinition) =>
+    request<SavedPipeline>(`/api/pipelines/${segment(definition.name)}`, json("PUT", definition)),
+  deletePipeline: (name: string) =>
+    request<void>(`/api/pipelines/${segment(name)}`, { method: "DELETE" }),
 
   evaluations: () => request<Evaluation[]>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),

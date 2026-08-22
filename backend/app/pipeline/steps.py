@@ -4,6 +4,7 @@ import pymupdf
 
 from app.domain.models import PromptConfiguration
 from app.pipeline.engine import PipelineContext
+from app.pipeline.regex_refine import apply_rules
 from app.services.gemini import GeminiClient
 from app.services.lm_studio import LMStudioClient
 
@@ -64,13 +65,17 @@ class InspectPdf:
         )
 
 
-class ExtractConfiguredEntities:
-    def __init__(self, prompts: PromptConfiguration, scale: float = 1.35) -> None:
-        self.prompts = prompts
+class RenderPages:
+    """Turn the pages the inspection selected into base64 PNGs.
+
+    Separate from extraction on purpose: an OCR or layout step produces text
+    from the same PDF, and the extraction step should not care which arrived.
+    """
+
+    def __init__(self, scale: float = 1.35) -> None:
         self.scale = scale
 
     async def run(self, context: PipelineContext) -> None:
-        page_count: int = context.artifacts["page_count"]
         processed_pages: int = context.artifacts["processed_pages"]
         images: list[str] = []
 
@@ -94,6 +99,20 @@ class ExtractConfiguredEntities:
         finally:
             document.close()
 
+        context.artifacts["images"] = images
+
+
+class ExtractEntities:
+    """Ask the configured provider for the entities, from images or from text."""
+
+    def __init__(self, prompts: PromptConfiguration) -> None:
+        self.prompts = prompts
+
+    async def run(self, context: PipelineContext) -> None:
+        page_count: int = context.artifacts["page_count"]
+        processed_pages: int = context.artifacts["processed_pages"]
+        images: list[str] = context.artifacts.get("images") or []
+
         client = build_extraction_client(context)
         page_range = "1" if processed_pages == 1 else f"1-{processed_pages}"
         context.artifacts["extraction"] = await client.extract_entities(
@@ -105,3 +124,37 @@ class ExtractConfiguredEntities:
             processed_pages=processed_pages,
         )
         context.artifacts["inference_stats"] = getattr(client, "last_prediction_stats", None) or {}
+
+
+class RefineWithRegex:
+    """Apply the user's per-field rules to whatever the model returned."""
+
+    def __init__(self, entities, rules) -> None:
+        self.entities = entities
+        self.rules = rules
+
+    async def run(self, context: PipelineContext) -> None:
+        extraction = context.artifacts.get("extraction")
+        if not extraction:
+            return
+        context.artifacts["extraction"] = apply_rules(
+            self.entities, extraction, self.rules, context.artifacts.get("text")
+        )
+
+
+class ExtractConfiguredEntities:
+    """Render and extract in one step.
+
+    Kept for the tests that predate the split and for any caller that just wants
+    the old behaviour; a pipeline uses RenderPages and ExtractEntities instead.
+    """
+
+    def __init__(self, prompts: PromptConfiguration, scale: float = 1.35) -> None:
+        self.render = RenderPages(scale)
+        self.extract = ExtractEntities(prompts)
+        self.prompts = prompts
+        self.scale = scale
+
+    async def run(self, context: PipelineContext) -> None:
+        await self.render.run(context)
+        await self.extract.run(context)

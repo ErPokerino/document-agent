@@ -14,8 +14,8 @@ from app.domain.models import EntityDefinition, PromptConfiguration
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.scoring import score_document
 from app.evaluation.store import EvaluationStore
+from app.pipeline.definition import DEFAULT_PIPELINE_NAME
 from app.pipeline.engine import DocumentPipeline, PipelineContext
-from app.pipeline.steps import ExtractConfiguredEntities, InspectPdf
 from app.services.gemini import GeminiError
 from app.services.lm_studio import LMStudioError
 from app.services.run_store import RunStore
@@ -34,6 +34,8 @@ async def run_evaluation(
     model: str,
     lm_studio_url: str,
     max_pages: int,
+    steps: list[Any],
+    pipeline_name: str = DEFAULT_PIPELINE_NAME,
     provider: str = "lm_studio",
     gemini_api_key: str = "",
     gemini_thinking_level: str = "low",
@@ -57,13 +59,9 @@ async def run_evaluation(
                     gemini_api_key=gemini_api_key,
                     gemini_thinking_level=gemini_thinking_level,
                 )
-                pipeline = DocumentPipeline(
-                    [
-                        InspectPdf(max_pages_to_analyze=max_pages),
-                        ExtractConfiguredEntities(prompts),
-                    ]
-                )
-                result = await pipeline.run(context)
+                # The steps hold no per-document state, so one compiled
+                # pipeline serves the whole run.
+                result = await DocumentPipeline(steps).run(context)
             except asyncio.CancelledError:
                 evaluations.finish(evaluation_id, "cancelled")
                 raise
@@ -101,6 +99,7 @@ async def run_evaluation(
                     elapsed_ms=elapsed_ms,
                     source="evaluation",
                     provider=provider,
+                    pipeline=pipeline_name,
                 )
 
         evaluations.complete(evaluation_id)

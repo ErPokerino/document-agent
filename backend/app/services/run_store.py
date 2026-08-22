@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.domain.models import FieldExtraction, PromptConfiguration
+from app.pipeline.definition import PipelineDefinition
 
 
 SCHEMA = """
@@ -35,7 +36,8 @@ CREATE TABLE IF NOT EXISTS runs (
     prompts_json    TEXT    NOT NULL,
     extraction_json TEXT    NOT NULL,
     source          TEXT    NOT NULL,
-    provider        TEXT    NOT NULL DEFAULT 'lm_studio'
+    provider        TEXT    NOT NULL DEFAULT 'lm_studio',
+    pipeline        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS run_corrections (
@@ -63,6 +65,7 @@ class RunSummary:
     elapsed_ms: int
     source: str
     provider: str
+    pipeline: str
     has_corrections: bool
 
 
@@ -92,6 +95,10 @@ class RunStore:
                 connection.execute(
                     "ALTER TABLE runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'lm_studio'"
                 )
+            if "pipeline" not in existing:
+                # Nullable on purpose: a run from before pipelines existed has no
+                # honest answer, and reads back as the default pipeline.
+                connection.execute("ALTER TABLE runs ADD COLUMN pipeline TEXT")
 
     def read_document(self, file_sha256: str) -> bytes | None:
         path = self._document_path(file_sha256)
@@ -128,6 +135,7 @@ class RunStore:
         elapsed_ms: int,
         source: str = "workspace",
         provider: str = "lm_studio",
+        pipeline: str | None = None,
     ) -> int:
         serialized = {
             name: field.model_dump(mode="json") for name, field in extraction.items()
@@ -141,8 +149,8 @@ class RunStore:
                 """
                 INSERT INTO runs (created_at, filename, file_sha256, model, page_count,
                                   processed_pages, elapsed_ms, prompts_json, extraction_json,
-                                  source, provider)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source, provider, pipeline)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -156,6 +164,7 @@ class RunStore:
                     json.dumps(serialized, ensure_ascii=False),
                     source,
                     provider,
+                    pipeline or PipelineDefinition.default().name,
                 ),
             )
             return int(cursor.lastrowid)
@@ -250,5 +259,6 @@ class RunStore:
             elapsed_ms=row["elapsed_ms"],
             source=row["source"],
             provider=row["provider"],
+            pipeline=row["pipeline"] or PipelineDefinition.default().name,
             has_corrections=bool(row["correction_count"]),
         )

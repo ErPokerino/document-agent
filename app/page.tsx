@@ -27,13 +27,15 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, Fragment, useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import { resolveBootstrap } from "../lib/bootstrap";
 import { Datasets } from "./datasets";
 import { Lab } from "./lab";
 import { Models, formatBytes, modelStateLabels } from "./models";
+import { Pipelines } from "./pipeline";
+import { stepLabels } from "../lib/pipeline-editor";
 import { Prompts } from "./prompts";
 import { buildReviewedExport } from "../lib/review";
 import { validateSettingsDraft } from "../lib/validation";
@@ -49,10 +51,11 @@ import type {
   GeminiKeyStatus,
 } from "../lib/types";
 
-type View = "workspace" | "prompts" | "datasets" | "lab" | "models";
+type View = "workspace" | "prompts" | "pipeline" | "datasets" | "lab" | "models";
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
   prompts: { eyebrow: "Extraction target", title: "Prompts" },
+  pipeline: { eyebrow: "How a document is processed", title: "Pipeline" },
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
   lab: { eyebrow: "Extraction quality", title: "Lab" },
   models: { eyebrow: "Configuration", title: "Models" },
@@ -98,6 +101,7 @@ export default function Home() {
   // saving one would overwrite the stored prompts with frontend constants.
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [draftSettings, setDraftSettings] = useState<AppSettings | null>(null);
+  const [pipelineShape, setPipelineShape] = useState<string[]>([]);
   const [settingsState, setSettingsState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
@@ -131,6 +135,24 @@ export default function Home() {
     }
     bootstrap();
   }, []);
+
+  // The strip below the result describes the pipeline in use, so it has to be
+  // read back whenever that choice changes.
+  useEffect(() => {
+    const chosen = settings?.pipeline;
+    if (!chosen) return;
+    let active = true;
+    void Promise.all([api.pipelines(), api.pipelineSteps()])
+      .then(([saved, catalogue]) => {
+        if (!active) return;
+        const pipeline = saved.find((candidate) => candidate.name === chosen);
+        setPipelineShape(pipeline ? stepLabels(pipeline.steps, catalogue) : []);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [settings?.pipeline]);
 
   useEffect(() => {
     let active = true;
@@ -237,6 +259,18 @@ export default function Home() {
   function validateDraft() {
     if (!draftSettings) return "Settings have not been loaded from the backend yet.";
     return validateSettingsDraft(draftSettings.prompts, pageLimitInput);
+  }
+
+  async function usePipeline(name: string) {
+    if (!draftSettings) return;
+    const saved = await api.saveSettings({
+      ...draftSettings,
+      pipeline: name,
+      gemini: { ...draftSettings.gemini, api_key: geminiKey },
+    });
+    setSettings(saved);
+    setDraftSettings(saved);
+    setGeminiKey("");
   }
 
   async function saveSettings() {
@@ -488,6 +522,9 @@ export default function Home() {
           <button className={`nav-item ${view === "prompts" ? "active" : ""}`} onClick={() => setView("prompts")}>
             <Braces size={17} /> Prompts
           </button>
+          <button className={`nav-item ${view === "pipeline" ? "active" : ""}`} onClick={() => setView("pipeline")}>
+            <Workflow size={17} /> Pipeline
+          </button>
           <button className={`nav-item ${view === "datasets" ? "active" : ""}`} onClick={() => setView("datasets")}>
             <Database size={17} /> Datasets
           </button>
@@ -497,7 +534,6 @@ export default function Home() {
           <button className={`nav-item ${view === "models" ? "active" : ""}`} onClick={() => setView("models")}>
             <Cpu size={17} /> Models
           </button>
-          <button className="nav-item disabled" aria-disabled="true"><Workflow size={17} /> Pipeline <small>Next</small></button>
         </nav>
 
         <div className="sidebar-bottom">
@@ -609,16 +645,20 @@ export default function Home() {
             )}
 
             <footer className="pipeline-strip">
-              <span>Current pipeline</span>
+              <span>{settings?.pipeline ?? "Current pipeline"}</span>
               <div className={`pipeline-step ${isModelReady ? "done" : "active"}`}><b>{isModelReady ? <Check size={10} /> : "1"}</b> Model ready</div>
               <ChevronRight size={13} />
               <div className={`pipeline-step ${file ? "done" : ""}`}><b>{file ? <Check size={10} /> : "2"}</b> PDF input</div>
+              {pipelineShape.map((label, index) => (
+                <Fragment key={`${label}-${index}`}>
+                  <ChevronRight size={13} />
+                  <div className={`pipeline-step ${processState === "processing" ? "active pulse" : result ? "done" : ""}`}>
+                    <b>{result ? <Check size={10} /> : index + 3}</b> {label}
+                  </div>
+                </Fragment>
+              ))}
               <ChevronRight size={13} />
-              <div className={`pipeline-step ${processState === "processing" ? "active" : result ? "done" : ""}`}><b>{result ? <Check size={10} /> : "3"}</b> Render first pages</div>
-              <ChevronRight size={13} />
-              <div className={`pipeline-step ${processState === "processing" ? "active pulse" : result ? "done" : ""}`}><b>{result ? <Check size={10} /> : "4"}</b> Single vision call</div>
-              <ChevronRight size={13} />
-              <div className={`pipeline-step ${result ? "done" : ""}`}><b>{result ? <Check size={10} /> : "5"}</b> JSON validation</div>
+              <div className={`pipeline-step ${result ? "done" : ""}`}><b>{result ? <Check size={10} /> : pipelineShape.length + 3}</b> JSON validation</div>
             </footer>
           </>
         ) : !draftSettings ? (
@@ -644,6 +684,12 @@ export default function Home() {
             onSave={saveSettings}
             settingsState={settingsState}
             settingsError={settingsError}
+          />
+        ) : view === "pipeline" ? (
+          <Pipelines
+            draftSettings={draftSettings}
+            entities={configuredEntities}
+            onUse={usePipeline}
           />
         ) : view === "datasets" ? (
           <Datasets savedEntities={configuredEntities} isModelReady={isModelReady} />

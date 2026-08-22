@@ -34,13 +34,17 @@ from app.domain.models import (
     PromoteRunRequest,
     PromptPreview,
     PromptPreviewRequest,
+    SavedPipeline,
+    StepCatalogueEntry,
 )
 from app.evaluation.datasets import DatasetStore, InvalidName
 from app.evaluation.export import evaluation_to_csv
 from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
+from app.pipeline.compiler import PipelineError, build_steps
+from app.pipeline.definition import CONTRACTS, PipelineDefinition, describe_problems
 from app.pipeline.engine import DocumentPipeline, PipelineContext
-from app.pipeline.steps import ExtractConfiguredEntities, InspectPdf
+from app.pipeline.store import InvalidPipelineName, PipelineStore, UnknownPipeline
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
 from app.services.lm_studio import LMStudioClient, LMStudioError
 from app.services.run_store import RunStore
@@ -52,6 +56,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 DATABASE_PATH = DATA_DIR / "docuflow.db"
 DATASETS_PATH = DATA_DIR / "datasets"
+PIPELINES_PATH = DATA_DIR / "pipelines"
 
 app = FastAPI(title="DocuFlow API", version="0.1.0")
 app.add_middleware(
@@ -66,6 +71,7 @@ settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
 dataset_store = DatasetStore(DATASETS_PATH)
+pipeline_store = PipelineStore(PIPELINES_PATH)
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
 active_model_operation: str | None = None
@@ -387,6 +393,10 @@ async def clear_gemini_key() -> Response:
 @app.put("/api/settings", response_model=AppSettings)
 async def update_settings(settings: AppSettings) -> AppSettings:
     previous_settings = settings_store.read()
+    try:
+        pipeline_store.read(settings.pipeline)
+    except (UnknownPipeline, InvalidPipelineName) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if settings.model in settings.excluded_model_ids:
         raise HTTPException(
             status_code=400,
@@ -436,6 +446,27 @@ async def update_settings(settings: AppSettings) -> AppSettings:
     return _masked(saved)
 
 
+
+def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
+    """The configured pipeline, compiled. Anything unusable is refused here.
+
+    Compiling before a document is touched means a broken regex or a step that
+    reads something nothing produced is a 400 on the request, not a run that
+    dies halfway through a dataset.
+    """
+    try:
+        return DocumentPipeline(
+            build_steps(
+                pipeline_store.read(settings.pipeline),
+                prompts=settings.prompts,
+                entities=settings.prompts.entities,
+                max_pages_to_analyze=settings.max_pages_to_analyze,
+            )
+        )
+    except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/documents/extract", response_model=ExtractionResponse)
 async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
     if file.content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
@@ -453,14 +484,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
     async with exclusive_model_operation("processing"):
         await _ensure_model_ready(settings)
         context = _pipeline_context(settings, file.filename or "invoice.pdf", content)
-        pipeline = DocumentPipeline(
-            [
-                InspectPdf(
-                    max_pages_to_analyze=settings.max_pages_to_analyze,
-                ),
-                ExtractConfiguredEntities(settings.prompts),
-            ]
-        )
+        pipeline = _document_pipeline(settings)
         started = time.perf_counter()
         try:
             result = await pipeline.run(context)
@@ -482,6 +506,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             elapsed_ms=round((time.perf_counter() - started) * 1000),
             source="workspace",
             provider=settings.provider,
+            pipeline=settings.pipeline,
         )
 
         return ExtractionResponse(
@@ -534,6 +559,7 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "completed_documents",
                 "error",
                 "max_pages",
+                "pipeline",
                 "succeeded_documents",
                 "failed_documents",
                 "pending_documents",
@@ -550,6 +576,102 @@ def _evaluation_model(detail: Any) -> Evaluation:
 def _require_dataset(name: str) -> None:
     if name not in {dataset.name for dataset in dataset_store.list_datasets()}:
         raise HTTPException(status_code=404, detail=f"No dataset named {name}")
+
+
+
+def _saved_pipeline(definition: PipelineDefinition) -> SavedPipeline:
+    return SavedPipeline(
+        name=definition.name,
+        description=definition.description,
+        steps=definition.steps,
+        problems=describe_problems(definition),
+    )
+
+
+def _refuse_unusable(definition: PipelineDefinition) -> None:
+    """Everything a saved pipeline must satisfy, in one place.
+
+    Saving a pipeline that cannot run is allowed nowhere: the app reads these
+    files back and runs them, and a file that only fails at run time turns a
+    composition mistake into a failed dataset run an hour later.
+    """
+    settings = settings_store.read()
+    try:
+        build_steps(
+            definition,
+            prompts=settings.prompts,
+            entities=settings.prompts.entities,
+            max_pages_to_analyze=settings.max_pages_to_analyze,
+        )
+    except PipelineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/pipelines/steps", response_model=list[StepCatalogueEntry])
+async def list_pipeline_steps() -> list[StepCatalogueEntry]:
+    """What can go into a pipeline, and what each piece needs and leaves behind."""
+    return [
+        StepCatalogueEntry(
+            kind=contract.kind.value,
+            label=contract.label,
+            description=contract.description,
+            requires_all=[artifact.value for artifact in contract.requires_all],
+            requires_any=[artifact.value for artifact in contract.requires_any],
+            produces=[artifact.value for artifact in contract.produces],
+        )
+        for contract in CONTRACTS.values()
+    ]
+
+
+@app.get("/api/pipelines", response_model=list[SavedPipeline])
+async def list_pipelines() -> list[SavedPipeline]:
+    return [_saved_pipeline(definition) for definition in pipeline_store.list()]
+
+
+@app.post("/api/pipelines/check", response_model=SavedPipeline)
+async def check_pipeline(definition: PipelineDefinition) -> SavedPipeline:
+    """Say what is wrong with a pipeline someone is still editing. Saves nothing."""
+    return _saved_pipeline(definition)
+
+
+@app.get("/api/pipelines/{name}", response_model=SavedPipeline)
+async def get_pipeline(name: str) -> SavedPipeline:
+    try:
+        return _saved_pipeline(pipeline_store.read(name))
+    except InvalidPipelineName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UnknownPipeline as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.put("/api/pipelines/{name}", response_model=SavedPipeline)
+async def save_pipeline(name: str, definition: PipelineDefinition) -> SavedPipeline:
+    if name != definition.name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This pipeline is saved as {name!r}; rename it in the body to move it.",
+        )
+    _refuse_unusable(definition)
+    try:
+        return _saved_pipeline(pipeline_store.save(definition))
+    except InvalidPipelineName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/pipelines/{name}", status_code=204, response_class=Response)
+async def delete_pipeline(name: str) -> Response:
+    if settings_store.read().pipeline == name:
+        raise HTTPException(
+            status_code=409,
+            detail="That pipeline is in use. Select another one in Settings before deleting it.",
+        )
+    try:
+        pipeline_store.delete(name)
+    except InvalidPipelineName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UnknownPipeline as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
 
 
 @app.get("/api/datasets", response_model=list[Dataset])
@@ -728,12 +850,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
 
     async with exclusive_model_operation("processing"):
         context = _pipeline_context(settings, document, content)
-        pipeline = DocumentPipeline(
-            [
-                InspectPdf(max_pages_to_analyze=settings.max_pages_to_analyze),
-                ExtractConfiguredEntities(settings.prompts),
-            ]
-        )
+        pipeline = _document_pipeline(settings)
         started = time.perf_counter()
         try:
             result = await pipeline.run(context)
@@ -755,6 +872,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
             elapsed_ms=elapsed_ms,
             source="labelling",
             provider=settings.provider,
+            pipeline=settings.pipeline,
         )
         return DraftLabels(
             document=document,
@@ -840,6 +958,10 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
             detail="This dataset has no labelled documents. Add ground truth before running a test.",
         )
 
+    # Compiled before anything is claimed: a pipeline that cannot run must
+    # not leave the backend marked busy.
+    steps = _document_pipeline(settings).steps
+
     await _ensure_model_ready(settings)
 
     claim_model_operation("evaluating")
@@ -849,6 +971,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         prompts=settings.prompts,
         total_documents=len(documents),
         max_pages=settings.max_pages_to_analyze,
+        pipeline=settings.pipeline,
     )
     evaluation_cancelled = asyncio.Event()
 
@@ -869,6 +992,8 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 gemini_api_key=settings.gemini.api_key,
                 gemini_thinking_level=settings.gemini.thinking_level,
                 max_pages=settings.max_pages_to_analyze,
+                steps=steps,
+                pipeline_name=settings.pipeline,
                 cancelled=cancelled,
             )
         except asyncio.CancelledError:
@@ -898,9 +1023,10 @@ async def delete_evaluation(evaluation_id: int) -> Response:
 async def retry_evaluation(evaluation_id: int) -> Evaluation:
     """Fill in the documents a run never scored, inside the same run.
 
-    The retry deliberately reuses the prompts, the model and the page limit the
-    run was started with. Finishing a run with today's configuration would make
-    its single accuracy number the average of two different experiments.
+    The retry deliberately reuses the prompts, the model, the pipeline and the
+    page limit the run was started with. Finishing a run with today's
+    configuration would make its single accuracy number the average of two
+    different experiments.
     """
     global evaluation_task, evaluation_cancelled
 
@@ -920,6 +1046,25 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 "so the retried documents are scored the same way as the rest of the run."
             ),
         )
+    page_limit = detail.max_pages or settings.max_pages_to_analyze
+    try:
+        steps = build_steps(
+            pipeline_store.read(detail.pipeline),
+            prompts=detail.prompts,
+            entities=detail.prompts.entities,
+            max_pages_to_analyze=page_limit,
+        )
+    except (UnknownPipeline, InvalidPipelineName) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This run used the pipeline '{detail.pipeline}', which no longer exists. "
+                "Recreate it to finish the run."
+            ),
+        ) from exc
+    except PipelineError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     await _ensure_model_ready(settings)
 
     attempted = evaluation_store.attempted_documents(evaluation_id)
@@ -956,7 +1101,9 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 provider=settings.provider,
                 gemini_api_key=settings.gemini.api_key,
                 gemini_thinking_level=settings.gemini.thinking_level,
-                max_pages=detail.max_pages or settings.max_pages_to_analyze,
+                max_pages=page_limit,
+                steps=steps,
+                pipeline_name=detail.pipeline,
                 cancelled=cancelled,
             )
         except asyncio.CancelledError:

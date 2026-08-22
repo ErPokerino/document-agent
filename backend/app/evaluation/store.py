@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.domain.models import PromptConfiguration
+from app.pipeline.definition import PipelineDefinition
 from app.evaluation.scoring import EvaluationMetrics, FieldOutcome, aggregate
 
 
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS evaluations (
     status              TEXT    NOT NULL,
     total_documents     INTEGER NOT NULL,
     error               TEXT,
-    max_pages           INTEGER NOT NULL DEFAULT 0
+    max_pages           INTEGER NOT NULL DEFAULT 0,
+    pipeline            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_documents (
@@ -91,6 +93,7 @@ class EvaluationSummary:
     completed_documents: int
     error: str | None
     max_pages: int
+    pipeline: str
     succeeded_documents: int
     failed_documents: int
     pending_documents: int
@@ -137,6 +140,9 @@ class EvaluationStore:
             connection.execute(
                 "ALTER TABLE evaluations ADD COLUMN max_pages INTEGER NOT NULL DEFAULT 0"
             )
+        if "pipeline" not in existing:
+            # Nullable: a run started before pipelines existed ran the default one.
+            connection.execute("ALTER TABLE evaluations ADD COLUMN pipeline TEXT")
 
         document_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
@@ -182,13 +188,15 @@ class EvaluationStore:
         prompts: PromptConfiguration,
         total_documents: int,
         max_pages: int = 0,
+        pipeline: str | None = None,
     ) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO evaluations
-                    (created_at, dataset, model, prompts_json, status, total_documents, max_pages)
-                VALUES (?, ?, ?, ?, 'running', ?, ?)
+                    (created_at, dataset, model, prompts_json, status, total_documents,
+                     max_pages, pipeline)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -197,6 +205,7 @@ class EvaluationStore:
                     json.dumps(prompts.model_dump(mode="json"), ensure_ascii=False),
                     total_documents,
                     max_pages,
+                    pipeline or PipelineDefinition.default().name,
                 ),
             )
             return int(cursor.lastrowid)
@@ -423,6 +432,7 @@ class EvaluationStore:
             completed_documents=completed,
             error=row["error"],
             max_pages=row["max_pages"],
+            pipeline=row["pipeline"] or PipelineDefinition.default().name,
             succeeded_documents=int(progress["succeeded"] or 0),
             failed_documents=int(progress["failed"] or 0),
             pending_documents=max(row["total_documents"] - completed, 0),

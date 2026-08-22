@@ -153,3 +153,23 @@ def test_the_same_pdf_is_stored_once(store, tmp_path) -> None:
 
 def test_an_unknown_document_hash_reads_as_missing(store) -> None:
     assert store.read_document("0" * 64) is None
+
+
+def test_a_run_records_the_pipeline_that_produced_it(store) -> None:
+    run_id = record(store, pipeline="ocr-then-llm")
+
+    assert store.get_run(run_id).pipeline == "ocr-then-llm"
+
+
+def test_a_run_recorded_before_pipelines_existed_reads_as_the_default(tmp_path) -> None:
+    import sqlite3
+
+    from app.pipeline.definition import PipelineDefinition
+
+    path = tmp_path / "docuflow.db"
+    store = RunStore(path)
+    run_id = record(store)
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE runs SET pipeline = NULL WHERE id = ?", (run_id,))
+
+    assert RunStore(path).get_run(run_id).pipeline == PipelineDefinition.default().name

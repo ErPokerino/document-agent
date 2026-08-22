@@ -358,3 +358,28 @@ def test_a_retried_document_replaces_its_token_counts(store) -> None:
     detail = store.get_evaluation(evaluation_id)
     assert detail.prompt_tokens == 100
     assert detail.completion_tokens == 5
+
+
+def test_a_run_remembers_the_pipeline_it_was_started_with(store) -> None:
+    evaluation_id = store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        pipeline="ocr-then-llm",
+    )
+
+    assert store.get_evaluation(evaluation_id).pipeline == "ocr-then-llm"
+
+
+def test_a_run_from_before_pipelines_existed_reads_as_the_default(tmp_path) -> None:
+    import sqlite3
+
+    from app.pipeline.definition import PipelineDefinition
+
+    path = tmp_path / "docuflow.db"
+    evaluation_id = start(EvaluationStore(path))
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE evaluations SET pipeline = NULL WHERE id = ?", (evaluation_id,))
+
+    assert EvaluationStore(path).get_evaluation(evaluation_id).pipeline == PipelineDefinition.default().name

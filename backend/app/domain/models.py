@@ -3,6 +3,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.pipeline.definition import DEFAULT_PIPELINE_NAME, PipelineStep
+
 
 DEFAULT_SYSTEM_PROMPT = """You are an information extraction agent specialized in invoices.
 Analyze only the content visible in the supplied pages.
@@ -179,6 +181,7 @@ class AppSettings(BaseModel):
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     lm_studio_url: str = "http://127.0.0.1:1234"
     max_pages_to_analyze: Annotated[int, Field(ge=1, le=100)] = 10
+    pipeline: str = DEFAULT_PIPELINE_NAME
     prompts: PromptConfiguration = Field(default_factory=PromptConfiguration)
 
 
@@ -286,6 +289,8 @@ class ExtractionRun(BaseModel):
     processed_pages: int
     elapsed_ms: int
     source: str
+    provider: str
+    pipeline: str
     has_corrections: bool
 
 
@@ -339,6 +344,7 @@ class Evaluation(BaseModel):
     completed_documents: int
     error: str | None = None
     max_pages: int
+    pipeline: str
     succeeded_documents: int
     failed_documents: int
     pending_documents: int
@@ -370,3 +376,21 @@ class EvaluationDocumentResult(BaseModel):
 class EvaluationDetail(Evaluation):
     prompts: PromptConfiguration
     documents: list[EvaluationDocumentResult]
+
+
+class StepCatalogueEntry(BaseModel):
+    kind: str
+    label: str
+    description: str
+    requires_all: list[str]
+    requires_any: list[str]
+    produces: list[str]
+
+
+class SavedPipeline(BaseModel):
+    name: str
+    description: str
+    steps: list[PipelineStep]
+    # Empty when the pipeline can run. The UI shows these instead of letting
+    # someone start a run that would fail on the first document.
+    problems: list[str] = Field(default_factory=list)

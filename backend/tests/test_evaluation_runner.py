@@ -6,6 +6,8 @@ import pytest
 from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, PromptConfiguration
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.runner import run_evaluation
+from app.pipeline.compiler import build_steps
+from app.pipeline.definition import PipelineDefinition
 from app.evaluation.store import EvaluationStore
 from app.services.lm_studio import LMStudioError
 
@@ -48,6 +50,16 @@ def fake_client(returns):
     return FakeClient
 
 
+
+def default_steps(max_pages: int = 1):
+    return build_steps(
+        PipelineDefinition.default(),
+        prompts=PromptConfiguration(entities=ENTITIES),
+        entities=ENTITIES,
+        max_pages_to_analyze=max_pages,
+    )
+
+
 async def execute(datasets, evaluations, evaluation_id, cancelled=None):
     documents = [(document.name, {"currency": "EUR"}) for document in datasets.list_documents("invoices")]
     await run_evaluation(
@@ -62,6 +74,7 @@ async def execute(datasets, evaluations, evaluation_id, cancelled=None):
         model="vision-model",
         lm_studio_url="http://localhost:1234",
         max_pages=1,
+        steps=default_steps(),
         cancelled=cancelled,
     )
 
@@ -143,6 +156,7 @@ async def test_labels_naming_an_unconfigured_entity_fail_only_that_document(work
         model="vision-model",
         lm_studio_url="http://localhost:1234",
         max_pages=1,
+        steps=default_steps(),
     )
 
     detail = evaluations.get_evaluation(evaluation_id)

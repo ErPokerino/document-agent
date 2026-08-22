@@ -6,6 +6,8 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
 
+export type StepKind = "render_pages" | "llm_extract" | "regex_refine";
+
 export type Confidence = FieldExtraction["confidence"];
 
 export type ModelRuntimeState = ModelInfo["runtime_state"];
@@ -17,6 +19,7 @@ export type AppSettings = {
   gemini: GeminiSettings;
   lm_studio_url: string;
   max_pages_to_analyze: number;
+  pipeline: string;
   prompts: PromptConfiguration;
 };
 
@@ -74,6 +77,7 @@ export type Evaluation = {
   completed_documents: number;
   error: string | null;
   max_pages: number;
+  pipeline: string;
   succeeded_documents: number;
   failed_documents: number;
   pending_documents: number;
@@ -95,6 +99,7 @@ export type EvaluationDetail = {
   completed_documents: number;
   error: string | null;
   max_pages: number;
+  pipeline: string;
   succeeded_documents: number;
   failed_documents: number;
   pending_documents: number;
@@ -149,6 +154,8 @@ export type ExtractionRun = {
   processed_pages: number;
   elapsed_ms: number;
   source: string;
+  provider: string;
+  pipeline: string;
   has_corrections: boolean;
 };
 
@@ -162,6 +169,8 @@ export type ExtractionRunDetail = {
   processed_pages: number;
   elapsed_ms: number;
   source: string;
+  provider: string;
+  pipeline: string;
   has_corrections: boolean;
   prompts: PromptConfiguration;
   extraction: Record<string, FieldExtraction>;
@@ -251,6 +260,17 @@ export type ModelPricing = {
   output_per_million: number | null;
 };
 
+export type PipelineDefinition = {
+  name: string;
+  description: string;
+  steps: PipelineStep[];
+};
+
+export type PipelineStep = {
+  kind: StepKind;
+  config: Record<string, unknown>;
+};
+
 export type ProcessingInfo = {
   page_count: number;
   processed_pages: number;
@@ -287,4 +307,20 @@ export type PromptPreview = {
 export type PromptPreviewRequest = {
   prompts: PromptConfiguration;
   provider: "lm_studio" | "gemini";
+};
+
+export type SavedPipeline = {
+  name: string;
+  description: string;
+  steps: PipelineStep[];
+  problems: string[];
+};
+
+export type StepCatalogueEntry = {
+  kind: string;
+  label: string;
+  description: string;
+  requires_all: string[];
+  requires_any: string[];
+  produces: string[];
 };

@@ -23,6 +23,7 @@ def detail(documents) -> EvaluationDetail:
         completed_documents=len(documents),
         error=None,
         max_pages=1,
+        pipeline="Vision extraction",
         succeeded_documents=sum(d.status == "ok" for d in documents),
         failed_documents=sum(d.status == "failed" for d in documents),
         pending_documents=0,

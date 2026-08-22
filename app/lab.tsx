@@ -273,7 +273,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
                 <td><span className={`status-tag ${evaluation.status}`}>{evaluation.status}</span></td>
                 <td className="run-id">#{evaluation.id}<small>{evaluation.dataset}</small></td>
                 <td className="run-date">{evaluation.created_at.replace("T", " ").slice(0, 16)}</td>
-                <td><span className="model-tag">{evaluation.model}</span></td>
+                <td><span className="model-tag">{evaluation.model}</span><small className="run-pipeline">{evaluation.pipeline}</small></td>
                 <td className="numeric">
                   {evaluation.succeeded_documents}/{evaluation.total_documents}
                   {evaluation.failed_documents > 0 && <small className="poor">{evaluation.failed_documents} failed</small>}
