@@ -79,6 +79,33 @@ def page_note(*, total_pages: int, processed_pages: int) -> str:
     )
 
 
+
+# LM Studio's REST API answers `Failed to load LLM 'x': Error: Failed to load
+# model.` whatever went wrong — an unsupported architecture, a corrupt file, a
+# memory failure. The CLI prints the reason under a "CAUSE" heading, so a
+# failed load asks it and passes the answer on.
+_CLI_CAUSE = re.compile(r"CAUSE\s*\n+\s*(?P<cause>.+?)\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def explain_load_failure(detail: str, cli_output: str) -> str:
+    """`detail` with the cause the CLI reported, when it reported one."""
+    match = _CLI_CAUSE.search(cli_output or "")
+    if match is None:
+        return detail
+    cause = " ".join(match.group("cause").split())
+    if not cause:
+        return detail
+
+    if "unknown model architecture" in cause:
+        architecture = cause.split("unknown model architecture:", 1)[-1].strip().strip("'\"")
+        return (
+            f"LM Studio's runtime does not know the {architecture} architecture, so it cannot "
+            f"open this model at all. Nothing in DocuFlow can change that: update the LM Studio "
+            f"runtime to a build that supports it, or choose another model."
+        )
+    return f"{detail} LM Studio reported: {cause}"
+
+
 def parameter_billions(params_string: str | None) -> float | None:
     """LM Studio's `params_string` as a number of billions, or None.
 
@@ -289,11 +316,18 @@ class LMStudioClient:
                             "parallel": 1,
                         }
                     )
-                load_response = await self._post_json(
-                    "/api/v1/models/load",
-                    load_payload,
-                    timeout=600,
-                )
+                try:
+                    load_response = await self._post_json(
+                        "/api/v1/models/load",
+                        load_payload,
+                        timeout=600,
+                    )
+                except LMStudioError as exc:
+                    # The REST answer says a load failed but not why. Ask the
+                    # CLI, which prints the reason, before giving up.
+                    raise LMStudioError(
+                        explain_load_failure(str(exc), await self._cli_load_failure_cause(model))
+                    ) from exc
                 load_ms = round(float(load_response.get("load_time_seconds", 0)) * 1000)
 
         warmup_ms = 0
@@ -411,6 +445,35 @@ class LMStudioClient:
         # image. A short settling window prevents an immediate false failure.
         await asyncio.sleep(10)
         return round((time.perf_counter() - started) * 1000)
+
+    async def _cli_load_failure_cause(self, model: str) -> str:
+        """Run the CLI load so its error message can be read. Loads nothing.
+
+        The load has already failed through REST, so this fails too — the point
+        is the reason it prints, which the REST answer does not carry.
+        """
+        from urllib.parse import urlparse
+
+        if urlparse(self.base_url).hostname not in LOCAL_HOSTS:
+            return ""
+        executable = shutil.which("lms")
+        if executable is None:
+            return ""
+
+        def run() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [executable, "load", model, "--identifier", model, "-y"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+
+        try:
+            completed = await asyncio.to_thread(run)
+        except (subprocess.TimeoutExpired, OSError):
+            return ""
+        return f"{completed.stdout or ''}\n{completed.stderr or ''}"
 
     async def _post_json(
         self,

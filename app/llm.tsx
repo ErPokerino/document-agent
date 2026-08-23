@@ -232,7 +232,11 @@ export function LanguageModels(props: Props) {
             <span className="model-loader-icon"><Power size={17} /></span>
             <div className="model-loader-copy">
               <strong>{modelStateLabels[selectedRuntimeState]}</strong>
-              <span>{selectedRuntimeState === "profile_mismatch" ? "Something loaded this model with LM Studio's defaults, which put it on the integrated GPU. The first image would lose the Vulkan device, so reload it here first." : "Vision is prepared before document processing and timed separately. Large models use a CPU-safe profile on this device to avoid integrated-GPU memory failures."}</span>
+              <span>{selectedRuntimeState === "profile_mismatch"
+                ? "Something loaded this model with LM Studio's defaults, which put it on the integrated GPU. The first image would lose the Vulkan device, so reload it here first."
+                : selectedDraftModel.vision
+                  ? "Loading and warm-up are timed separately from document processing, and the vision path is prepared here rather than inside the first document's timer. A large model is kept off the integrated GPU, which cannot hold it."
+                  : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images; it fits a pipeline that reads the page with OCR or the Layout Parser."}</span>
               {modelLoadReport && modelLoadReport.model === selectedDraftModel.id && (
                 <small>{modelLoadReport.profile === "compatibility" ? "CPU-safe" : "LM Studio default"} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
               )}

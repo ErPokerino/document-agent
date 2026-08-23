@@ -311,3 +311,46 @@ async def test_a_pipeline_that_sends_no_images_warms_up_without_one(monkeypatch)
 
 async def _load_answer() -> dict:
     return {"load_time_seconds": 0.1}
+
+
+def test_a_bare_load_failure_is_explained_with_what_the_cli_saw() -> None:
+    """LM Studio's REST API drops the reason a load failed.
+
+    It answers `Failed to load LLM 'x': Error: Failed to load model.` for an
+    unsupported architecture, a corrupt file and a memory failure alike, which
+    leaves someone with nothing to act on. The CLI prints the cause.
+    """
+    from app.services.lm_studio import explain_load_failure
+
+    cli_output = (
+        "Loading ling-3.0-tiny 6%\n"
+        "Error: Failed to load model. \n\n\n   (X) CAUSE  \n\n"
+        "error loading model: unknown model architecture: 'bailingmoe3'\n"
+    )
+
+    explained = explain_load_failure("Failed to load model.", cli_output)
+
+    assert "bailingmoe3" in explained
+    assert "architecture" in explained
+    # And what to do about it, since there is nothing DocuFlow can change.
+    assert "runtime" in explained.lower()
+
+
+def test_a_cause_the_cli_gives_is_passed_on_even_when_it_is_not_recognised() -> None:
+    from app.services.lm_studio import explain_load_failure
+
+    explained = explain_load_failure(
+        "Failed to load model.",
+        "Error: Failed to load model.\n\n (X) CAUSE \n\nerror loading model: tensor 'blk.0' not found\n",
+    )
+
+    assert "tensor 'blk.0' not found" in explained
+
+
+def test_nothing_from_the_cli_leaves_the_original_message_alone() -> None:
+    from app.services.lm_studio import explain_load_failure
+
+    assert explain_load_failure("Something went wrong", "") == "Something went wrong"
+    assert explain_load_failure("Something went wrong", "Loading 10%\nLoading 20%") == (
+        "Something went wrong"
+    )
