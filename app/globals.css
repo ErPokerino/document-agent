@@ -825,3 +825,13 @@ button.model-chip:hover { border-color: var(--line-strong); }
 .data-table .row-confirm { margin: 2px 0; }
 /* Worth knowing, not a reason to stop: the pipeline still runs. */
 .warning-alert { border: 1px solid #e7d6a9; background: #fff7df; color: #7a5a0c; }
+.info-hint.below .info-hint-bubble { bottom: auto; top: calc(100% + 7px); }
+.collapse-toggle { display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.collapse-toggle:hover { color: var(--accent); }
+.data-table .filter-row td { padding: 6px 12px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.data-table .filter-row input { height: 27px; border-color: var(--line); font-size: 11px; }
+.score-without { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+.score-without > span { display: flex; align-items: center; color: var(--muted); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-right: 4px; }
+.entity-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); color: var(--ink); font: inherit; font-size: 11px; cursor: pointer; }
+.entity-toggle:hover { border-color: var(--line-strong); }
+.entity-toggle.off { background: var(--surface-2); color: var(--muted); border-style: dashed; text-decoration: line-through; }

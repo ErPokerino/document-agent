@@ -3,10 +3,10 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator
 
 import pymupdf
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.domain.models import (
@@ -839,6 +839,7 @@ async def list_master_data_tables() -> list[MasterDataTable]:
                     hint=column.hint,
                     kind=column.kind,
                     editable=column.editable,
+                    generated=column.generated,
                 )
                 for column in table.columns
             ],
@@ -853,9 +854,22 @@ async def list_master_data_rows(
     query: str = "",
     sort: str = "",
     descending: bool = False,
+    filter: Annotated[list[str], Query()] = [],
 ) -> list[dict[str, Any]]:
+    """Rows, narrowed by a search over everything and by column.
+
+    Each `filter` is `column:value`; the column name cannot contain a colon,
+    so splitting once leaves any colon in the value alone.
+    """
+    filters: dict[str, str] = {}
+    for item in filter:
+        column, separator, value = item.partition(":")
+        if separator:
+            filters[column] = value
     try:
-        return master_data_store.rows(table_key, query=query, sort=sort, descending=descending)
+        return master_data_store.rows(
+            table_key, query=query, sort=sort, descending=descending, filters=filters
+        )
     except UnknownTable as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

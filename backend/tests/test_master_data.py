@@ -27,8 +27,13 @@ def test_the_tables_on_offer_describe_their_own_columns() -> None:
         "source",
         "created_at",
     ]
-    assert suppliers.column("id_subject").editable is False
+    # The identifier is filled in for you and can still be corrected; what the
+    # app records about a row is not yours to rewrite.
+    assert suppliers.column("id_subject").generated is True
+    assert suppliers.column("id_subject").editable is True
     assert suppliers.column("name").editable is True
+    assert suppliers.column("source").editable is False
+    assert suppliers.column("created_at").editable is False
 
 
 def test_a_table_nobody_defined_is_refused(store) -> None:
@@ -72,11 +77,11 @@ def test_a_row_can_be_corrected(store) -> None:
     assert updated["name"] == "acme international"
 
 
-def test_a_generated_column_cannot_be_written(store) -> None:
+def test_a_column_the_app_maintains_cannot_be_written(store) -> None:
     row = store.add("suppliers", {"name": "ACME"})
 
-    with pytest.raises(ValueError, match="id_subject"):
-        store.update("suppliers", row["id_subject"], {"id_subject": "S9999"})
+    with pytest.raises(ValueError, match="source"):
+        store.update("suppliers", row["id_subject"], {"source": "invented"})
 
 
 def test_acting_on_a_row_that_is_not_there_says_so(store) -> None:
@@ -130,3 +135,71 @@ def test_a_row_can_be_read_back_by_identifier(store) -> None:
 def test_a_name_that_normalizes_to_nothing_is_refused(store) -> None:
     with pytest.raises(ValueError):
         store.add("suppliers", {"name": "   "})
+
+
+def test_the_identifier_is_generated_but_can_be_corrected(store) -> None:
+    row = store.add("suppliers", {"name": "ACME"})
+
+    corrected = store.update("suppliers", row["id_subject"], {"id_subject": "ACME-01"})
+
+    assert corrected["id_subject"] == "ACME-01"
+    assert corrected["name"] == "acme"
+    assert store.read("suppliers", "ACME-01")["name"] == "acme"
+    with pytest.raises(UnknownRow):
+        store.read("suppliers", "S0001")
+
+
+def test_an_identifier_already_in_use_is_refused(store) -> None:
+    store.add("suppliers", {"name": "ACME"})
+    other = store.add("suppliers", {"name": "Zeta"})
+
+    with pytest.raises(DuplicateRow, match="S0001"):
+        store.update("suppliers", other["id_subject"], {"id_subject": "S0001"})
+
+
+def test_an_identifier_can_be_chosen_when_the_row_is_created(store) -> None:
+    row = store.add("suppliers", {"id_subject": "ACME-01", "name": "ACME"})
+
+    assert row["id_subject"] == "ACME-01"
+    # The running number is untouched, so the next generated one is still S0001.
+    assert store.add("suppliers", {"name": "Zeta"})["id_subject"] == "S0001"
+
+
+def test_an_empty_identifier_is_refused(store) -> None:
+    row = store.add("suppliers", {"name": "ACME"})
+
+    with pytest.raises(ValueError):
+        store.update("suppliers", row["id_subject"], {"id_subject": "  "})
+
+
+def test_rows_can_be_filtered_one_column_at_a_time(store) -> None:
+    store.add("suppliers", {"name": "ACME Trasporti"})
+    store.add("suppliers", {"name": "Zeta Trasporti"})
+
+    by_name = store.rows("suppliers", filters={"name": "acme"})
+    by_id = store.rows("suppliers", filters={"id_subject": "0002"})
+
+    assert [row["name"] for row in by_name] == ["acme trasporti"]
+    assert [row["name"] for row in by_id] == ["zeta trasporti"]
+
+
+def test_column_filters_narrow_each_other(store) -> None:
+    store.add("suppliers", {"name": "ACME Trasporti"})
+    store.add("suppliers", {"name": "Zeta Trasporti"})
+
+    both = store.rows("suppliers", filters={"name": "trasporti", "id_subject": "0001"})
+
+    assert [row["name"] for row in both] == ["acme trasporti"]
+
+
+def test_a_filter_on_a_column_that_does_not_exist_is_refused(store) -> None:
+    with pytest.raises(ValueError, match="turnover"):
+        store.rows("suppliers", filters={"turnover": "big"})
+
+
+def test_a_column_filter_and_the_search_box_apply_together(store) -> None:
+    store.add("suppliers", {"name": "ACME Trasporti"})
+    store.add("suppliers", {"name": "Zeta Trasporti"})
+
+    assert store.rows("suppliers", query="zeta", filters={"name": "trasporti"}) != []
+    assert store.rows("suppliers", query="zeta", filters={"name": "acme"}) == []

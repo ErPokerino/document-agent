@@ -463,6 +463,8 @@ class MasterDataColumn(BaseModel):
     hint: str
     kind: Literal["identifier", "text", "timestamp"]
     editable: bool
+    # Filled in automatically when a row is created; still editable afterwards.
+    generated: bool = False
 
 
 class MasterDataTable(BaseModel):

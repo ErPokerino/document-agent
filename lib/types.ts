@@ -238,6 +238,7 @@ export type MasterDataColumn = {
   hint: string;
   kind: "identifier" | "text" | "timestamp";
   editable: boolean;
+  generated: boolean;
 };
 
 export type MasterDataRowRequest = {

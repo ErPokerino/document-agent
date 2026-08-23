@@ -48,7 +48,9 @@ def test_the_tables_describe_themselves(api) -> None:
         "source",
         "created_at",
     ]
-    assert tables[0]["columns"][0]["editable"] is False
+    assert tables[0]["columns"][0]["generated"] is True
+    assert tables[0]["columns"][0]["editable"] is True
+    assert tables[0]["columns"][2]["editable"] is False
 
 
 def test_a_table_nobody_defined_is_a_404(api) -> None:
@@ -94,11 +96,11 @@ def test_a_row_can_be_corrected_and_removed(api) -> None:
     assert client.get(ROWS).json() == []
 
 
-def test_writing_a_generated_column_is_refused(api) -> None:
+def test_writing_a_column_the_app_maintains_is_refused(api) -> None:
     client, _ = api
     client.post(ROWS, json={"values": {"name": "ACME"}})
 
-    refused = client.patch(f"{ROWS}/S0001", json={"values": {"id_subject": "S9999"}})
+    refused = client.patch(f"{ROWS}/S0001", json={"values": {"source": "invented"}})
 
     assert refused.status_code == 400
 
@@ -143,3 +145,42 @@ def test_the_table_can_be_filled_from_the_labelled_documents(api, tmp_path, monk
 
     # Three documents, two suppliers: the third normalizes onto the first.
     assert [row["name"] for row in added] == ["acme", "zeta trasporti"]
+
+
+def test_rows_can_be_filtered_by_column(api) -> None:
+    client, _ = api
+    for name in ("ACME Trasporti", "Zeta Trasporti"):
+        client.post(ROWS, json={"values": {"name": name}})
+
+    found = client.get(f"{ROWS}?filter=name:acme").json()
+    both = client.get(f"{ROWS}?filter=name:trasporti&filter=id_subject:0002").json()
+
+    assert [row["name"] for row in found] == ["acme trasporti"]
+    assert [row["name"] for row in both] == ["zeta trasporti"]
+
+
+def test_a_filter_on_an_unknown_column_is_refused(api) -> None:
+    client, _ = api
+
+    assert client.get(f"{ROWS}?filter=turnover:big").status_code == 400
+
+
+def test_the_identifier_can_be_corrected(api) -> None:
+    client, _ = api
+    client.post(ROWS, json={"values": {"name": "ACME"}})
+
+    corrected = client.patch(f"{ROWS}/S0001", json={"values": {"id_subject": "ACME-01"}})
+
+    assert corrected.status_code == 200
+    assert corrected.json()["id_subject"] == "ACME-01"
+    assert [row["id_subject"] for row in client.get(ROWS).json()] == ["ACME-01"]
+
+
+def test_an_identifier_already_in_use_is_refused(api) -> None:
+    client, _ = api
+    client.post(ROWS, json={"values": {"name": "ACME"}})
+    client.post(ROWS, json={"values": {"name": "Zeta"}})
+
+    clash = client.patch(f"{ROWS}/S0002", json={"values": {"id_subject": "S0001"}})
+
+    assert clash.status_code == 409

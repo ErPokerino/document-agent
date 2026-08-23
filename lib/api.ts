@@ -109,13 +109,23 @@ export const api = {
   masterDataTables: () => request<MasterDataTable[]>("/api/master-data/tables"),
   masterDataRows: (
     table: string,
-    options: { query?: string; sort?: string; descending?: boolean } = {},
+    options: {
+      query?: string;
+      sort?: string;
+      descending?: boolean;
+      filters?: Record<string, string>;
+    } = {},
   ) => {
     const search = new URLSearchParams({
       query: options.query ?? "",
       sort: options.sort ?? "",
       descending: String(options.descending ?? false),
     });
+    // One `filter=column:value` per narrowed column; the backend splits once,
+    // so a value holding a colon survives.
+    for (const [column, value] of Object.entries(options.filters ?? {})) {
+      if (value.trim()) search.append("filter", `${column}:${value.trim()}`);
+    }
     return request<Record<string, string>[]>(
       `/api/master-data/tables/${segment(table)}/rows?${search}`,
     );

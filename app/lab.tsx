@@ -11,6 +11,7 @@ import {
   Cpu,
   Download,
   Eye,
+  EyeOff,
   FilterX,
   FlaskConical,
   History,
@@ -38,6 +39,7 @@ import {
   type EvaluationFilters,
 } from "../lib/run-filters";
 import { runsToCsv } from "../lib/runs-csv";
+import { entitiesIn, scoreWithout } from "../lib/scoring-view";
 import { nextSort, sortEvaluations, type Sort, type SortKey } from "../lib/run-sort";
 import type { AppSettings, Dataset, Evaluation, EvaluationDetail, MetricTally } from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
@@ -55,6 +57,9 @@ export function Lab({ draftSettings, isModelReady }: Props) {
   const [openEvaluation, setOpenEvaluation] = useState<EvaluationDetail | null>(null);
   const [filters, setFilters] = useState<EvaluationFilters>(emptyFilters);
   const [sort, setSort] = useState<Sort>({ key: "id", direction: "desc" });
+  // Scoring a run again without a field, in the view only: the stored run
+  // is what happened, and this is a question about it.
+  const [excluded, setExcluded] = useState<string[]>([]);
   const [runDocumentQuery, setRunDocumentQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmingRun, setConfirmingRun] = useState<number | null>(null);
@@ -84,7 +89,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
 
   /** What you exported is what you were looking at: same rows, same order. */
   function downloadRunsCsv() {
-    const csv = runsToCsv(visibleEvaluations, draftSettings);
+    const csv = runsToCsv(visibleEvaluations, draftSettings, excluded);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
@@ -271,6 +276,31 @@ export function Lab({ draftSettings, isModelReady }: Props) {
       </button>
         </div>
 
+      <div className="score-without">
+          <span>
+            Score without
+            <InfoHint text="Leaves these fields out of every accuracy on this page. Nothing stored changes: it answers how a run did on the rest, which is the fair question when one pipeline fills a field another does not." />
+          </span>
+          {entitiesIn(evaluations).map((entity) => {
+            const off = excluded.includes(entity);
+            return (
+              <button
+                key={entity}
+                className={`entity-toggle ${off ? "off" : ""}`}
+                aria-pressed={off}
+                onClick={() =>
+                  setExcluded(off ? excluded.filter((name) => name !== entity) : [...excluded, entity])
+                }
+              >
+                {off ? <EyeOff size={12} /> : <Eye size={12} />} {entity}
+              </button>
+            );
+          })}
+          {excluded.length > 0 && (
+            <button className="link-button" onClick={() => setExcluded([])}>Score with everything</button>
+          )}
+        </div>
+
         {evaluations.length === 0 ? (
       <div className="models-empty"><AlertCircle size={18} /><span>No test has been run yet.</span></div>
         ) : visibleEvaluations.length === 0 ? (
@@ -324,9 +354,12 @@ export function Lab({ draftSettings, isModelReady }: Props) {
                 </td>
                 <td className="numeric">{seconds(evaluation.total_elapsed_ms)}<small>{seconds(evaluation.average_elapsed_ms)} avg</small></td>
                 <td className="numeric">{evaluation.max_pages || "—"}</td>
-                <td className={`numeric accuracy-cell ${accuracyClass(evaluation.metrics.accuracy)}`}>
-                  {percent(evaluation.metrics.accuracy)}
-                  <small>{evaluation.metrics.matched}/{evaluation.metrics.total}</small>
+                <td className={`numeric accuracy-cell ${accuracyClass(scoreWithout(evaluation.metrics, excluded).accuracy)}`}>
+                  {percent(scoreWithout(evaluation.metrics, excluded).accuracy)}
+                  <small>
+                    {scoreWithout(evaluation.metrics, excluded).matched}/
+                    {scoreWithout(evaluation.metrics, excluded).total}
+                  </small>
                 </td>
                 <td className="numeric cost-cell">{formatUsd(runCost(evaluation))}</td>
                 <td className="row-actions" onClick={(event) => event.stopPropagation()}>

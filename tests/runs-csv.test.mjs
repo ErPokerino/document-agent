@@ -24,7 +24,19 @@ const run = (overrides = {}) => ({
   completion_tokens: 1339,
   ocr_pages: 10,
   layout_pages: 0,
-  metrics: { matched: 49, total: 50, accuracy: 0.98, per_entity: {}, per_confidence: {} },
+  metrics: {
+    matched: 49,
+    total: 50,
+    accuracy: 0.98,
+    per_entity: {
+      date: { matched: 10, total: 10, accuracy: 1 },
+      document_number: { matched: 10, total: 10, accuracy: 1 },
+      supplier_name: { matched: 9, total: 10, accuracy: 0.9 },
+      currency: { matched: 10, total: 10, accuracy: 1 },
+      total_amount: { matched: 10, total: 10, accuracy: 1 },
+    },
+    per_confidence: {},
+  },
   ...overrides,
 });
 
@@ -82,4 +94,13 @@ test("the rows come out in the order they were given", () => {
 
 test("an empty selection still produces a header", () => {
   assert.equal(runsToCsv([], null).trim().split("\n").length, 1);
+});
+
+test("a field left out of the accuracy on screen is left out of the export", () => {
+  const withEverything = rows(runsToCsv([run()], null))[1];
+  const without = rows(runsToCsv([run()], null, ["total_amount"]))[1];
+  const header = rows(runsToCsv([run()], null))[0];
+
+  assert.equal(withEverything[header.indexOf("scored_fields")], "50");
+  assert.equal(without[header.indexOf("scored_fields")], "40");
 });

@@ -5,6 +5,9 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Filter,
   FilterX,
   Library,
   LoaderCircle,
@@ -28,7 +31,12 @@ export function MasterData() {
   const [tableKey, setTableKey] = useState<string>("");
   const [rows, setRows] = useState<Row[]>([]);
   const [query, setQuery] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Row>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sort, setSort] = useState<{ column: string; descending: boolean } | null>(null);
+  // Collapsed by default once there are several: a register you are not
+  // working on should cost one line, not a screenful.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Row | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Row>({});
@@ -56,9 +64,10 @@ export function MasterData() {
         query,
         sort: sort?.column ?? "",
         descending: sort?.descending ?? false,
+        filters: columnFilters,
       }),
     );
-  }, [tableKey, query, sort]);
+  }, [tableKey, query, sort, columnFilters]);
 
   // Search and sort on the server: a reference table is the kind that outgrows
   // the browser long before anything else here does.
@@ -91,7 +100,24 @@ export function MasterData() {
 
   function startAdding() {
     if (!table) return;
-    setDraft(Object.fromEntries(table.columns.filter((c) => c.editable).map((c) => [c.key, ""])));
+    // A generated column is left out of the draft: the store fills it in.
+    setDraft(
+      Object.fromEntries(
+        table.columns.filter((column) => column.editable && !column.generated).map((c) => [c.key, ""]),
+      ),
+    );
+  }
+
+  const activeFilters = Object.values(columnFilters).filter((value) => value.trim()).length;
+  const isCollapsed = (key: string) => collapsed.has(key);
+
+  function toggleCollapsed(key: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   return (
@@ -129,10 +155,20 @@ export function MasterData() {
       {table && (
         <div className="settings-card">
           <div className="settings-card-heading">
-            <span className="settings-card-icon"><Library size={18} /></span>
+            <button
+              className="collapse-toggle"
+              aria-expanded={!isCollapsed(table.key)}
+              onClick={() => toggleCollapsed(table.key)}
+            >
+              {isCollapsed(table.key) ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+              <span className="settings-card-icon"><Library size={18} /></span>
+            </button>
             <div>
               <h3>{table.label}</h3>
-              <p>{table.description} · {rows.length} row{rows.length === 1 ? "" : "s"}{query ? " matching" : ""}.</p>
+              <p>
+                {table.description} · {rows.length} row{rows.length === 1 ? "" : "s"}
+                {query || activeFilters ? " matching" : ""}.
+              </p>
             </div>
             <button className="secondary-button small" onClick={startAdding} disabled={busy || draft !== null}>
               <Plus size={13} /> Add row
@@ -153,6 +189,8 @@ export function MasterData() {
             )}
           </div>
 
+          {!isCollapsed(table.key) && (
+          <>
           {seeded !== null && (
             <p className="field-help good-note">
               <Check size={12} /> {seeded === 0 ? "Nothing to add: every labelled value is already here." : `${seeded} added.`}
@@ -166,8 +204,18 @@ export function MasterData() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-            {(query || sort) && (
-              <button className="secondary-button small ghost" onClick={() => { setQuery(""); setSort(null); }}>
+            <button
+              className={`secondary-button small ${filtersOpen ? "" : "ghost"}`}
+              aria-pressed={filtersOpen}
+              onClick={() => setFiltersOpen(!filtersOpen)}
+            >
+              <Filter size={13} /> Per column{activeFilters ? ` · ${activeFilters}` : ""}
+            </button>
+            {(query || sort || activeFilters > 0) && (
+              <button
+                className="secondary-button small ghost"
+                onClick={() => { setQuery(""); setSort(null); setColumnFilters({}); }}
+              >
                 <FilterX size={13} /> Reset
               </button>
             )}
@@ -188,25 +236,44 @@ export function MasterData() {
                         {column.label}
                         {sort?.column === column.key && (sort.descending ? <ArrowDown size={11} /> : <ArrowUp size={11} />)}
                       </button>
-                      {column.hint && <InfoHint text={column.hint} />}
+                      {column.hint && <InfoHint text={column.hint} placement="below" />}
                     </th>
                   ))}
                   <th aria-label="Actions" />
                 </tr>
+                {filtersOpen && (
+                  <tr className="filter-row">
+                    {table.columns.map((column) => (
+                      <td key={column.key}>
+                        <input
+                          value={columnFilters[column.key] ?? ""}
+                          placeholder="contains…"
+                          aria-label={`Filter by ${column.label}`}
+                          onChange={(event) =>
+                            setColumnFilters({ ...columnFilters, [column.key]: event.target.value })
+                          }
+                        />
+                      </td>
+                    ))}
+                    <td />
+                  </tr>
+                )}
               </thead>
               <tbody>
                 {draft && (
                   <tr className="data-row drafting">
                     {table.columns.map((column) => (
                       <td key={column.key}>
-                        {column.editable ? (
+                        {column.editable && !column.generated ? (
                           <input
                             value={draft[column.key] ?? ""}
                             aria-label={column.label}
                             onChange={(event) => setDraft({ ...draft, [column.key]: event.target.value })}
                           />
                         ) : (
-                          <span className="generated">generated</span>
+                          <span className="generated">
+                            {column.generated ? "given automatically" : "—"}
+                          </span>
                         )}
                       </td>
                     ))}
@@ -324,10 +391,12 @@ export function MasterData() {
 
           {rows.length === 0 && !draft && (
             <p className="field-help">
-              {query
+              {query || activeFilters
                 ? "Nothing matches that."
                 : "This table is empty. Add a row, or fill it from the labelled documents."}
             </p>
+          )}
+          </>
           )}
         </div>
       )}

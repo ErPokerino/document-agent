@@ -11,6 +11,7 @@
  */
 
 import { totalCost } from "./cost.ts";
+import { scoreWithout } from "./scoring-view.ts";
 import type { AppSettings, Evaluation } from "./types";
 
 const COLUMNS = [
@@ -55,7 +56,13 @@ function seconds(ms: number | null): string {
   return ms === null || ms === undefined ? "" : (ms / 1000).toFixed(1);
 }
 
-export function runsToCsv(evaluations: Evaluation[], rates: Rates): string {
+export function runsToCsv(
+  evaluations: Evaluation[],
+  rates: Rates,
+  // The fields left out of the accuracy on screen are left out here too:
+  // what you export is what you are looking at.
+  excluded: string[] = [],
+): string {
   const lines = [COLUMNS.join(",")];
 
   for (const run of evaluations) {
@@ -70,6 +77,8 @@ export function runsToCsv(evaluations: Evaluation[], rates: Rates): string {
       rates ? ("gemini" in rates ? rates.gcp : rates.gcp) : null,
     );
 
+    const score = scoreWithout(run.metrics, excluded);
+
     lines.push(
       [
         run.id,
@@ -82,10 +91,10 @@ export function runsToCsv(evaluations: Evaluation[], rates: Rates): string {
         run.total_documents,
         run.succeeded_documents,
         run.failed_documents,
-        run.metrics.matched,
-        run.metrics.total,
+        score.matched,
+        score.total,
         // A run that scored nothing has no accuracy; zero would be a claim.
-        run.metrics.accuracy === null ? null : run.metrics.accuracy.toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
+        score.accuracy === null ? null : score.accuracy.toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
         seconds(run.total_elapsed_ms),
         seconds(run.average_elapsed_ms),
         run.prompt_tokens,

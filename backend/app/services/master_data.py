@@ -43,7 +43,13 @@ class ColumnDefinition:
     hint: str = ""
     kind: Literal["identifier", "text", "timestamp"] = "text"
     editable: bool = True
-    # Stored normalized, and no two rows may share the result.
+    # Filled in by the store when a row is created, if nothing is supplied.
+    # Generated and editable are different questions: an identifier is given
+    # automatically and can still be corrected afterwards.
+    generated: bool = False
+    # No two rows may share the value. Normalized ones are compared after
+    # normalization; an identifier is compared as typed.
+    unique: bool = False
     normalized: bool = False
 
 
@@ -70,6 +76,13 @@ class TableDefinition:
     def editable_columns(self) -> "tuple[ColumnDefinition, ...]":
         return tuple(column for column in self.columns if column.editable)
 
+    @property
+    def seed_column(self) -> str:
+        """The column a value from a labelled document goes into."""
+        if self.match_column:
+            return self.match_column
+        return next(column.key for column in self.editable_columns if not column.generated)
+
 
 SUPPLIERS = TableDefinition(
     key="suppliers",
@@ -83,9 +96,14 @@ SUPPLIERS = TableDefinition(
         ColumnDefinition(
             key="id_subject",
             label="Id subject",
-            hint="Generated when the row is created, and never reused.",
+            hint=(
+                "Given automatically as a running number when the row is created, and never "
+                "reused. You can replace it with your own code; it has to stay unique, and "
+                "documents matched under the old one keep it."
+            ),
             kind="identifier",
-            editable=False,
+            generated=True,
+            unique=True,
         ),
         ColumnDefinition(
             key="name",
@@ -94,6 +112,7 @@ SUPPLIERS = TableDefinition(
                 "Normalized as it is saved: accents folded, punctuation dropped, legal forms "
                 "like S.r.l. or Ltd removed. Two suppliers cannot share one."
             ),
+            unique=True,
             normalized=True,
         ),
         ColumnDefinition(
@@ -157,16 +176,31 @@ class MasterDataStore:
         query: str = "",
         sort: str = "",
         descending: bool = False,
+        filters: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
+        """Rows, narrowed by a search over everything and by column.
+
+        `query` matches any column; `filters` narrows one column each, and all
+        of them apply together. Both are substring matches, case-insensitive.
+        """
         table = self.table(table_key)
         order = table.column(sort).key if sort else table.id_column
         needle = f"%{query.strip().lower()}%"
         searchable = " OR ".join(f"lower({column.key}) LIKE ?" for column in table.columns)
+
+        conditions = [f"(? = '%%' OR {searchable})"]
+        parameters: list[str] = [needle, *([needle] * len(table.columns))]
+        for key, value in (filters or {}).items():
+            if not str(value).strip():
+                continue
+            conditions.append(f"lower({table.column(key).key}) LIKE ?")
+            parameters.append(f"%{str(value).strip().lower()}%")
+
         with self._connect() as connection:
             found = connection.execute(
-                f"SELECT * FROM {table.key} WHERE ? = '%%' OR {searchable} "
+                f"SELECT * FROM {table.key} WHERE {' AND '.join(conditions)} "
                 f"ORDER BY {order} COLLATE NOCASE {'DESC' if descending else 'ASC'}",
-                (needle, *([needle] * len(table.columns))),
+                tuple(parameters),
             ).fetchall()
         return [dict(row) for row in found]
 
@@ -185,7 +219,7 @@ class MasterDataStore:
         prepared = self._prepare(table, values)
         with self._connect() as connection:
             self._refuse_duplicates(connection, table, prepared)
-            identifier = self._claim_identifier(connection, table)
+            identifier = prepared.get(table.id_column) or self._claim_identifier(connection, table)
             row = {
                 table.id_column: identifier,
                 "source": source,
@@ -216,7 +250,7 @@ class MasterDataStore:
                 f"UPDATE {table.key} SET {assignments} WHERE {table.id_column} = ?",
                 (*prepared.values(), identifier),
             )
-        return self.read(table_key, identifier)
+        return self.read(table_key, prepared.get(table.id_column, identifier))
 
     def delete(self, table_key: str, identifier: str) -> None:
         table = self.table(table_key)
@@ -239,7 +273,7 @@ class MasterDataStore:
         merged: whoever corrected that row knew better than this list does.
         """
         table = self.table(table_key)
-        column = table.match_column or table.editable_columns[0].key
+        column = table.seed_column
         added: list[dict[str, Any]] = []
         for value in values:
             try:
@@ -256,7 +290,7 @@ class MasterDataStore:
         for key, value in values.items():
             column = table.column(key)
             if not column.editable:
-                raise ValueError(f"{column.label} ({key}) is generated and cannot be written")
+                raise ValueError(f"{column.label} ({key}) is filled in by the app, not by hand")
             text = str(value or "").strip()
             if column.normalized:
                 text = normalize_company_name(text)
@@ -273,7 +307,7 @@ class MasterDataStore:
         excluding: str = "",
     ) -> None:
         for column in table.columns:
-            if not column.normalized or column.key not in prepared:
+            if not column.unique or column.key not in prepared:
                 continue
             clash = connection.execute(
                 f"SELECT {table.id_column} FROM {table.key} "
@@ -283,6 +317,8 @@ class MasterDataStore:
             if clash is not None:
                 raise DuplicateRow(
                     f"{prepared[column.key]!r} is already registered as {clash[table.id_column]}"
+                    if column.key != table.id_column
+                    else f"{prepared[column.key]!r} is already the identifier of another row"
                 )
 
     @staticmethod
