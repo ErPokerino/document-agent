@@ -496,7 +496,7 @@ export default function Home() {
                       onChange={(event) => updateReviewValue(entity, event.target.value)}
                     />
                     <div className="value-controls">
-                      <span className={`confidence-pill ${field.confidence}`} title="Original model confidence"><i /> {confidenceLabels[field.confidence]}</span>
+                      <span className={`confidence-pill ${field.confidence}`} title={field.score === null || field.score === undefined ? "Original model confidence" : `Match quality: ${field.score.toFixed(2)} similarity to the register`}><i /> {confidenceLabels[field.confidence]}{field.score !== null && field.score !== undefined && <em>{field.score.toFixed(2)}</em>}</span>
                       {edited && <span className="manual-pill"><Pencil size={9} /> Edited</span>}
                       {edited && <button className="revert-value" onClick={() => revertReviewValue(entity.name)} aria-label={`Revert ${prettyName(entity.name)}`} title="Restore model value"><RotateCcw size={11} /></button>}
                     </div>
