@@ -345,7 +345,12 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
                     model_runtime_states[model_id] = "not_loaded"
             model_runtime_states[request.model] = "ready"
             model_warmup_modes[request.model] = str(result["warmup_mode"])
-            settings_store.write(settings.model_copy(update={"model": request.model}))
+            # Re-read rather than write back the snapshot this request
+            # started with: a load takes minutes, and anything chosen in the
+            # meantime — a pipeline, above all — would be reverted by it.
+            settings_store.write(
+                settings_store.read().model_copy(update={"model": request.model})
+            )
             return ModelLoadResponse.model_validate(result)
         except LMStudioError as exc:
             model_runtime_states[request.model] = "error"

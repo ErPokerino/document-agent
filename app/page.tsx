@@ -182,8 +182,13 @@ export default function Home() {
     async function refreshModels() {
       setModelsRefreshing(true);
       try {
-        const discovered = await api.models();
-        if (active) setModels(discovered);
+        const [discovered, stored] = await Promise.all([api.models(), api.settings()]);
+        if (!active) return;
+        setModels(discovered);
+        // What is displayed converges on what the backend holds, whatever
+        // wrote it. Only the shown state: `draftSettings` is the edit buffer
+        // and belongs to whoever is typing in it.
+        setSettings(stored);
       } catch {
         // Keep the last successful discovery result while LM Studio is unavailable.
       } finally {

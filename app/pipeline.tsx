@@ -262,6 +262,9 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     try {
       const renamed = await api.renamePipeline(name, next);
       await refresh();
+      // The backend carried the selection across; say so here too, or the
+      // chip in the top bar keeps naming a pipeline that no longer exists.
+      if (inUse === name) await onUse(renamed.name);
       if (openedAs === name) open(renamed);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
