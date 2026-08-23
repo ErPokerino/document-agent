@@ -1,11 +1,10 @@
 "use client";
 
-import { Braces, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, Plus, Save, Sparkles, Trash2 } from "lucide-react";
+import { Braces, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, Save, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "../lib/api";
-import { formatLabels } from "../lib/format";
-import type { AppSettings, EntityDefinition, EntityFormat, PromptPreview } from "../lib/types";
+import type { AppSettings, PromptPreview } from "../lib/types";
 
 type Props = {
   draftSettings: AppSettings;
@@ -24,40 +23,8 @@ export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState
     setDraftSettings({ ...draftSettings, prompts: { ...draftSettings.prompts, [key]: value } });
   }
 
-  function updateEntity(index: number, update: Partial<EntityDefinition>) {
-    const entities = draftSettings.prompts.entities.map((entity, entityIndex) =>
-      entityIndex === index ? { ...entity, ...update } : entity,
-    );
-    setDraftSettings({ ...draftSettings, prompts: { ...draftSettings.prompts, entities } });
-  }
 
-  function addEntity() {
-    const existing = new Set(draftSettings.prompts.entities.map((entity) => entity.name));
-    let suffix = 1;
-    let name = "new_field";
-    while (existing.has(name)) name = `new_field_${++suffix}`;
-    setDraftSettings({
-      ...draftSettings,
-      prompts: {
-        ...draftSettings.prompts,
-        entities: [
-          ...draftSettings.prompts.entities,
-          { name, format: "text", description: "Describe where to find the value and how to interpret it." },
-        ],
-      },
-    });
-  }
 
-  function removeEntity(index: number) {
-    if (draftSettings.prompts.entities.length === 1) return;
-    setDraftSettings({
-      ...draftSettings,
-      prompts: {
-        ...draftSettings.prompts,
-        entities: draftSettings.prompts.entities.filter((_, entityIndex) => entityIndex !== index),
-      },
-    });
-  }
 
   // Assembled by the backend, so it cannot drift from what actually goes out.
   function refreshPreview() {
@@ -71,7 +38,7 @@ export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState
     <section className="settings-layout wide">
       <div className="settings-intro">
         <Braces size={19} />
-        <div><h2>Prompts &amp; entities</h2><p>What to pull out of a document, and the words used to ask for it.</p></div>
+        <div><h2>Prompts</h2><p>The words used to ask the model. What to ask for is in Entities.</p></div>
       </div>
 
       {settingsError && <div className="alert error-alert" role="alert">{settingsError}</div>}
@@ -79,7 +46,7 @@ export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState
       <div className="settings-card prompt-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Sparkles size={18} /></span>
-          <div><h3>Global prompts</h3><p>Control the agent, the single document request and the confidence rubric.</p></div>
+          <div><h3>Global prompts</h3><p>The agent, the single document request and the confidence rubric. The entity names and descriptions are appended from Entities.</p></div>
         </div>
         <div className="prompt-field">
           <div className="prompt-field-head">
@@ -147,32 +114,8 @@ export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState
         </div>
       </div>
 
-      <div className="settings-card entity-card">
-        <div className="settings-card-heading entity-heading">
-          <span className="settings-card-icon"><Braces size={18} /></span>
-          <div><h3>Entities to extract</h3><p>Name, format and description automatically build the prompt and JSON Schema.</p></div>
-          <button className="add-entity-button" onClick={addEntity}><Plus size={14} /> Add entity</button>
-        </div>
-        <div className="entity-list">
-          {draftSettings.prompts.entities.map((entity, index) => (
-            <div className="entity-editor" key={`${entity.name}-${index}`}>
-              <div className="entity-index">{String(index + 1).padStart(2, "0")}</div>
-              <div className="entity-fields">
-                <div className="entity-row">
-                  <label><span>JSON name</span><input value={entity.name} onChange={(event) => updateEntity(index, { name: event.target.value.toLowerCase().replaceAll(" ", "_") })} /></label>
-                  <label><span>Format</span><select value={entity.format} onChange={(event) => updateEntity(index, { format: event.target.value as EntityFormat })}>{Object.entries(formatLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                </div>
-                <label className="entity-description"><span>Description for the model</span><textarea value={entity.description} onChange={(event) => updateEntity(index, { description: event.target.value })} /></label>
-              </div>
-              <button className="remove-entity-button" disabled={draftSettings.prompts.entities.length === 1} onClick={() => removeEntity(index)} aria-label={`Remove ${entity.name}`}><Trash2 size={15} /></button>
-            </div>
-          ))}
-        </div>
-      </div>
-  
-
       <div className="settings-actions sticky-actions">
-        <p><Braces size={14} /> Saved prompts are what a test run uses.</p>
+        <p><Sparkles size={14} /> Saved prompts are what a test run uses.</p>
         <button className="primary-button save-button" disabled={settingsState === "saving"} onClick={onSave}>
           {settingsState === "saving" ? <LoaderCircle className="spin" size={15} /> : settingsState === "saved" ? <CheckCircle2 size={15} /> : <Save size={15} />}
           {settingsState === "saving" ? "Saving…" : settingsState === "saved" ? "Saved" : "Save prompts"}

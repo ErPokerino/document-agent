@@ -5,6 +5,7 @@ import {
   addStep,
   defaultConfigFor,
   emptyRule,
+  groupCatalogue,
   moveStep,
   removeStep,
   rulesOf,
@@ -102,4 +103,54 @@ test("the page limit must be a whole number inside the backend range", () => {
   assert.match(pageLimitProblem("101") ?? "", /between 1 and 100/);
   assert.match(pageLimitProblem("2.5") ?? "", /between 1 and 100/);
   assert.match(pageLimitProblem("") ?? "", /between 1 and 100/);
+});
+
+test("steps are offered grouped by what they do", () => {
+  const catalogue = [
+    { kind: "render_pages", label: "Render pages" },
+    { kind: "document_ai_ocr", label: "Document AI OCR" },
+    { kind: "llm_extract", label: "LLM extraction" },
+    { kind: "regex_refine", label: "Regex refinement" },
+    { kind: "master_data_lookup", label: "Master data lookup" },
+  ];
+
+  const grouped = groupCatalogue(catalogue);
+
+  assert.deepEqual(grouped.map((group) => group.title), [
+    "Read the document",
+    "Ask a model",
+    "Work out the rest",
+  ]);
+  assert.deepEqual(grouped[0].entries.map((entry) => entry.kind), ["render_pages", "document_ai_ocr"]);
+  assert.deepEqual(grouped[2].entries.map((entry) => entry.kind), ["regex_refine", "master_data_lookup"]);
+});
+
+test("a step nobody grouped still gets offered", () => {
+  const grouped = groupCatalogue([{ kind: "something_new", label: "Something new" }]);
+
+  assert.equal(grouped.at(-1).entries.at(-1).kind, "something_new");
+});
+
+test("an empty catalogue produces no empty groups", () => {
+  assert.deepEqual(groupCatalogue([]), []);
+});
+
+test("a lookup step is summarized by the field it fills", () => {
+  const step = { kind: "master_data_lookup", config: { source_entity: "supplier_name", target_entity: "id_subject" } };
+
+  assert.match(summarizeStep(step), /supplier_name/);
+  assert.match(summarizeStep(step), /id_subject/);
+});
+
+test("a lookup step that is not configured yet says so instead of pretending", () => {
+  assert.match(summarizeStep({ kind: "master_data_lookup", config: {} }), /not configured/i);
+});
+
+test("a new lookup step starts with the defaults the backend would use", () => {
+  assert.deepEqual(defaultConfigFor("master_data_lookup"), {
+    source_entity: "",
+    target_entity: "",
+    algorithm: "combined",
+    minimum_similarity: 0.75,
+  });
 });

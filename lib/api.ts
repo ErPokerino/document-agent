@@ -18,6 +18,7 @@ import type {
   PromptPreview,
   SavedPipeline,
   StepCatalogueEntry,
+  Subject,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -104,6 +105,17 @@ export const api = {
       `/api/datasets/${segment(name)}/documents/${segment(document)}/draft-labels`,
       { method: "POST" },
     ),
+
+  subjects: (query = "") =>
+    request<Subject[]>(`/api/master-data/subjects?query=${encodeURIComponent(query)}`),
+  addSubject: (name: string) =>
+    request<Subject>("/api/master-data/subjects", json("POST", { name })),
+  updateSubject: (id: string, name: string) =>
+    request<Subject>(`/api/master-data/subjects/${segment(id)}`, json("PATCH", { name })),
+  deleteSubject: (id: string) =>
+    request<void>(`/api/master-data/subjects/${segment(id)}`, { method: "DELETE" }),
+  seedSubjects: (entity = "supplier_name") =>
+    request<Subject[]>("/api/master-data/subjects/from-datasets", json("POST", { entity })),
 
   pipelines: () => request<SavedPipeline[]>("/api/pipelines"),
   pipelineSteps: () => request<StepCatalogueEntry[]>("/api/pipelines/steps"),

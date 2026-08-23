@@ -8,12 +8,12 @@ POC for extracting structured data from invoice PDFs with local vision models ru
 - side-by-side PDF preview of the uploaded document during review;
 - one vision-model call containing the first pages allowed by the configured page maximum;
 - explicit cut notice showing processed pages and total pages;
-- persistent model selection in Settings;
-- automatic discovery and periodic refresh of installed vision-capable models;
+- persistent model and pipeline selection;
+- automatic discovery and periodic refresh of installed models, vision or text-only;
 - explicit single-model `Load & warm up` phase with separate load and warm-up timing;
-- configurable maximum pages per extraction request;
+- composable pipelines: page rendering, Document AI OCR and Layout Parser, the model call, per-field regex rules and master-data lookup, with a per-pipeline page limit;
 - editable system, extraction and confidence prompts;
-- configurable entities with name, format and description;
+- configurable entities with name, format and description, each either read from the document or derived by a pipeline step;
 - qualitative `low`, `medium` or `high` confidence for every value;
 - field-tolerant validation: one invalid value is set to `null/low` without discarding valid fields;
 - editable review fields, including missing values, with undo and manual-edit tracking in the JSON export;
@@ -39,14 +39,16 @@ runs `npm run build` itself when `dist/` is missing.
 After changing any frontend code, restart with a rebuild in one step:
 
 ```powershell
-.estart.ps1
+.
+estart.ps1
 ```
 
 Building under a running server is what breaks the app silently: `vinext start`
 loads `dist/server/index.js` once and serves client chunks by content hash, so a
 rebuild leaves it pointing at hashes that no longer exist. The page still renders,
 but React never hydrates and every click does nothing. `npm test` runs a build,
-so re-run `.estart.ps1` after it.
+so re-run `.
+estart.ps1` after it.
 
 Run `npm test` for the type check, the frontend tests and the backend tests.
 

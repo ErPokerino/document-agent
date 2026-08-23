@@ -23,9 +23,19 @@ export type RegexRule = {
 
 export const DEFAULT_RENDER_SCALE = 1.35;
 
+export const DEFAULT_MINIMUM_SIMILARITY = 0.75;
+
 export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
   if (kind === "render_pages") return { scale: DEFAULT_RENDER_SCALE };
   if (kind === "regex_refine") return { rules: [] };
+  if (kind === "master_data_lookup") {
+    return {
+      source_entity: "",
+      target_entity: "",
+      algorithm: "combined",
+      minimum_similarity: DEFAULT_MINIMUM_SIMILARITY,
+    };
+  }
   // A Document AI step takes its processor from Settings unless it is told
   // otherwise, so it starts with nothing of its own.
   return {};
@@ -73,6 +83,11 @@ export function summarizeStep(step: PipelineStep): string {
   if (step.kind === "document_ai_ocr") return "OCR text from Document AI";
   if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
   if (step.kind === "llm_extract") return "One call to the configured model";
+  if (step.kind === "master_data_lookup") {
+    const config = step.config as { source_entity?: string; target_entity?: string };
+    if (!config.source_entity || !config.target_entity) return "Lookup not configured";
+    return `${config.source_entity} → ${config.target_entity}`;
+  }
   if (step.kind === "regex_refine") {
     const count = rulesOf(step).length;
     return count === 1 ? "1 rule" : `${count} rules`;
@@ -98,4 +113,43 @@ export function pageLimitProblem(input: string): string | null {
     return `The page limit must be a whole number between ${MIN_PAGES} and ${MAX_PAGES}.`;
   }
   return null;
+}
+
+export type CatalogueGroup = {
+  title: string;
+  blurb: string;
+  entries: Pick<StepCatalogueEntry, "kind" | "label">[];
+};
+
+// Three questions, in the order a pipeline answers them: what is on the page,
+// what does a model make of it, and what follows from that. A step nobody
+// placed lands in the last group rather than disappearing.
+const GROUPS: { title: string; blurb: string; kinds: string[] }[] = [
+  {
+    title: "Read the document",
+    blurb: "Turn the PDF into something a later step can use.",
+    kinds: ["render_pages", "document_ai_ocr", "document_ai_layout"],
+  },
+  { title: "Ask a model", blurb: "One call that fills the extracted fields.", kinds: ["llm_extract"] },
+  {
+    title: "Work out the rest",
+    blurb: "Deterministic steps over what is already there.",
+    kinds: ["regex_refine", "master_data_lookup"],
+  },
+];
+
+export function groupCatalogue(
+  catalogue: Pick<StepCatalogueEntry, "kind" | "label">[],
+): CatalogueGroup[] {
+  const placed = new Set(GROUPS.flatMap((group) => group.kinds));
+  const groups = GROUPS.map((group) => ({
+    title: group.title,
+    blurb: group.blurb,
+    entries: group.kinds
+      .map((kind) => catalogue.find((entry) => entry.kind === kind))
+      .filter((entry): entry is Pick<StepCatalogueEntry, "kind" | "label"> => entry !== undefined),
+  }));
+  const unplaced = catalogue.filter((entry) => !placed.has(entry.kind));
+  if (unplaced.length) groups[groups.length - 1].entries.push(...unplaced);
+  return groups.filter((group) => group.entries.length > 0);
 }

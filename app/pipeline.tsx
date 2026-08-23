@@ -22,8 +22,10 @@ import { InfoHint } from "./info-hint";
 import {
   MAX_PAGES,
   MIN_PAGES,
+  DEFAULT_MINIMUM_SIMILARITY,
   addStep,
   emptyRule,
+  groupCatalogue,
   moveStep,
   pageLimitProblem,
   removeStep,
@@ -75,6 +77,10 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
 
   const inUse = draftSettings.pipeline;
   const entityNames = entities.map((entity) => entity.name);
+  const modelEntities = entities.filter((entity) => (entity.source ?? "model") === "model");
+  const derivedEntityNames = entities
+    .filter((entity) => entity.source === "derived")
+    .map((entity) => entity.name);
 
   async function refresh() {
     setPipelines(await api.pipelines());
@@ -424,6 +430,102 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                     </div>
                   )}
 
+                  {step.kind === "document_ai_ocr" && (
+                    <div className="flow-step-body">
+                      <p className="field-help">
+                        Uses the OCR processor configured in Settings. Billed by Google per page, so
+                        only the pages this pipeline allows are sent.
+                      </p>
+                    </div>
+                  )}
+
+                  {step.kind === "document_ai_layout" && (
+                    <div className="flow-step-body">
+                      <p className="field-help">
+                        Uses the Layout Parser configured in Settings. Costs more per page than OCR
+                        and keeps the headings, tables and lists around the text.
+                      </p>
+                    </div>
+                  )}
+
+                  {step.kind === "master_data_lookup" && (() => {
+                    const config = step.config as {
+                      source_entity?: string;
+                      target_entity?: string;
+                      algorithm?: string;
+                      minimum_similarity?: number;
+                    };
+                    const update = (change: Record<string, unknown>) =>
+                      setSteps(setStepConfig(draft.steps, index, { ...config, ...change }));
+                    const threshold = Number(config.minimum_similarity ?? DEFAULT_MINIMUM_SIMILARITY);
+                    return (
+                      <div className="flow-step-body">
+                        <div className="flow-lookup">
+                          <label>
+                            <span>Match this field
+                              <InfoHint text="The extracted value that is compared with the register, usually the supplier name as printed on the document." />
+                            </span>
+                            <select value={config.source_entity ?? ""} onChange={(event) => update({ source_entity: event.target.value })}>
+                              <option value="">Choose a field…</option>
+                              {modelEntities.map((entity) => (
+                                <option key={entity.name} value={entity.name}>{entity.name}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Against
+                              <InfoHint text="The reference table to search. Manage its rows in Master Data." />
+                            </span>
+                            <select value="subjects" disabled>
+                              <option value="subjects">Suppliers register</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>Fill this field
+                              <InfoHint text="Where the matched row's identifier is written. Only a derived entity can be chosen: an extracted one is the model's answer and this step must not overwrite it." />
+                            </span>
+                            <select value={config.target_entity ?? ""} onChange={(event) => update({ target_entity: event.target.value })}>
+                              <option value="">Choose a field…</option>
+                              {derivedEntityNames.map((name) => (
+                                <option key={name} value={name}>{name}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Compare by
+                              <InfoHint text="Words compares the sets of words, so order and dropped words do not matter. Letters compares three-letter sequences, which survives an OCR typo. Both takes whichever score is higher." align="end" />
+                            </span>
+                            <select value={config.algorithm ?? "combined"} onChange={(event) => update({ algorithm: event.target.value })}>
+                              <option value="combined">Both, whichever is stronger</option>
+                              <option value="token_set">Words</option>
+                              <option value="trigram">Letters</option>
+                            </select>
+                          </label>
+                          <label className="flow-threshold">
+                            <span>Accept from
+                              <InfoHint text="Below this the field is left empty and the run says which score it reached, because an identifier that is wrong but looks like data is worse than a gap." align="end" />
+                            </span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              value={threshold}
+                              onChange={(event) => update({ minimum_similarity: Number(event.target.value) })}
+                            />
+                            <output>{threshold.toFixed(2)}</output>
+                          </label>
+                        </div>
+                        {derivedEntityNames.length === 0 && (
+                          <p className="field-help">
+                            There is no derived entity to fill yet. Create one in Entities, under
+                            &ldquo;Worked out from the rest&rdquo;.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {step.kind === "regex_refine" && (
                     <div className="flow-step-body">
                       <div className="flow-rules">
@@ -505,10 +607,21 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
           </div>
 
           <div className="flow-add-step">
-            {catalogue.map((entry) => (
-              <button className="secondary-button small" key={entry.kind} onClick={() => setSteps(addStep(draft.steps, entry.kind as StepKind))}>
-                <Plus size={13} /> {entry.label}
-              </button>
+            {groupCatalogue(catalogue).map((group) => (
+              <div className="flow-add-group" key={group.title}>
+                <span className="flow-add-title">{group.title}<InfoHint text={group.blurb} /></span>
+                <div className="flow-add-buttons">
+                  {group.entries.map((entry) => (
+                    <button
+                      className="secondary-button small"
+                      key={entry.kind}
+                      onClick={() => setSteps(addStep(draft.steps, entry.kind as StepKind))}
+                    >
+                      <Plus size={13} /> {entry.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 

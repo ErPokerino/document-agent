@@ -15,6 +15,7 @@ import {
   FileJson,
   FileText,
   LayoutDashboard,
+  Library,
   LoaderCircle,
   Pencil,
   RotateCcw,
@@ -32,6 +33,8 @@ import { ChangeEvent, DragEvent, Fragment, useEffect, useRef, useState } from "r
 import { api } from "../lib/api";
 import { resolveBootstrap } from "../lib/bootstrap";
 import { Datasets } from "./datasets";
+import { Entities } from "./entities";
+import { MasterData } from "./master-data";
 import { Lab } from "./lab";
 import { Models, formatBytes, modelStateLabels } from "./models";
 import { Pipelines } from "./pipeline";
@@ -52,10 +55,21 @@ import type {
   GeminiKeyStatus,
 } from "../lib/types";
 
-type View = "workspace" | "prompts" | "pipelines" | "datasets" | "lab" | "models" | "settings";
+type View =
+  | "workspace"
+  | "entities"
+  | "prompts"
+  | "pipelines"
+  | "master-data"
+  | "datasets"
+  | "lab"
+  | "models"
+  | "settings";
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
-  prompts: { eyebrow: "Extraction target", title: "Prompts" },
+  entities: { eyebrow: "Extraction target", title: "Entities" },
+  prompts: { eyebrow: "How the model is asked", title: "Prompts" },
+  "master-data": { eyebrow: "Reference tables", title: "Master Data" },
   pipelines: { eyebrow: "How a document is processed", title: "Pipelines" },
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
   lab: { eyebrow: "Extraction quality", title: "Lab" },
@@ -525,11 +539,17 @@ export default function Home() {
           <button className={`nav-item ${view === "workspace" ? "active" : ""}`} onClick={() => setView("workspace")}>
             <LayoutDashboard size={17} /> Workspace
           </button>
+          <button className={`nav-item ${view === "entities" ? "active" : ""}`} onClick={() => setView("entities")}>
+            <Braces size={17} /> Entities
+          </button>
           <button className={`nav-item ${view === "prompts" ? "active" : ""}`} onClick={() => setView("prompts")}>
-            <Braces size={17} /> Prompts
+            <Sparkles size={17} /> Prompts
           </button>
           <button className={`nav-item ${view === "pipelines" ? "active" : ""}`} onClick={() => setView("pipelines")}>
             <Workflow size={17} /> Pipelines
+          </button>
+          <button className={`nav-item ${view === "master-data" ? "active" : ""}`} onClick={() => setView("master-data")}>
+            <Library size={17} /> Master Data
           </button>
           <button className={`nav-item ${view === "datasets" ? "active" : ""}`} onClick={() => setView("datasets")}>
             <Database size={17} /> Datasets
@@ -692,6 +712,16 @@ export default function Home() {
               </div>
             )}
           </section>
+        ) : view === "entities" ? (
+          <Entities
+            draftSettings={draftSettings}
+            setDraftSettings={setDraftSettings}
+            onSave={saveSettings}
+            settingsState={settingsState}
+            settingsError={settingsError}
+          />
+        ) : view === "master-data" ? (
+          <MasterData />
         ) : view === "prompts" ? (
           <Prompts
             draftSettings={draftSettings}
