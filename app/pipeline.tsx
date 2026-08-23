@@ -63,21 +63,50 @@ const sourceLabels: Record<RegexRule["source"], string> = {
 };
 
 // Every measure normalizes both names first — accents folded, punctuation
-// dropped, legal forms like S.r.l. or Ltd removed — then scores what is left.
-const algorithmHints: Record<string, string> = {
-  combined:
-    "The highest score any of the others gives, so one kind of noise cannot hide a match another kind would find. Unrelated names still score around 0.4, because Jaro-Winkler is in the mix: keep the threshold well above that.",
-  exact:
-    "The normalized names are the same string, or they are not: 1 or 0. Use it when the register is authoritative and anything less should be looked at by a person.",
-  token_set:
-    "Sørensen-Dice over the sets of words: twice the shared words over the total. Order and repeats do not matter, so 'Rossi Trasporti' matches 'Trasporti Rossi S.r.l.'. Blind to a typo inside a word.",
-  trigram:
-    "Sørensen-Dice over the sets of three-letter sequences. Survives a misread letter, and still sees a word that moved. Weak on very short names, which have few triples.",
-  levenshtein:
-    "1 minus the edit distance over the longer name: the number of single-character insertions, deletions and substitutions needed to turn one into the other. The strictest measure of 'almost the same text'; punishes two swapped letters twice.",
-  jaro_winkler:
-    "The classic name-matching measure: characters matching within a window, transpositions half-priced, plus a bonus for a shared prefix. Best on short names and swapped letters; generous, so unrelated names score around 0.4.",
-};
+// dropped, legal forms like S.r.l. or Ltd removed — then scores what is left
+// from 0 to 1. One list, so the options and their explanations cannot drift.
+const algorithms = [
+  {
+    value: "combined",
+    label: "Best of all of them",
+    explanation:
+      "Takes the highest score any of the others gives, so one kind of noise cannot hide a match another kind would have found. Note it inherits Jaro-Winkler's floor: unrelated names still score around 0.4, so keep the threshold well above that.",
+  },
+  {
+    value: "exact",
+    label: "Exact match",
+    explanation:
+      "The two normalized names are the same string, or they are not: 1 or 0, nothing between. Use it when the register is authoritative and a near miss should be looked at by a person rather than guessed at.",
+  },
+  {
+    value: "token_set",
+    label: "Shared words",
+    explanation:
+      "Sørensen-Dice over the sets of words: twice the words in common, over the total number of words. Order and repeats do not matter, so “Rossi Trasporti” matches “Trasporti Rossi S.r.l.”. Blind to a typo inside a word.",
+  },
+  {
+    value: "trigram",
+    label: "Shared letter triples",
+    explanation:
+      "The same Sørensen-Dice, over the sets of three-letter sequences instead of words. A misread letter only spoils the three triples that contain it, so it survives OCR noise, and a word that moved keeps its triples. Weak on very short names, which have few.",
+  },
+  {
+    value: "levenshtein",
+    label: "Edit distance",
+    explanation:
+      "1 minus the edit distance divided by the longer name: how many single-character insertions, deletions and substitutions it would take to turn one name into the other. The strictest measure of “almost the same text”, and it charges twice for two letters swapped.",
+  },
+  {
+    value: "jaro_winkler",
+    label: "Jaro-Winkler",
+    explanation:
+      "The classic for names: counts characters matching within a sliding window, charges half for transpositions, then adds a bonus for a shared prefix, because names that start alike usually are alike. Best on short names and swapped letters, and generous — unrelated names score around 0.4.",
+  },
+] as const;
+
+function algorithmFor(value: string | undefined) {
+  return algorithms.find((algorithm) => algorithm.value === value) ?? algorithms[0];
+}
 
 /** Compose the steps a document goes through, and save that as a pipeline. */
 export function Pipelines({ draftSettings, entities, onUse }: Props) {
@@ -534,15 +563,12 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                           </label>
                           <label>
                             <span>Compare by
-                              <InfoHint text={algorithmHints[config.algorithm ?? "combined"]} align="end" />
+                              <InfoHint text="How close two names have to be counted. Every measure normalizes both first, then scores from 0 to 1; the one you pick is explained under it, and the threshold beside it decides what counts as a match." align="end" />
                             </span>
                             <select value={config.algorithm ?? "combined"} onChange={(event) => update({ algorithm: event.target.value })}>
-                              <option value="combined">Best of all of them</option>
-                              <option value="exact">Exact match</option>
-                              <option value="token_set">Shared words</option>
-                              <option value="trigram">Shared letter triples</option>
-                              <option value="levenshtein">Edit distance</option>
-                              <option value="jaro_winkler">Jaro-Winkler</option>
+                              {algorithms.map((algorithm) => (
+                                <option key={algorithm.value} value={algorithm.value}>{algorithm.label}</option>
+                              ))}
                             </select>
                           </label>
                           <label className="flow-threshold">
@@ -560,6 +586,10 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                             <output>{threshold.toFixed(2)}</output>
                           </label>
                         </div>
+                        <p className="field-help flow-algorithm-note">
+                          <strong>{algorithmFor(config.algorithm).label}:</strong>{" "}
+                          {algorithmFor(config.algorithm).explanation}
+                        </p>
                         {derivedEntityNames.length === 0 && (
                           <p className="field-help">
                             There is no derived entity to fill yet. Create one in Extraction, under

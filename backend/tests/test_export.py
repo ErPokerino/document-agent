@@ -24,6 +24,7 @@ def detail(documents) -> EvaluationDetail:
         error=None,
         max_pages=1,
         pipeline="Vision extraction",
+        steps=["render_pages", "llm_extract"],
         succeeded_documents=sum(d.status == "ok" for d in documents),
         failed_documents=sum(d.status == "failed" for d in documents),
         pending_documents=0,

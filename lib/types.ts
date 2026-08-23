@@ -80,6 +80,7 @@ export type Evaluation = {
   error: string | null;
   max_pages: number;
   pipeline: string;
+  steps: string[];
   succeeded_documents: number;
   failed_documents: number;
   pending_documents: number;
@@ -104,6 +105,7 @@ export type EvaluationDetail = {
   error: string | null;
   max_pages: number;
   pipeline: string;
+  steps: string[];
   succeeded_documents: number;
   failed_documents: number;
   pending_documents: number;
@@ -162,6 +164,7 @@ export type ExtractionRun = {
   source: string;
   provider: string;
   pipeline: string;
+  steps: string[];
   has_corrections: boolean;
 };
 
@@ -177,6 +180,7 @@ export type ExtractionRunDetail = {
   source: string;
   provider: string;
   pipeline: string;
+  steps: string[];
   has_corrections: boolean;
   prompts: PromptConfiguration;
   extraction: Record<string, FieldExtraction>;

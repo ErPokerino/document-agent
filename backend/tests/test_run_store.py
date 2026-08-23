@@ -173,3 +173,13 @@ def test_a_run_recorded_before_pipelines_existed_reads_as_the_default(tmp_path) 
         connection.execute("UPDATE runs SET pipeline = NULL WHERE id = ?", (run_id,))
 
     assert RunStore(path).get_run(run_id).pipeline == PipelineDefinition.default().name
+
+
+def test_a_run_records_the_steps_that_actually_ran(store) -> None:
+    run_id = record(store, steps=["document_ai_layout", "llm_extract"])
+
+    assert store.get_run(run_id).steps == ["document_ai_layout", "llm_extract"]
+
+
+def test_a_run_from_before_the_steps_were_recorded_lists_none(store) -> None:
+    assert store.get_run(record(store)).steps == []

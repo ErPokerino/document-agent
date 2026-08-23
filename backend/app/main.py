@@ -564,6 +564,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             source="workspace",
             provider=settings.provider,
             pipeline=settings.pipeline,
+            steps=[step.kind.value for step in _selected_pipeline(settings).steps],
         )
 
         return ExtractionResponse(
@@ -617,6 +618,7 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "error",
                 "max_pages",
                 "pipeline",
+                "steps",
                 "succeeded_documents",
                 "failed_documents",
                 "pending_documents",
@@ -1141,6 +1143,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
             source="labelling",
             provider=settings.provider,
             pipeline=settings.pipeline,
+            steps=[step.kind.value for step in _selected_pipeline(settings).steps],
         )
         return DraftLabels(
             document=document,
@@ -1241,6 +1244,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         total_documents=len(documents),
         max_pages=pipeline_definition.page_limit,
         pipeline=settings.pipeline,
+        steps=[step.kind.value for step in pipeline_definition.steps],
     )
     evaluation_cancelled = asyncio.Event()
 
@@ -1260,6 +1264,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 max_pages=pipeline_definition.page_limit,
                 steps=steps,
                 pipeline_name=settings.pipeline,
+                pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
                 make_context=lambda name, content: _pipeline_context(settings, name, content),
                 cancelled=cancelled,
             )
@@ -1372,6 +1377,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 max_pages=page_limit,
                 steps=steps,
                 pipeline_name=detail.pipeline,
+                pipeline_steps=detail.steps,
                 make_context=lambda name, content: _pipeline_context(
                     settings.model_copy(update={"model": detail.model}), name, content
                 ),

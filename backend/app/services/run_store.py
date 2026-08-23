@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS runs (
     extraction_json TEXT    NOT NULL,
     source          TEXT    NOT NULL,
     provider        TEXT    NOT NULL DEFAULT 'lm_studio',
-    pipeline        TEXT
+    pipeline        TEXT,
+    steps           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS run_corrections (
@@ -66,6 +67,8 @@ class RunSummary:
     source: str
     provider: str
     pipeline: str
+    # What actually ran, in order, rather than only the name it ran under.
+    steps: list[str]
     has_corrections: bool
 
 
@@ -99,6 +102,8 @@ class RunStore:
                 # Nullable on purpose: a run from before pipelines existed has no
                 # honest answer, and reads back as the default pipeline.
                 connection.execute("ALTER TABLE runs ADD COLUMN pipeline TEXT")
+            if "steps" not in existing:
+                connection.execute("ALTER TABLE runs ADD COLUMN steps TEXT")
 
     def read_document(self, file_sha256: str) -> bytes | None:
         path = self._document_path(file_sha256)
@@ -136,6 +141,7 @@ class RunStore:
         source: str = "workspace",
         provider: str = "lm_studio",
         pipeline: str | None = None,
+        steps: list[str] | None = None,
     ) -> int:
         serialized = {
             name: field.model_dump(mode="json") for name, field in extraction.items()
@@ -149,8 +155,8 @@ class RunStore:
                 """
                 INSERT INTO runs (created_at, filename, file_sha256, model, page_count,
                                   processed_pages, elapsed_ms, prompts_json, extraction_json,
-                                  source, provider, pipeline)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source, provider, pipeline, steps)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -165,6 +171,7 @@ class RunStore:
                     source,
                     provider,
                     pipeline or PipelineDefinition.default().name,
+                    ",".join(steps or []),
                 ),
             )
             return int(cursor.lastrowid)
@@ -260,5 +267,6 @@ class RunStore:
             source=row["source"],
             provider=row["provider"],
             pipeline=row["pipeline"] or PipelineDefinition.default().name,
+            steps=[step for step in (row["steps"] or "").split(",") if step],
             has_corrections=bool(row["correction_count"]),
         )

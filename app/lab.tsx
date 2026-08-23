@@ -39,6 +39,7 @@ import {
   type EvaluationFilters,
 } from "../lib/run-filters";
 import { runsToCsv } from "../lib/runs-csv";
+import { stepLabel } from "../lib/pipeline-editor";
 import { entitiesIn, scoreWithout } from "../lib/scoring-view";
 import { nextSort, sortEvaluations, type Sort, type SortKey } from "../lib/run-sort";
 import type { AppSettings, Dataset, Evaluation, EvaluationDetail, MetricTally } from "../lib/types";
@@ -415,6 +416,14 @@ export function Lab({ draftSettings, isModelReady }: Props) {
 
       <div className="run-tags">
         <span className="model-tag">{openEvaluation.model}</span>
+        <span className="pipeline-tag">
+          <Workflow size={11} /> {openEvaluation.pipeline}
+        </span>
+        {openEvaluation.steps.length > 0 && (
+          <span className="steps-tag" title="The steps this run actually went through, in order">
+            {openEvaluation.steps.map(stepLabel).join(" → ")}
+          </span>
+        )}
         <span className="pages-tag">{openEvaluation.max_pages || "?"} pages per extraction</span>
         <span className="pages-tag">{openEvaluation.prompts.entities.length} entities</span>
         {openEvaluation.prompt_tokens > 0 && (

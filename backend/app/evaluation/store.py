@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS evaluations (
     total_documents     INTEGER NOT NULL,
     error               TEXT,
     max_pages           INTEGER NOT NULL DEFAULT 0,
-    pipeline            TEXT
+    pipeline            TEXT,
+    steps               TEXT
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_documents (
@@ -98,6 +99,9 @@ class EvaluationSummary:
     error: str | None
     max_pages: int
     pipeline: str
+    # What actually ran, in order. The pipeline name is a label and can be
+    # edited or reused; this is the only record of the shape of the run.
+    steps: list[str]
     succeeded_documents: int
     failed_documents: int
     pending_documents: int
@@ -150,6 +154,9 @@ class EvaluationStore:
         if "pipeline" not in existing:
             # Nullable: a run started before pipelines existed ran the default one.
             connection.execute("ALTER TABLE evaluations ADD COLUMN pipeline TEXT")
+        if "steps" not in existing:
+            # A run from before this says nothing rather than claiming a shape.
+            connection.execute("ALTER TABLE evaluations ADD COLUMN steps TEXT")
 
         document_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
@@ -196,14 +203,15 @@ class EvaluationStore:
         total_documents: int,
         max_pages: int = 0,
         pipeline: str | None = None,
+        steps: list[str] | None = None,
     ) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO evaluations
                     (created_at, dataset, model, prompts_json, status, total_documents,
-                     max_pages, pipeline)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
+                     max_pages, pipeline, steps)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -213,6 +221,7 @@ class EvaluationStore:
                     total_documents,
                     max_pages,
                     pipeline or PipelineDefinition.default().name,
+                    ",".join(steps or []),
                 ),
             )
             return int(cursor.lastrowid)
@@ -457,6 +466,7 @@ class EvaluationStore:
             error=row["error"],
             max_pages=row["max_pages"],
             pipeline=row["pipeline"] or PipelineDefinition.default().name,
+            steps=[step for step in (row["steps"] or "").split(",") if step],
             succeeded_documents=int(progress["succeeded"] or 0),
             failed_documents=int(progress["failed"] or 0),
             pending_documents=max(row["total_documents"] - completed, 0),

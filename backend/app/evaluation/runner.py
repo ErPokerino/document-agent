@@ -40,6 +40,7 @@ async def run_evaluation(
     # settings that Workspace had.
     make_context: Callable[[str, bytes], PipelineContext],
     pipeline_name: str = DEFAULT_PIPELINE_NAME,
+    pipeline_steps: list[str] | None = None,
     provider: str = "lm_studio",
     cancelled: asyncio.Event | None = None,
 ) -> None:
@@ -96,6 +97,7 @@ async def run_evaluation(
                     source="evaluation",
                     provider=provider,
                     pipeline=pipeline_name,
+                    steps=pipeline_steps or [],
                 )
 
         evaluations.complete(evaluation_id)

@@ -153,3 +153,21 @@ export function groupCatalogue(
   if (unplaced.length) groups[groups.length - 1].entries.push(...unplaced);
   return groups.filter((group) => group.entries.length > 0);
 }
+
+/** What a step kind is called, without needing the backend catalogue.
+
+    Used where a recorded run is shown: a run from months ago names step kinds
+    that must stay readable even if the catalogue changes around them.
+ */
+export const STEP_LABELS: Record<string, string> = {
+  render_pages: "Render pages",
+  document_ai_ocr: "Document AI OCR",
+  document_ai_layout: "Document AI Layout Parser",
+  llm_extract: "LLM extraction",
+  regex_refine: "Regex refinement",
+  master_data_lookup: "Master data lookup",
+};
+
+export function stepLabel(kind: string): string {
+  return STEP_LABELS[kind] ?? kind;
+}

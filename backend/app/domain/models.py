@@ -329,6 +329,7 @@ class ExtractionRun(BaseModel):
     source: str
     provider: str
     pipeline: str
+    steps: list[str] = Field(default_factory=list)
     has_corrections: bool
 
 
@@ -383,6 +384,7 @@ class Evaluation(BaseModel):
     error: str | None = None
     max_pages: int
     pipeline: str
+    steps: list[str] = Field(default_factory=list)
     succeeded_documents: int
     failed_documents: int
     pending_documents: int

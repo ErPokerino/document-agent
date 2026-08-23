@@ -406,3 +406,24 @@ def test_a_run_that_never_touched_document_ai_counts_no_pages(store) -> None:
     store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 1.0), 100)
 
     assert store.get_evaluation(evaluation_id).ocr_pages == 0
+
+
+def test_a_run_records_the_steps_that_actually_ran(store) -> None:
+    """A pipeline name is a label: it can be edited, and two pipelines can be
+    renamed into each other's names. What ran is the list of steps."""
+    evaluation_id = store.start(
+        dataset="invoices",
+        model="m",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        pipeline="Layout then LLM",
+        steps=["document_ai_layout", "llm_extract"],
+    )
+
+    assert store.get_evaluation(evaluation_id).steps == ["document_ai_layout", "llm_extract"]
+
+
+def test_a_run_from_before_the_steps_were_recorded_says_nothing_rather_than_guessing(store) -> None:
+    evaluation_id = start(store)
+
+    assert store.get_evaluation(evaluation_id).steps == []
