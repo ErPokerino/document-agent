@@ -18,7 +18,13 @@ from typing import Any
 
 import httpx
 
-from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, PromptConfiguration
+from app.domain.models import (
+    EntityDefinition,
+    EntityFormat,
+    FieldExtraction,
+    PromptConfiguration,
+    model_entities,
+)
 from app.services.field_validation import validate_result
 from app.services.lm_studio import DOCUMENT_TEXT_HEADER
 
@@ -74,6 +80,7 @@ class GeminiClient:
         exist here at all, so formats are stated in the description and enforced
         by the shared validation once the answer comes back.
         """
+        entities = model_entities(entities)
         types = {
             EntityFormat.decimal: "NUMBER",
             EntityFormat.integer: "INTEGER",

@@ -2,7 +2,7 @@ import base64
 
 import pymupdf
 
-from app.domain.models import PromptConfiguration
+from app.domain.models import EntityDefinition, FieldExtraction, PromptConfiguration
 from app.pipeline.engine import PipelineContext
 from app.pipeline.regex_refine import apply_rules
 from app.services.document_ai import (
@@ -12,6 +12,8 @@ from app.services.document_ai import (
     text_from_ocr,
 )
 from app.services.gemini import GeminiClient
+from app.services.master_data import SubjectStore
+from app.services.similarity import DEFAULT_ALGORITHM, similarity
 from app.services.lm_studio import LMStudioClient
 
 
@@ -225,3 +227,84 @@ def _first_pages(content: bytes, pages: int) -> bytes:
             trimmed.close()
     finally:
         source.close()
+
+
+# What a similarity score means in the three words the rest of the app speaks.
+# A match below the pipeline's threshold never gets here: it is refused.
+HIGH_SIMILARITY = 0.95
+MEDIUM_SIMILARITY = 0.8
+
+
+def confidence_from_similarity(score: float) -> str:
+    if score >= HIGH_SIMILARITY:
+        return "high"
+    if score >= MEDIUM_SIMILARITY:
+        return "medium"
+    return "low"
+
+
+class LookUpInMasterData:
+    """Fill an entity the document never carried, from the supplier register.
+
+    The document says "UL VS LTD"; what handles it downstream needs the
+    internal id, which is on no page. This compares the extracted name with
+    every name in the register and takes the best, provided it is close enough
+    to be worth trusting — how close is the pipeline's decision, not ours.
+    """
+
+    def __init__(
+        self,
+        *,
+        entities: list[EntityDefinition],
+        subjects: SubjectStore,
+        source_entity: str,
+        target_entity: str,
+        algorithm: str = DEFAULT_ALGORITHM,
+        minimum_similarity: float = 0.75,
+    ) -> None:
+        self.entities = entities
+        self.subjects = subjects
+        self.source_entity = source_entity
+        self.target_entity = target_entity
+        self.algorithm = algorithm
+        self.minimum_similarity = minimum_similarity
+
+    def _refused(self, warning: str) -> FieldExtraction:
+        return FieldExtraction(value=None, confidence="low", warning=warning)
+
+    async def run(self, context: PipelineContext) -> None:
+        extraction: dict[str, FieldExtraction] = dict(context.artifacts.get("extraction") or {})
+        source = extraction.get(self.source_entity)
+        name = "" if source is None or source.value is None else str(source.value).strip()
+
+        if not name:
+            extraction[self.target_entity] = self._refused(
+                f"No {self.source_entity} was extracted, so there was nothing to look up."
+            )
+            context.artifacts["extraction"] = extraction
+            return
+
+        register = self.subjects.list()
+        if not register:
+            extraction[self.target_entity] = self._refused(
+                "The supplier register is empty. Add suppliers in Master Data."
+            )
+            context.artifacts["extraction"] = extraction
+            return
+
+        best = max(register, key=lambda subject: similarity(name, subject.name, self.algorithm))
+        score = round(similarity(name, best.name, self.algorithm), 4)
+
+        if score < self.minimum_similarity:
+            extraction[self.target_entity] = self._refused(
+                f"No supplier in the register is close enough to {name!r}: the best match "
+                f"scored {score:.2f}, below the {self.minimum_similarity:.2f} this pipeline asks for."
+            )
+        else:
+            extraction[self.target_entity] = FieldExtraction(
+                value=best.id_subject,
+                confidence=confidence_from_similarity(score),
+                score=score,
+                warning=None,
+            )
+        context.artifacts["extraction"] = extraction

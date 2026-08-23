@@ -39,6 +39,20 @@ class EntityDefinition(BaseModel):
     name: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$", min_length=1, max_length=64)]
     format: EntityFormat
     description: Annotated[str, Field(min_length=1, max_length=800)]
+    # Where the value comes from. A derived entity is never asked of the model:
+    # it is worked out from the others, or from the document text, by a step in
+    # the pipeline. It is still labelled and scored like any other field.
+    source: Literal["model", "derived"] = "model"
+
+
+def model_entities(entities: list["EntityDefinition"]) -> list["EntityDefinition"]:
+    """The ones the model is asked for, in order."""
+    return [entity for entity in entities if entity.source == "model"]
+
+
+def derived_entities(entities: list["EntityDefinition"]) -> list["EntityDefinition"]:
+    """The ones a pipeline step has to fill, in order."""
+    return [entity for entity in entities if entity.source == "derived"]
 
 
 def default_entities() -> list[EntityDefinition]:
@@ -95,6 +109,10 @@ class FieldExtraction(BaseModel):
     value: str | float | int | None
     confidence: Literal["low", "medium", "high"]
     warning: str | None = None
+    # Only a step that computes a number sets this: a lookup reports how close
+    # the match was. `confidence` stays the level everything else reads, so a
+    # derived field is scored and filtered exactly like any other.
+    score: float | None = None
 
 
 class ModelInfo(BaseModel):
@@ -434,3 +452,27 @@ class GcpKeyStatus(BaseModel):
     project_id: str = ""
     problem: str = ""
     verified_processors: list[str] = Field(default_factory=list)
+
+
+class Subject(BaseModel):
+    """One row of the supplier register."""
+
+    id_subject: str
+    name: str
+    normalized_name: str
+    created_at: str
+    source: str
+
+
+class SubjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class SeedSubjectsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Which labelled entity holds the name to register. Not hardcoded, because
+    # the next register will be built from a different field.
+    entity: Annotated[str, Field(min_length=1, max_length=64)] = "supplier_name"

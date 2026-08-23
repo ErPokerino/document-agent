@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
 
-export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "llm_extract" | "regex_refine";
+export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "llm_extract" | "regex_refine" | "master_data_lookup";
 
 export type Confidence = FieldExtraction["confidence"];
 
@@ -65,6 +65,7 @@ export type EntityDefinition = {
   name: string;
   format: EntityFormat;
   description: string;
+  source: "model" | "derived";
 };
 
 export type Evaluation = {
@@ -186,6 +187,7 @@ export type FieldExtraction = {
   value: string | number | null;
   confidence: "low" | "medium" | "high";
   warning: string | null;
+  score: number | null;
 };
 
 export type GcpKeyStatus = {
@@ -346,6 +348,10 @@ export type SavedPipeline = {
   problems: string[];
 };
 
+export type SeedSubjectsRequest = {
+  entity: string;
+};
+
 export type StepCatalogueEntry = {
   kind: string;
   label: string;
@@ -353,4 +359,16 @@ export type StepCatalogueEntry = {
   requires_all: string[];
   requires_any: string[];
   produces: string[];
+};
+
+export type Subject = {
+  id_subject: string;
+  name: string;
+  normalized_name: string;
+  created_at: string;
+  source: string;
+};
+
+export type SubjectRequest = {
+  name: string;
 };

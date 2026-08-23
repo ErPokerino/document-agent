@@ -195,3 +195,83 @@ async def test_the_text_a_reader_produced_reaches_the_model(monkeypatch) -> None
     await step_module.ExtractEntities(PROMPTS).run(context)
 
     assert seen["text"] == "ACME LTD"
+
+
+def test_a_lookup_step_is_built_with_the_register_and_the_threshold(tmp_path) -> None:
+    from app.pipeline.steps import LookUpInMasterData
+    from app.services.master_data import SubjectStore
+
+    subjects = SubjectStore(tmp_path / "docuflow.db")
+    definition = PipelineDefinition(
+        name="with lookup",
+        steps=[
+            PipelineStep(kind=StepKind.render_pages),
+            PipelineStep(kind=StepKind.llm_extract),
+            PipelineStep(
+                kind=StepKind.master_data_lookup,
+                config={
+                    "source_entity": "supplier_name",
+                    "target_entity": "id_subject",
+                    "algorithm": "trigram",
+                    "minimum_similarity": 0.6,
+                },
+            ),
+        ],
+    )
+
+    step = build_steps(definition, prompts=PROMPTS, entities=ENTITIES, subjects=subjects)[-1]
+
+    assert isinstance(step, LookUpInMasterData)
+    assert step.source_entity == "supplier_name"
+    assert step.target_entity == "id_subject"
+    assert step.algorithm == "trigram"
+    assert step.minimum_similarity == 0.6
+
+
+def test_a_lookup_with_no_target_is_refused_before_the_run(tmp_path) -> None:
+    from app.services.master_data import SubjectStore
+
+    definition = PipelineDefinition(
+        name="incomplete",
+        steps=[
+            PipelineStep(kind=StepKind.render_pages),
+            PipelineStep(kind=StepKind.llm_extract),
+            PipelineStep(kind=StepKind.master_data_lookup, config={"source_entity": "supplier_name"}),
+        ],
+    )
+
+    with pytest.raises(PipelineError, match="Step 3"):
+        build_steps(
+            definition,
+            prompts=PROMPTS,
+            entities=ENTITIES,
+            subjects=SubjectStore(tmp_path / "docuflow.db"),
+        )
+
+
+def test_a_lookup_with_an_unusable_threshold_is_refused(tmp_path) -> None:
+    from app.services.master_data import SubjectStore
+
+    definition = PipelineDefinition(
+        name="bad threshold",
+        steps=[
+            PipelineStep(kind=StepKind.render_pages),
+            PipelineStep(kind=StepKind.llm_extract),
+            PipelineStep(
+                kind=StepKind.master_data_lookup,
+                config={
+                    "source_entity": "supplier_name",
+                    "target_entity": "id_subject",
+                    "minimum_similarity": 4,
+                },
+            ),
+        ],
+    )
+
+    with pytest.raises(PipelineError, match="between 0 and 1"):
+        build_steps(
+            definition,
+            prompts=PROMPTS,
+            entities=ENTITIES,
+            subjects=SubjectStore(tmp_path / "docuflow.db"),
+        )

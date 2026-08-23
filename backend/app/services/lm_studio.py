@@ -23,6 +23,7 @@ from app.domain.models import (
     ModelInfo,
     PromptConfiguration,
     default_entities,
+    model_entities,
 )
 
 
@@ -672,7 +673,7 @@ class LMStudioClient:
     def _system_prompt(prompts: PromptConfiguration) -> str:
         entity_lines = "\n".join(
             f"- {entity.name} [{entity.format.value}]: {entity.description}"
-            for entity in prompts.entities
+            for entity in model_entities(prompts.entities)
         )
         return f"""{prompts.system_prompt.strip()}
 
@@ -689,6 +690,7 @@ Return only JSON that conforms to the supplied schema.
 
     @staticmethod
     def _generation_schema(entities: list[EntityDefinition]) -> dict[str, Any]:
+        entities = model_entities(entities)
         item_count = len(entities)
         value_keys = [entity.name for entity in entities]
         properties: dict[str, Any] = {}
@@ -737,6 +739,7 @@ Return only JSON that conforms to the supplied schema.
         payload: Any,
         entities: list[EntityDefinition],
     ) -> bool:
+        entities = model_entities(entities)
         item_count = len(entities)
         expected_keys = {entity.name for entity in entities} | {"c"}
         return (
@@ -754,6 +757,7 @@ Return only JSON that conforms to the supplied schema.
     ) -> dict[str, FieldExtraction]:
         if not LMStudioClient._named_response_shape_is_valid(payload, entities):
             raise ValueError("The response does not contain one named value and confidence per entity")
+        entities = model_entities(entities)
 
         confidence_names = {"l": "low", "m": "medium", "h": "high"}
         expanded = {

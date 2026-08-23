@@ -21,10 +21,13 @@ from app.pipeline.regex_refine import RegexRule
 from app.pipeline.steps import (
     ExtractEntities,
     InspectPdf,
+    LookUpInMasterData,
     ReadWithDocumentAi,
     RefineWithRegex,
     RenderPages,
 )
+from app.services.master_data import SubjectStore
+from app.services.similarity import ALGORITHMS, DEFAULT_ALGORITHM
 
 
 DEFAULT_RENDER_SCALE = 1.35
@@ -38,12 +41,34 @@ def _rules(config: dict[str, Any]) -> list[RegexRule]:
     return [RegexRule.model_validate(rule) for rule in config.get("rules", [])]
 
 
+def _required_entity(config: dict[str, Any], key: str) -> str:
+    name = str(config.get(key) or "").strip()
+    if not name:
+        raise ValueError(f"no {key.replace('_', ' ')} is chosen")
+    return name
+
+
+def _algorithm(config: dict[str, Any]) -> str:
+    algorithm = str(config.get("algorithm") or DEFAULT_ALGORITHM)
+    if algorithm not in ALGORITHMS:
+        raise ValueError(f"{algorithm!r} is not one of: {', '.join(ALGORITHMS)}")
+    return algorithm
+
+
+def _threshold(config: dict[str, Any]) -> float:
+    value = float(config.get("minimum_similarity", 0.75))
+    if not 0 <= value <= 1:
+        raise ValueError("the minimum similarity must be between 0 and 1")
+    return value
+
+
 def _build_one(
     step: PipelineStep,
     *,
     prompts: PromptConfiguration,
     entities: list[EntityDefinition],
     gcp: GcpSettings,
+    subjects: SubjectStore | None,
 ) -> Any:
     config = step.config
     if step.kind is StepKind.render_pages:
@@ -61,6 +86,17 @@ def _build_one(
         return ExtractEntities(prompts)
     if step.kind is StepKind.regex_refine:
         return RefineWithRegex(entities, _rules(config))
+    if step.kind is StepKind.master_data_lookup:
+        if subjects is None:
+            raise PipelineError("No master data register is available to look anything up in")
+        return LookUpInMasterData(
+            entities=entities,
+            subjects=subjects,
+            source_entity=_required_entity(config, "source_entity"),
+            target_entity=_required_entity(config, "target_entity"),
+            algorithm=_algorithm(config),
+            minimum_similarity=_threshold(config),
+        )
     raise PipelineError(f"No runnable step exists for '{step.kind.value}'")
 
 
@@ -70,6 +106,7 @@ def build_steps(
     prompts: PromptConfiguration,
     entities: list[EntityDefinition],
     gcp: GcpSettings | None = None,
+    subjects: SubjectStore | None = None,
     max_pages: int | None = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
@@ -88,6 +125,7 @@ def build_steps(
                     prompts=prompts,
                     entities=entities,
                     gcp=gcp or GcpSettings(),
+                    subjects=subjects,
                 )
             )
         except (ValidationError, ValueError) as exc:

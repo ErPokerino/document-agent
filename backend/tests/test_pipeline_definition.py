@@ -164,3 +164,41 @@ def test_a_pipeline_that_reads_text_does_not_need_a_vision_model() -> None:
 def test_a_pipeline_that_renders_and_ocrs_still_needs_vision() -> None:
     # Both artifacts are there, and the model is handed the images.
     assert requires_vision(pipeline(ocr(), render(), extract(), name="both")) is True
+
+
+def lookup(**config) -> PipelineStep:
+    return PipelineStep(kind=StepKind.master_data_lookup, config=config)
+
+
+def test_a_lookup_reads_entities_and_leaves_entities() -> None:
+    contract = contract_for(StepKind.master_data_lookup)
+
+    assert contract.requires_all == (Artifact.entities,)
+    assert contract.produces == (Artifact.entities,)
+
+
+def test_a_lookup_before_the_model_has_nothing_to_look_up() -> None:
+    problems = describe_problems(pipeline(render(), lookup(), extract(), name="backwards"))
+
+    assert any("entities" in problem for problem in problems)
+
+
+def test_a_pipeline_says_which_derived_entities_it_leaves_empty() -> None:
+    from app.domain.models import EntityDefinition, EntityFormat
+
+    entities = [
+        EntityDefinition(name="supplier_name", format=EntityFormat.text, description="x"),
+        EntityDefinition(
+            name="id_subject", format=EntityFormat.text, description="x", source="derived"
+        ),
+    ]
+
+    unfilled = describe_problems(
+        pipeline(render(), extract(), name="no lookup"), entities=entities
+    )
+
+    assert any("id_subject" in problem for problem in unfilled)
+    assert describe_problems(
+        pipeline(render(), extract(), lookup(target_entity="id_subject"), name="with lookup"),
+        entities=entities,
+    ) == []

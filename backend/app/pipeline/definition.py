@@ -40,6 +40,7 @@ class StepKind(str, Enum):
     document_ai_layout = "document_ai_layout"
     llm_extract = "llm_extract"
     regex_refine = "regex_refine"
+    master_data_lookup = "master_data_lookup"
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,13 @@ CONTRACTS: dict[StepKind, StepContract] = {
         kind=StepKind.regex_refine,
         label="Regex refinement",
         description="Rewrite or fill single fields with rules you control.",
+        requires_all=(Artifact.entities,),
+        produces=(Artifact.entities,),
+    ),
+    StepKind.master_data_lookup: StepContract(
+        kind=StepKind.master_data_lookup,
+        label="Master data lookup",
+        description="Fill a field the document never carried, by matching a name to the register.",
         requires_all=(Artifact.entities,),
         produces=(Artifact.entities,),
     ),
@@ -148,8 +156,27 @@ def requires_vision(pipeline: PipelineDefinition) -> bool:
     return False
 
 
-def describe_problems(pipeline: PipelineDefinition) -> list[str]:
-    """Everything wrong with this pipeline, in words someone can act on."""
+def filled_entities(pipeline: PipelineDefinition) -> set[str]:
+    """The entity names a step in this pipeline writes by itself."""
+    filled: set[str] = set()
+    for step in pipeline.steps:
+        if step.kind is StepKind.master_data_lookup:
+            target = str(step.config.get("target_entity") or "").strip()
+            if target:
+                filled.add(target)
+    return filled
+
+
+def describe_problems(
+    pipeline: PipelineDefinition,
+    entities: "list | None" = None,
+) -> list[str]:
+    """Everything wrong with this pipeline, in words someone can act on.
+
+    `entities` is optional so the shape of a pipeline can be checked on its
+    own. Given it, the check also covers the other half of the contract: a
+    derived entity nobody fills would be scored as wrong on every document.
+    """
     if not pipeline.steps:
         return ["The pipeline is empty: add at least a step that produces entities."]
 
@@ -176,4 +203,12 @@ def describe_problems(pipeline: PipelineDefinition) -> list[str]:
 
     if Artifact.entities not in available:
         problems.append("The pipeline produces no entities: nothing would come out of a run.")
+
+    filled = filled_entities(pipeline)
+    for entity in entities or []:
+        if getattr(entity, "source", "model") == "derived" and entity.name not in filled:
+            problems.append(
+                f"Nothing in this pipeline fills '{entity.name}', which is a derived entity. "
+                "Add the step that produces it, or it will be empty on every document."
+            )
     return problems

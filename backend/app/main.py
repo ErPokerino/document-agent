@@ -38,6 +38,9 @@ from app.domain.models import (
     PromptPreview,
     PromptPreviewRequest,
     SavedPipeline,
+    SeedSubjectsRequest,
+    Subject,
+    SubjectRequest,
     StepCatalogueEntry,
 )
 from app.evaluation.datasets import DatasetStore, InvalidName
@@ -57,6 +60,7 @@ from app.services.document_ai import DocumentAiClient, DocumentAiError, ServiceA
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
 from app.services.lm_studio import LMStudioClient, LMStudioError
 from app.services.run_store import RunStore
+from app.services.master_data import DuplicateSubject, SubjectStore, UnknownSubject
 from app.services.migrations import adopt_legacy_page_limit
 from app.services.settings_store import SettingsStore
 
@@ -83,6 +87,7 @@ settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
 dataset_store = DatasetStore(DATASETS_PATH)
+subject_store = SubjectStore(DATABASE_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
 # The page limit used to be one number for the whole app; carry an existing
 # install's value into the pipeline that inherits the job, then write the
@@ -505,6 +510,7 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
                 prompts=settings.prompts,
                 entities=settings.prompts.entities,
                 gcp=settings.gcp,
+                subjects=subject_store,
             )
         )
     except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
@@ -631,7 +637,7 @@ def _saved_pipeline(definition: PipelineDefinition) -> SavedPipeline:
         description=definition.description,
         page_limit=definition.page_limit,
         steps=definition.steps,
-        problems=describe_problems(definition),
+        problems=describe_problems(definition, settings_store.read().prompts.entities),
     )
 
 
@@ -649,6 +655,7 @@ def _refuse_unusable(definition: PipelineDefinition) -> None:
             prompts=settings.prompts,
             entities=settings.prompts.entities,
             gcp=settings.gcp,
+            subjects=subject_store,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -802,6 +809,60 @@ async def delete_pipeline(name: str) -> Response:
     except InvalidPipelineName as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UnknownPipeline as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.get("/api/master-data/subjects", response_model=list[Subject])
+async def list_subjects(query: str = "") -> list[Subject]:
+    return [Subject(**asdict(subject)) for subject in subject_store.list(query=query)]
+
+
+@app.post("/api/master-data/subjects", response_model=Subject, status_code=201)
+async def add_subject(request: SubjectRequest) -> Subject:
+    try:
+        return Subject(**asdict(subject_store.add(request.name)))
+    except DuplicateSubject as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/master-data/subjects/from-datasets", response_model=list[Subject])
+async def seed_subjects(request: SeedSubjectsRequest) -> list[Subject]:
+    """Register every supplier the labelled documents name, once each.
+
+    Only what is missing is added: a row someone corrected keeps its spelling.
+    """
+    names: list[str] = []
+    for dataset in dataset_store.list_datasets():
+        for document in dataset_store.list_documents(dataset.name):
+            label_file = dataset_store.read_labels(dataset.name, document.name)
+            if label_file is None:
+                continue
+            value = label_file.labels.get(request.entity)
+            if isinstance(value, str) and value.strip():
+                names.append(value.strip())
+    return [Subject(**asdict(subject)) for subject in subject_store.seed(names)]
+
+
+@app.patch("/api/master-data/subjects/{id_subject}", response_model=Subject)
+async def update_subject(id_subject: str, request: SubjectRequest) -> Subject:
+    try:
+        return Subject(**asdict(subject_store.update(id_subject, name=request.name)))
+    except UnknownSubject as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DuplicateSubject as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/master-data/subjects/{id_subject}", status_code=204, response_class=Response)
+async def delete_subject(id_subject: str) -> Response:
+    try:
+        subject_store.delete(id_subject)
+    except UnknownSubject as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)
 
@@ -1187,6 +1248,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
             prompts=detail.prompts,
             entities=detail.prompts.entities,
             gcp=settings.gcp,
+            subjects=subject_store,
         )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(
