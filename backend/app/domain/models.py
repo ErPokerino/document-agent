@@ -12,7 +12,7 @@ Never invent values or use knowledge that is not present in the document.
 Return null when a value is missing or unreadable.
 """
 
-DEFAULT_USER_PROMPT = """Extract the configured entities from invoice pages {page_range}.
+DEFAULT_USER_PROMPT = """Extract the configured entities from the invoice, page {page_range} of it.
 Check the header, tax summary and final payable amount carefully.
 Return only the requested JSON object.
 """
@@ -441,6 +441,9 @@ class SavedPipeline(BaseModel):
     # Empty when the pipeline can run. The UI shows these instead of letting
     # someone start a run that would fail on the first document.
     problems: list[str] = Field(default_factory=list)
+    # Worth knowing, but not a reason to refuse: a pipeline that fills only
+    # some of the derived entities is a legitimate thing to run and compare.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GcpKeyStatus(BaseModel):
@@ -454,25 +457,25 @@ class GcpKeyStatus(BaseModel):
     verified_processors: list[str] = Field(default_factory=list)
 
 
-class Subject(BaseModel):
-    """One row of the supplier register."""
-
-    id_subject: str
-    name: str
-    normalized_name: str
-    created_at: str
-    source: str
+class MasterDataColumn(BaseModel):
+    key: str
+    label: str
+    hint: str
+    kind: Literal["identifier", "text", "timestamp"]
+    editable: bool
 
 
-class SubjectRequest(BaseModel):
+class MasterDataTable(BaseModel):
+    key: str
+    label: str
+    description: str
+    id_column: str
+    seed_entity: str
+    match_column: str
+    columns: list[MasterDataColumn]
+
+
+class MasterDataRowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[str, Field(min_length=1, max_length=200)]
-
-
-class SeedSubjectsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # Which labelled entity holds the name to register. Not hardcoded, because
-    # the next register will be built from a different field.
-    entity: Annotated[str, Field(min_length=1, max_length=64)] = "supplier_name"
+    values: dict[str, str]

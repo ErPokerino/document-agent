@@ -232,6 +232,28 @@ export type LabelsRequest = {
   labels: Record<string, unknown>;
 };
 
+export type MasterDataColumn = {
+  key: string;
+  label: string;
+  hint: string;
+  kind: "identifier" | "text" | "timestamp";
+  editable: boolean;
+};
+
+export type MasterDataRowRequest = {
+  values: Record<string, string>;
+};
+
+export type MasterDataTable = {
+  key: string;
+  label: string;
+  description: string;
+  id_column: string;
+  seed_entity: string;
+  match_column: string;
+  columns: MasterDataColumn[];
+};
+
 export type MetricTally = {
   matched: number;
   total: number;
@@ -346,10 +368,7 @@ export type SavedPipeline = {
   page_limit: number;
   steps: PipelineStep[];
   problems: string[];
-};
-
-export type SeedSubjectsRequest = {
-  entity: string;
+  warnings: string[];
 };
 
 export type StepCatalogueEntry = {
@@ -359,16 +378,4 @@ export type StepCatalogueEntry = {
   requires_all: string[];
   requires_any: string[];
   produces: string[];
-};
-
-export type Subject = {
-  id_subject: string;
-  name: string;
-  normalized_name: string;
-  created_at: string;
-  source: string;
-};
-
-export type SubjectRequest = {
-  name: string;
 };

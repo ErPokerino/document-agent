@@ -32,6 +32,32 @@ if (-not (Get-ListenerPid 8000)) {
         -RedirectStandardError (Join-Path $runtime "backend.err.log")
 }
 
+# A build that landed under the running server leaves it importing chunk
+# names that no longer exist, and every page becomes a 500. `npm test` runs a
+# build, so this is one `npm test` away at any time: recover instead of
+# leaving someone to read a stack trace.
+$frontendPid = Get-ListenerPid 3000
+if ($frontendPid) {
+    try {
+        $probe = Invoke-WebRequest "http://localhost:3000" -UseBasicParsing -TimeoutSec 15
+        $healthy = $probe.StatusCode -eq 200
+    } catch {
+        $healthy = $false
+    }
+    if (-not $healthy) {
+        Write-Host "The running frontend cannot serve its own build. Rebuilding..."
+        & (Join-Path $projectRoot "stop.ps1") | Out-Null
+        Push-Location $projectRoot
+        try {
+            & npm.cmd run build
+            if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+}
+
 if (-not (Get-ListenerPid 3000)) {
     # `npm run start` serves dist/ and never builds it, so a fresh clone would
     # otherwise fail with an empty output directory.

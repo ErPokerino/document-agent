@@ -26,7 +26,7 @@ from app.domain.models import (
     model_entities,
 )
 from app.services.field_validation import validate_result
-from app.services.lm_studio import DOCUMENT_TEXT_HEADER
+from app.services.lm_studio import DOCUMENT_TEXT_HEADER, page_note
 
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -151,14 +151,8 @@ class GeminiClient:
         document_text: str = "",
     ) -> dict[str, FieldExtraction]:
         headers = self._headers()
-        page_note = (
-            f"Only the first {processed_pages} of {total_pages} pages are supplied. "
-            "Do not infer content from omitted pages. Return null for values that are not visible, "
-            "and do not treat subtotals or carried-forward amounts as the final total."
-            if processed_pages < total_pages
-            else "All pages of the document are supplied."
-        )
-        user_text = f"{prompts.user_prompt.replace('{page_range}', page_range).strip()}\n\n{page_note}"
+        note = page_note(total_pages=total_pages, processed_pages=processed_pages)
+        user_text = f"{prompts.user_prompt.replace('{page_range}', page_range).strip()}\n\n{note}"
         if document_text.strip():
             user_text = f"{user_text}\n\n{DOCUMENT_TEXT_HEADER}\n\n{document_text.strip()}"
         parts: list[dict[str, Any]] = [{"text": user_text}]

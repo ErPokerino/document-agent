@@ -1,6 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
+from app.domain.models import EntityDefinition, EntityFormat
+
 from app.pipeline.definition import (
     Artifact,
     PipelineDefinition,
@@ -8,6 +10,7 @@ from app.pipeline.definition import (
     StepKind,
     contract_for,
     describe_problems,
+    describe_warnings,
     requires_vision,
 )
 
@@ -183,22 +186,32 @@ def test_a_lookup_before_the_model_has_nothing_to_look_up() -> None:
     assert any("entities" in problem for problem in problems)
 
 
-def test_a_pipeline_says_which_derived_entities_it_leaves_empty() -> None:
-    from app.domain.models import EntityDefinition, EntityFormat
+ENTITIES_WITH_DERIVED = [
+    EntityDefinition(name="supplier_name", format=EntityFormat.text, description="x"),
+    EntityDefinition(name="id_subject", format=EntityFormat.text, description="x", source="derived"),
+]
 
-    entities = [
-        EntityDefinition(name="supplier_name", format=EntityFormat.text, description="x"),
-        EntityDefinition(
-            name="id_subject", format=EntityFormat.text, description="x", source="derived"
-        ),
-    ]
 
-    unfilled = describe_problems(
-        pipeline(render(), extract(), name="no lookup"), entities=entities
-    )
+def test_a_derived_entity_nobody_fills_is_a_warning_not_a_refusal() -> None:
+    """A pipeline that skips a derived field is a choice, not a mistake.
 
-    assert any("id_subject" in problem for problem in unfilled)
-    assert describe_problems(
-        pipeline(render(), extract(), lookup(target_entity="id_subject"), name="with lookup"),
-        entities=entities,
-    ) == []
+    Refusing to run it would mean a vision pipeline could not be compared with
+    an OCR one the moment either produced a field the other does not.
+    """
+    incomplete = pipeline(render(), extract(), name="no lookup")
+
+    assert describe_problems(incomplete, entities=ENTITIES_WITH_DERIVED) == []
+    warnings = describe_warnings(incomplete, entities=ENTITIES_WITH_DERIVED)
+    assert any("id_subject" in warning for warning in warnings)
+
+
+def test_a_pipeline_that_fills_it_has_nothing_to_warn_about() -> None:
+    complete = pipeline(render(), extract(), lookup(target_entity="id_subject"), name="with lookup")
+
+    assert describe_warnings(complete, entities=ENTITIES_WITH_DERIVED) == []
+
+
+def test_a_broken_pipeline_is_still_refused() -> None:
+    backwards = pipeline(extract(), render(), name="backwards")
+
+    assert describe_problems(backwards, entities=ENTITIES_WITH_DERIVED) != []

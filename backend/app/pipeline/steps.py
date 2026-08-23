@@ -12,7 +12,7 @@ from app.services.document_ai import (
     text_from_ocr,
 )
 from app.services.gemini import GeminiClient
-from app.services.master_data import SubjectStore
+from app.services.master_data import MasterDataStore
 from app.services.similarity import DEFAULT_ALGORITHM, similarity
 from app.services.lm_studio import LMStudioClient
 
@@ -256,14 +256,16 @@ class LookUpInMasterData:
         self,
         *,
         entities: list[EntityDefinition],
-        subjects: SubjectStore,
+        master_data: MasterDataStore,
+        table: str,
         source_entity: str,
         target_entity: str,
         algorithm: str = DEFAULT_ALGORITHM,
         minimum_similarity: float = 0.75,
     ) -> None:
         self.entities = entities
-        self.subjects = subjects
+        self.master_data = master_data
+        self.table = table
         self.source_entity = source_entity
         self.target_entity = target_entity
         self.algorithm = algorithm
@@ -284,27 +286,57 @@ class LookUpInMasterData:
             context.artifacts["extraction"] = extraction
             return
 
-        register = self.subjects.list()
+        definition = self.master_data.table(self.table)
+        register = self.master_data.rows(self.table)
         if not register:
             extraction[self.target_entity] = self._refused(
-                "The supplier register is empty. Add suppliers in Master Data."
+                f"The {definition.label} table is empty. Add rows in Master Data."
             )
             context.artifacts["extraction"] = extraction
             return
 
-        best = max(register, key=lambda subject: similarity(name, subject.name, self.algorithm))
-        score = round(similarity(name, best.name, self.algorithm), 4)
+        column = definition.match_column
+        scored = ((row, similarity(name, row.get(column), self.algorithm)) for row in register)
+        best, score = max(scored, key=lambda pair: pair[1])
+        score = round(score, 4)
 
         if score < self.minimum_similarity:
             extraction[self.target_entity] = self._refused(
-                f"No supplier in the register is close enough to {name!r}: the best match "
+                f"No row in {definition.label} is close enough to {name!r}: the best match "
                 f"scored {score:.2f}, below the {self.minimum_similarity:.2f} this pipeline asks for."
             )
         else:
             extraction[self.target_entity] = FieldExtraction(
-                value=best.id_subject,
+                value=best[definition.id_column],
                 confidence=confidence_from_similarity(score),
                 score=score,
                 warning=None,
+            )
+        context.artifacts["extraction"] = extraction
+
+
+class MarkUnfilledDerivedEntities:
+    """Say, in the result, which derived fields this pipeline never produces.
+
+    Leaving them out would read as "the model returned nothing", which is not
+    what happened: nothing here was asked to produce them. Every run then
+    carries the same set of fields, which is what makes two runs comparable.
+    """
+
+    def __init__(self, names: list[str]) -> None:
+        self.names = names
+
+    async def run(self, context: PipelineContext) -> None:
+        extraction: dict[str, FieldExtraction] = dict(context.artifacts.get("extraction") or {})
+        for name in self.names:
+            if name in extraction:
+                continue
+            extraction[name] = FieldExtraction(
+                value=None,
+                confidence="low",
+                warning=(
+                    f"This pipeline does not fill '{name}'. Add the step that produces it, "
+                    "or use a pipeline that has one."
+                ),
             )
         context.artifacts["extraction"] = extraction

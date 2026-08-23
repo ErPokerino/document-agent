@@ -132,8 +132,8 @@ const GROUPS: { title: string; blurb: string; kinds: string[] }[] = [
   },
   { title: "Ask a model", blurb: "One call that fills the extracted fields.", kinds: ["llm_extract"] },
   {
-    title: "Work out the rest",
-    blurb: "Deterministic steps over what is already there.",
+    title: "Derived",
+    blurb: "Work out further fields from what is already there, without a model.",
     kinds: ["regex_refine", "master_data_lookup"],
   },
 ];

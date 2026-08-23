@@ -40,7 +40,6 @@ import { Models, formatBytes, modelStateLabels } from "./models";
 import { Pipelines } from "./pipeline";
 import { Settings } from "./settings";
 import { stepLabels } from "../lib/pipeline-editor";
-import { Prompts } from "./prompts";
 import { buildReviewedExport } from "../lib/review";
 import { validateSettingsDraft } from "../lib/validation";
 import type {
@@ -57,8 +56,7 @@ import type {
 
 type View =
   | "workspace"
-  | "entities"
-  | "prompts"
+  | "extraction"
   | "pipelines"
   | "master-data"
   | "datasets"
@@ -67,8 +65,7 @@ type View =
   | "settings";
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
-  entities: { eyebrow: "Extraction target", title: "Entities" },
-  prompts: { eyebrow: "How the model is asked", title: "Prompts" },
+  extraction: { eyebrow: "What comes out of a document", title: "Extraction" },
   "master-data": { eyebrow: "Reference tables", title: "Master Data" },
   pipelines: { eyebrow: "How a document is processed", title: "Pipelines" },
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
@@ -539,11 +536,8 @@ export default function Home() {
           <button className={`nav-item ${view === "workspace" ? "active" : ""}`} onClick={() => setView("workspace")}>
             <LayoutDashboard size={17} /> Workspace
           </button>
-          <button className={`nav-item ${view === "entities" ? "active" : ""}`} onClick={() => setView("entities")}>
-            <Braces size={17} /> Entities
-          </button>
-          <button className={`nav-item ${view === "prompts" ? "active" : ""}`} onClick={() => setView("prompts")}>
-            <Sparkles size={17} /> Prompts
+          <button className={`nav-item ${view === "extraction" ? "active" : ""}`} onClick={() => setView("extraction")}>
+            <Braces size={17} /> Extraction
           </button>
           <button className={`nav-item ${view === "pipelines" ? "active" : ""}`} onClick={() => setView("pipelines")}>
             <Workflow size={17} /> Pipelines
@@ -712,7 +706,7 @@ export default function Home() {
               </div>
             )}
           </section>
-        ) : view === "entities" ? (
+        ) : view === "extraction" ? (
           <Entities
             draftSettings={draftSettings}
             setDraftSettings={setDraftSettings}
@@ -722,14 +716,6 @@ export default function Home() {
           />
         ) : view === "master-data" ? (
           <MasterData />
-        ) : view === "prompts" ? (
-          <Prompts
-            draftSettings={draftSettings}
-            setDraftSettings={setDraftSettings}
-            onSave={saveSettings}
-            settingsState={settingsState}
-            settingsError={settingsError}
-          />
         ) : view === "pipelines" ? (
           <Pipelines
             draftSettings={draftSettings}

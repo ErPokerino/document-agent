@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Info,
   LoaderCircle,
   Pencil,
   Plus,
@@ -61,6 +62,23 @@ const sourceLabels: Record<RegexRule["source"], string> = {
   text: "The document text",
 };
 
+// Every measure normalizes both names first — accents folded, punctuation
+// dropped, legal forms like S.r.l. or Ltd removed — then scores what is left.
+const algorithmHints: Record<string, string> = {
+  combined:
+    "The highest score any of the others gives, so one kind of noise cannot hide a match another kind would find. Unrelated names still score around 0.4, because Jaro-Winkler is in the mix: keep the threshold well above that.",
+  exact:
+    "The normalized names are the same string, or they are not: 1 or 0. Use it when the register is authoritative and anything less should be looked at by a person.",
+  token_set:
+    "Sørensen-Dice over the sets of words: twice the shared words over the total. Order and repeats do not matter, so 'Rossi Trasporti' matches 'Trasporti Rossi S.r.l.'. Blind to a typo inside a word.",
+  trigram:
+    "Sørensen-Dice over the sets of three-letter sequences. Survives a misread letter, and still sees a word that moved. Weak on very short names, which have few triples.",
+  levenshtein:
+    "1 minus the edit distance over the longer name: the number of single-character insertions, deletions and substitutions needed to turn one into the other. The strictest measure of 'almost the same text'; punishes two swapped letters twice.",
+  jaro_winkler:
+    "The classic name-matching measure: characters matching within a window, transpositions half-priced, plus a bonus for a shared prefix. Best on short names and swapped letters; generous, so unrelated names score around 0.4.",
+};
+
 /** Compose the steps a document goes through, and save that as a pipeline. */
 export function Pipelines({ draftSettings, entities, onUse }: Props) {
   const [pipelines, setPipelines] = useState<SavedPipeline[]>([]);
@@ -68,6 +86,8 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
   const [draft, setDraft] = useState<PipelineDefinition | null>(null);
   const [openedAs, setOpenedAs] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [tables, setTables] = useState<{ key: string; label: string }[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -90,10 +110,15 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     let active = true;
     async function load() {
       try {
-        const [saved, steps] = await Promise.all([api.pipelines(), api.pipelineSteps()]);
+        const [saved, steps, found] = await Promise.all([
+          api.pipelines(),
+          api.pipelineSteps(),
+          api.masterDataTables(),
+        ]);
         if (!active) return;
         setPipelines(saved);
         setCatalogue(steps);
+        setTables(found);
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -112,7 +137,11 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     const timer = window.setTimeout(() => {
       void api
         .checkPipeline(draft)
-        .then((checked) => active && setProblems(checked.problems))
+        .then((checked) => {
+          if (!active) return;
+          setProblems(checked.problems);
+          setWarnings(checked.warnings);
+        })
         .catch(() => active && setProblems([]));
     }, 250);
     return () => {
@@ -131,6 +160,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     setPageLimitInput(String(pipeline.page_limit));
     setOpenedAs(pipeline.name);
     setProblems(pipeline.problems);
+    setWarnings(pipeline.warnings);
     setError(null);
     setState("idle");
   }
@@ -171,6 +201,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
       await refresh();
       setOpenedAs(saved.name);
       setProblems(saved.problems);
+      setWarnings(saved.warnings);
       setState("saved");
       window.setTimeout(() => setState("idle"), 1800);
     } catch (cause) {
@@ -287,7 +318,11 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                   {pipeline.description ? ` · ${pipeline.description}` : ""}
                 </small>
               </button>
-              {pipeline.problems.length > 0 && <span className="status-tag failed">Cannot run</span>}
+              {pipeline.problems.length > 0 ? (
+                <span className="status-tag failed">Cannot run</span>
+              ) : pipeline.warnings.length > 0 ? (
+                <span className="status-tag partial" title={pipeline.warnings.join(" ")}>Partial</span>
+              ) : null}
               {inUse === pipeline.name ? (
                 <span className="status-tag completed">In use</span>
               ) : (
@@ -450,6 +485,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
 
                   {step.kind === "master_data_lookup" && (() => {
                     const config = step.config as {
+                      table?: string;
                       source_entity?: string;
                       target_entity?: string;
                       algorithm?: string;
@@ -476,8 +512,13 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                             <span>Against
                               <InfoHint text="The reference table to search. Manage its rows in Master Data." />
                             </span>
-                            <select value="subjects" disabled>
-                              <option value="subjects">Suppliers register</option>
+                            <select
+                              value={config.table ?? "suppliers"}
+                              onChange={(event) => update({ table: event.target.value })}
+                            >
+                              {tables.map((table) => (
+                                <option key={table.key} value={table.key}>{table.label}</option>
+                              ))}
                             </select>
                           </label>
                           <label>
@@ -493,12 +534,15 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                           </label>
                           <label>
                             <span>Compare by
-                              <InfoHint text="Words compares the sets of words, so order and dropped words do not matter. Letters compares three-letter sequences, which survives an OCR typo. Both takes whichever score is higher." align="end" />
+                              <InfoHint text={algorithmHints[config.algorithm ?? "combined"]} align="end" />
                             </span>
                             <select value={config.algorithm ?? "combined"} onChange={(event) => update({ algorithm: event.target.value })}>
-                              <option value="combined">Both, whichever is stronger</option>
-                              <option value="token_set">Words</option>
-                              <option value="trigram">Letters</option>
+                              <option value="combined">Best of all of them</option>
+                              <option value="exact">Exact match</option>
+                              <option value="token_set">Shared words</option>
+                              <option value="trigram">Shared letter triples</option>
+                              <option value="levenshtein">Edit distance</option>
+                              <option value="jaro_winkler">Jaro-Winkler</option>
                             </select>
                           </label>
                           <label className="flow-threshold">
@@ -518,8 +562,8 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                         </div>
                         {derivedEntityNames.length === 0 && (
                           <p className="field-help">
-                            There is no derived entity to fill yet. Create one in Entities, under
-                            &ldquo;Worked out from the rest&rdquo;.
+                            There is no derived entity to fill yet. Create one in Extraction, under
+                            &ldquo;Derived&rdquo;.
                           </p>
                         )}
                       </div>
@@ -629,6 +673,13 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
             <div className="alert error-alert" role="status">
               <AlertCircle size={17} />
               <span>{problems.join(" ")}</span>
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div className="alert warning-alert" role="status">
+              <Info size={17} />
+              <span>{warnings.join(" ")}</span>
             </div>
           )}
 

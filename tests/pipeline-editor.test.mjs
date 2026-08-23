@@ -119,7 +119,7 @@ test("steps are offered grouped by what they do", () => {
   assert.deepEqual(grouped.map((group) => group.title), [
     "Read the document",
     "Ask a model",
-    "Work out the rest",
+    "Derived",
   ]);
   assert.deepEqual(grouped[0].entries.map((entry) => entry.kind), ["render_pages", "document_ai_ocr"]);
   assert.deepEqual(grouped[2].entries.map((entry) => entry.kind), ["regex_refine", "master_data_lookup"]);

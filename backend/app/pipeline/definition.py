@@ -167,16 +167,30 @@ def filled_entities(pipeline: PipelineDefinition) -> set[str]:
     return filled
 
 
+def describe_warnings(
+    pipeline: PipelineDefinition,
+    entities: "list | None" = None,
+) -> list[str]:
+    """What is worth knowing about this pipeline, without stopping it.
+
+    A pipeline that fills only some of the derived entities is a legitimate
+    thing to run — that is how one pipeline is compared with another that does
+    more. It is not something to discover from a column of zeroes, either.
+    """
+    filled = filled_entities(pipeline)
+    return [
+        f"This pipeline does not fill '{entity.name}'. It will come out empty, "
+        f"and a test run will score it as missing on every document."
+        for entity in entities or []
+        if getattr(entity, "source", "model") == "derived" and entity.name not in filled
+    ]
+
+
 def describe_problems(
     pipeline: PipelineDefinition,
     entities: "list | None" = None,
 ) -> list[str]:
-    """Everything wrong with this pipeline, in words someone can act on.
-
-    `entities` is optional so the shape of a pipeline can be checked on its
-    own. Given it, the check also covers the other half of the contract: a
-    derived entity nobody fills would be scored as wrong on every document.
-    """
+    """Everything that stops this pipeline from running, in words someone can act on."""
     if not pipeline.steps:
         return ["The pipeline is empty: add at least a step that produces entities."]
 
@@ -203,12 +217,4 @@ def describe_problems(
 
     if Artifact.entities not in available:
         problems.append("The pipeline produces no entities: nothing would come out of a run.")
-
-    filled = filled_entities(pipeline)
-    for entity in entities or []:
-        if getattr(entity, "source", "model") == "derived" and entity.name not in filled:
-            problems.append(
-                f"Nothing in this pipeline fills '{entity.name}', which is a derived entity. "
-                "Add the step that produces it, or it will be empty on every document."
-            )
     return problems

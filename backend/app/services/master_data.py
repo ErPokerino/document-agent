@@ -1,13 +1,17 @@
-"""The supplier register: internal identifiers a document never carries.
+"""Reference tables: the values a document implies but never states.
 
-A document says "UL VS LTD". Whatever handles it downstream needs the internal
-id for that supplier, which appears nowhere on the page. This is the table that
-holds the correspondence, and the one thing that must be true of it is that a
-supplier appears exactly once: two rows for the same company mean a lookup has
-two right answers.
+An invoice says "UL VS LTD"; what handles it downstream needs the internal
+supplier id, which is on no page. That correspondence lives here.
 
-The identifier is a running number and is never reused, so a deleted row cannot
-come back meaning a different supplier in a run recorded earlier.
+One shape serves every table. A table declares its columns — which one is the
+generated identifier, which may be edited, which is normalized and has to stay
+unique — and the store enforces that shape for all of them. Adding a second
+register is a `TableDefinition`, not another module.
+
+Only the normalized spelling of a name is kept. The name printed on an invoice
+varies between invoices from the same supplier, so storing "the" spelling would
+be storing one arbitrary invoice's version of it; what identifies the supplier
+is what survives normalization.
 """
 
 import sqlite3
@@ -15,56 +19,119 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator, Literal
 
 from app.services.similarity import normalize_company_name
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS subjects (
-    id_subject      TEXT    PRIMARY KEY,
-    name            TEXT    NOT NULL,
-    normalized_name TEXT    NOT NULL UNIQUE,
-    created_at      TEXT    NOT NULL,
-    source          TEXT    NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS subject_counter (
-    id   INTEGER PRIMARY KEY CHECK (id = 1),
-    next INTEGER NOT NULL
-);
-"""
+class UnknownTable(LookupError):
+    """No reference table is defined under that name."""
 
 
-class UnknownSubject(LookupError):
-    """No supplier is registered under that identifier."""
+class UnknownRow(LookupError):
+    """No row in that table has that identifier."""
 
 
-class DuplicateSubject(ValueError):
-    """That supplier is already in the register under another spelling."""
+class DuplicateRow(ValueError):
+    """A row with that normalized value is already there."""
 
 
 @dataclass(frozen=True)
-class Subject:
-    id_subject: str
-    name: str
-    normalized_name: str
-    created_at: str
-    source: str
+class ColumnDefinition:
+    key: str
+    label: str
+    hint: str = ""
+    kind: Literal["identifier", "text", "timestamp"] = "text"
+    editable: bool = True
+    # Stored normalized, and no two rows may share the result.
+    normalized: bool = False
+
+
+@dataclass(frozen=True)
+class TableDefinition:
+    key: str
+    label: str
+    description: str
+    id_column: str
+    id_prefix: str
+    columns: tuple[ColumnDefinition, ...]
+    # The labelled entity this table can be filled from, if any.
+    seed_entity: str = ""
+    # The column a lookup step compares against.
+    match_column: str = ""
+
+    def column(self, key: str) -> ColumnDefinition:
+        for column in self.columns:
+            if column.key == key:
+                return column
+        raise ValueError(f"{self.label} has no column {key!r}")
+
+    @property
+    def editable_columns(self) -> "tuple[ColumnDefinition, ...]":
+        return tuple(column for column in self.columns if column.editable)
+
+
+SUPPLIERS = TableDefinition(
+    key="suppliers",
+    label="Suppliers",
+    description="Internal identifier for each supplier, matched by name.",
+    id_column="id_subject",
+    id_prefix="S",
+    seed_entity="supplier_name",
+    match_column="name",
+    columns=(
+        ColumnDefinition(
+            key="id_subject",
+            label="Id subject",
+            hint="Generated when the row is created, and never reused.",
+            kind="identifier",
+            editable=False,
+        ),
+        ColumnDefinition(
+            key="name",
+            label="Name",
+            hint=(
+                "Normalized as it is saved: accents folded, punctuation dropped, legal forms "
+                "like S.r.l. or Ltd removed. Two suppliers cannot share one."
+            ),
+            normalized=True,
+        ),
+        ColumnDefinition(
+            key="source",
+            label="Source",
+            hint="Whether the row was typed in or filled from the labelled documents.",
+            editable=False,
+        ),
+        ColumnDefinition(
+            key="created_at",
+            label="Added",
+            kind="timestamp",
+            editable=False,
+        ),
+    ),
+)
+
+TABLES: dict[str, TableDefinition] = {SUPPLIERS.key: SUPPLIERS}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-class SubjectStore:
+class MasterDataStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
-            connection.executescript(SCHEMA)
+            for table in TABLES.values():
+                columns = ", ".join(f"{column.key} TEXT" for column in table.columns)
+                connection.execute(
+                    f"CREATE TABLE IF NOT EXISTS {table.key} "
+                    f"({columns}, PRIMARY KEY ({table.id_column}))"
+                )
             connection.execute(
-                "INSERT INTO subject_counter (id, next) VALUES (1, 1) ON CONFLICT(id) DO NOTHING"
+                "CREATE TABLE IF NOT EXISTS master_data_counters "
+                "(table_key TEXT PRIMARY KEY, next INTEGER NOT NULL)"
             )
 
     @contextmanager
@@ -77,109 +144,156 @@ class SubjectStore:
         finally:
             connection.close()
 
-    def list(self, query: str = "") -> "list[Subject]":
-        """Every supplier, by name. `query` matches either spelling."""
-        needle = f"%{query.strip().lower()}%"
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM subjects
-                WHERE ? = '%%' OR lower(name) LIKE ? OR normalized_name LIKE ?
-                ORDER BY name COLLATE NOCASE
-                """,
-                (needle, needle, needle),
-            ).fetchall()
-        return [_subject(row) for row in rows]
+    @staticmethod
+    def table(key: str) -> TableDefinition:
+        if key not in TABLES:
+            raise UnknownTable(f"No reference table named {key!r}")
+        return TABLES[key]
 
-    def read(self, id_subject: str) -> Subject:
+    def rows(
+        self,
+        table_key: str,
+        *,
+        query: str = "",
+        sort: str = "",
+        descending: bool = False,
+    ) -> list[dict[str, Any]]:
+        table = self.table(table_key)
+        order = table.column(sort).key if sort else table.id_column
+        needle = f"%{query.strip().lower()}%"
+        searchable = " OR ".join(f"lower({column.key}) LIKE ?" for column in table.columns)
+        with self._connect() as connection:
+            found = connection.execute(
+                f"SELECT * FROM {table.key} WHERE ? = '%%' OR {searchable} "
+                f"ORDER BY {order} COLLATE NOCASE {'DESC' if descending else 'ASC'}",
+                (needle, *([needle] * len(table.columns))),
+            ).fetchall()
+        return [dict(row) for row in found]
+
+    def read(self, table_key: str, identifier: str) -> dict[str, Any]:
+        table = self.table(table_key)
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM subjects WHERE id_subject = ?", (id_subject,)
+                f"SELECT * FROM {table.key} WHERE {table.id_column} = ?", (identifier,)
             ).fetchone()
         if row is None:
-            raise UnknownSubject(f"No supplier with id {id_subject!r}")
-        return _subject(row)
+            raise UnknownRow(f"{table.label} has no row {identifier!r}")
+        return dict(row)
 
-    def add(self, name: str, source: str = "manual") -> Subject:
-        normalized = normalize_company_name(name)
-        if not normalized:
-            raise ValueError("A supplier needs a name")
+    def add(self, table_key: str, values: dict[str, Any], source: str = "manual") -> dict[str, Any]:
+        table = self.table(table_key)
+        prepared = self._prepare(table, values)
         with self._connect() as connection:
-            existing = connection.execute(
-                "SELECT * FROM subjects WHERE normalized_name = ?", (normalized,)
-            ).fetchone()
-            if existing is not None:
-                raise DuplicateSubject(
-                    f"{existing['name']} is already registered as {existing['id_subject']}"
-                )
-            id_subject = _claim_identifier(connection)
+            self._refuse_duplicates(connection, table, prepared)
+            identifier = self._claim_identifier(connection, table)
+            row = {
+                table.id_column: identifier,
+                "source": source,
+                "created_at": _now(),
+                **prepared,
+            }
+            keys = [column.key for column in table.columns if column.key in row]
             connection.execute(
-                """
-                INSERT INTO subjects (id_subject, name, normalized_name, created_at, source)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (id_subject, name.strip(), normalized, _now(), source),
+                f"INSERT INTO {table.key} ({', '.join(keys)}) "
+                f"VALUES ({', '.join('?' for _ in keys)})",
+                tuple(row[key] for key in keys),
             )
-        return self.read(id_subject)
+        return self.read(table_key, identifier)
 
-    def update(self, id_subject: str, *, name: str) -> Subject:
-        normalized = normalize_company_name(name)
-        if not normalized:
-            raise ValueError("A supplier needs a name")
+    def update(self, table_key: str, identifier: str, values: dict[str, Any]) -> dict[str, Any]:
+        table = self.table(table_key)
+        prepared = self._prepare(table, values)
+        if not prepared:
+            return self.read(table_key, identifier)
         with self._connect() as connection:
             if connection.execute(
-                "SELECT 1 FROM subjects WHERE id_subject = ?", (id_subject,)
+                f"SELECT 1 FROM {table.key} WHERE {table.id_column} = ?", (identifier,)
             ).fetchone() is None:
-                raise UnknownSubject(f"No supplier with id {id_subject!r}")
-            clash = connection.execute(
-                "SELECT * FROM subjects WHERE normalized_name = ? AND id_subject <> ?",
-                (normalized, id_subject),
-            ).fetchone()
-            if clash is not None:
-                raise DuplicateSubject(
-                    f"{clash['name']} is already registered as {clash['id_subject']}"
-                )
+                raise UnknownRow(f"{table.label} has no row {identifier!r}")
+            self._refuse_duplicates(connection, table, prepared, excluding=identifier)
+            assignments = ", ".join(f"{key} = ?" for key in prepared)
             connection.execute(
-                "UPDATE subjects SET name = ?, normalized_name = ? WHERE id_subject = ?",
-                (name.strip(), normalized, id_subject),
+                f"UPDATE {table.key} SET {assignments} WHERE {table.id_column} = ?",
+                (*prepared.values(), identifier),
             )
-        return self.read(id_subject)
+        return self.read(table_key, identifier)
 
-    def delete(self, id_subject: str) -> None:
+    def delete(self, table_key: str, identifier: str) -> None:
+        table = self.table(table_key)
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM subjects WHERE id_subject = ?", (id_subject,)
+                f"DELETE FROM {table.key} WHERE {table.id_column} = ?", (identifier,)
             )
             if cursor.rowcount == 0:
-                raise UnknownSubject(f"No supplier with id {id_subject!r}")
+                raise UnknownRow(f"{table.label} has no row {identifier!r}")
 
-    def seed(self, names: Iterable[str], source: str = "datasets") -> "list[Subject]":
-        """Register the names not already there, and return only those.
+    def seed(
+        self,
+        table_key: str,
+        values: Iterable[str],
+        source: str = "datasets",
+    ) -> list[dict[str, Any]]:
+        """Add the values not already there, and return only those.
 
-        A name that normalizes onto an existing row is skipped rather than
+        A value that normalizes onto an existing row is skipped rather than
         merged: whoever corrected that row knew better than this list does.
         """
-        added: list[Subject] = []
-        for name in names:
+        table = self.table(table_key)
+        column = table.match_column or table.editable_columns[0].key
+        added: list[dict[str, Any]] = []
+        for value in values:
             try:
-                added.append(self.add(name, source=source))
-            except (DuplicateSubject, ValueError):
+                added.append(self.add(table_key, {column: value}, source=source))
+            except (DuplicateRow, ValueError):
                 continue
         return added
 
+    # -- internals ------------------------------------------------------------
 
-def _claim_identifier(connection: sqlite3.Connection) -> str:
-    row = connection.execute("SELECT next FROM subject_counter WHERE id = 1").fetchone()
-    number = int(row["next"])
-    connection.execute("UPDATE subject_counter SET next = ? WHERE id = 1", (number + 1,))
-    return f"S{number:04d}"
+    @staticmethod
+    def _prepare(table: TableDefinition, values: dict[str, Any]) -> dict[str, str]:
+        prepared: dict[str, str] = {}
+        for key, value in values.items():
+            column = table.column(key)
+            if not column.editable:
+                raise ValueError(f"{column.label} ({key}) is generated and cannot be written")
+            text = str(value or "").strip()
+            if column.normalized:
+                text = normalize_company_name(text)
+            if not text:
+                raise ValueError(f"{column.label} cannot be empty")
+            prepared[key] = text
+        return prepared
 
+    @staticmethod
+    def _refuse_duplicates(
+        connection: sqlite3.Connection,
+        table: TableDefinition,
+        prepared: dict[str, str],
+        excluding: str = "",
+    ) -> None:
+        for column in table.columns:
+            if not column.normalized or column.key not in prepared:
+                continue
+            clash = connection.execute(
+                f"SELECT {table.id_column} FROM {table.key} "
+                f"WHERE {column.key} = ? AND {table.id_column} <> ?",
+                (prepared[column.key], excluding),
+            ).fetchone()
+            if clash is not None:
+                raise DuplicateRow(
+                    f"{prepared[column.key]!r} is already registered as {clash[table.id_column]}"
+                )
 
-def _subject(row: sqlite3.Row) -> Subject:
-    return Subject(
-        id_subject=row["id_subject"],
-        name=row["name"],
-        normalized_name=row["normalized_name"],
-        created_at=row["created_at"],
-        source=row["source"],
-    )
+    @staticmethod
+    def _claim_identifier(connection: sqlite3.Connection, table: TableDefinition) -> str:
+        row = connection.execute(
+            "SELECT next FROM master_data_counters WHERE table_key = ?", (table.key,)
+        ).fetchone()
+        number = int(row["next"]) if row else 1
+        connection.execute(
+            "INSERT INTO master_data_counters (table_key, next) VALUES (?, ?) "
+            "ON CONFLICT(table_key) DO UPDATE SET next = excluded.next",
+            (table.key, number + 1),
+        )
+        return f"{table.id_prefix}{number:04d}"

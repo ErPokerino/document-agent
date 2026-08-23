@@ -1,6 +1,6 @@
 "use client";
 
-import { Braces, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, Save, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "../lib/api";
@@ -9,13 +9,15 @@ import type { AppSettings, PromptPreview } from "../lib/types";
 type Props = {
   draftSettings: AppSettings;
   setDraftSettings: (settings: AppSettings) => void;
-  onSave: () => void;
-  settingsState: "idle" | "saving" | "saved" | "error";
-  settingsError: string | null;
 };
 
-/** What to extract, and how to ask for it. */
-export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState, settingsError }: Props) {
+/** How the model is asked for the extracted entities.
+
+    A card rather than a section: the wording is one mechanism among several,
+    and it belongs beside the fields it asks for. When there are several
+    document classes, each will have its own of both, together.
+ */
+export function SystemPrompts({ draftSettings, setDraftSettings }: Props) {
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -35,14 +37,7 @@ export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState
   }
 
   return (
-    <section className="settings-layout wide">
-      <div className="settings-intro">
-        <Braces size={19} />
-        <div><h2>Prompts</h2><p>The words used to ask the model. What to ask for is in Entities.</p></div>
-      </div>
-
-      {settingsError && <div className="alert error-alert" role="alert">{settingsError}</div>}
-
+    <>
       <div className="settings-card prompt-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Sparkles size={18} /></span>
@@ -113,14 +108,6 @@ export function Prompts({ draftSettings, setDraftSettings, onSave, settingsState
           )}
         </div>
       </div>
-
-      <div className="settings-actions sticky-actions">
-        <p><Sparkles size={14} /> Saved prompts are what a test run uses.</p>
-        <button className="primary-button save-button" disabled={settingsState === "saving"} onClick={onSave}>
-          {settingsState === "saving" ? <LoaderCircle className="spin" size={15} /> : settingsState === "saved" ? <CheckCircle2 size={15} /> : <Save size={15} />}
-          {settingsState === "saving" ? "Saving…" : settingsState === "saved" ? "Saved" : "Save prompts"}
-        </button>
-      </div>
-    </section>
+    </>
   );
 }

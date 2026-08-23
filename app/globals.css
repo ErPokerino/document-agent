@@ -802,3 +802,26 @@ button.model-chip:hover { border-color: var(--line-strong); }
 @media (max-width: 1180px) { .flow-lookup { grid-template-columns: 1fr 1fr; } .flow-threshold { grid-column: span 2; } }
 /* A derived field carries the number its confidence came from. */
 .confidence-pill em { font-style: normal; margin-left: 5px; padding-left: 5px; border-left: 1px solid currentColor; opacity: .75; font-family: var(--font-mono), monospace; }
+
+/* --- a reference table, read like a table --- */
+.table-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.table-tab { padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.table-tab.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.data-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 11px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
+.data-table th .sort-button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 0; }
+.data-table th .sort-button:hover { color: var(--accent); }
+.data-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover { background: var(--surface); }
+.data-table td code { font: 500 11px var(--font-mono), monospace; color: var(--accent); }
+.data-table td.timestamp, .data-table .muted { color: var(--muted); font-size: 11px; }
+.data-table .generated { color: var(--line-strong); font-style: italic; font-size: 11px; }
+.data-table input { width: 100%; height: 30px; border: 1px solid var(--accent); border-radius: 6px; background: var(--paper); color: var(--ink); padding: 0 8px; font: inherit; font-size: 12px; }
+.data-table .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.data-table .row-actions .icon-button { width: 28px; height: 28px; }
+.data-row.drafting { background: var(--accent-soft); }
+.data-table .row-confirm { margin: 2px 0; }
+/* Worth knowing, not a reason to stop: the pipeline still runs. */
+.warning-alert { border: 1px solid #e7d6a9; background: #fff7df; color: #7a5a0c; }

@@ -38,9 +38,9 @@ from app.domain.models import (
     PromptPreview,
     PromptPreviewRequest,
     SavedPipeline,
-    SeedSubjectsRequest,
-    Subject,
-    SubjectRequest,
+    MasterDataColumn,
+    MasterDataRowRequest,
+    MasterDataTable,
     StepCatalogueEntry,
 )
 from app.evaluation.datasets import DatasetStore, InvalidName
@@ -52,6 +52,7 @@ from app.pipeline.definition import (
     CONTRACTS,
     PipelineDefinition,
     describe_problems,
+    describe_warnings,
     requires_vision,
 )
 from app.pipeline.engine import DocumentPipeline, PipelineContext
@@ -60,7 +61,13 @@ from app.services.document_ai import DocumentAiClient, DocumentAiError, ServiceA
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
 from app.services.lm_studio import LMStudioClient, LMStudioError
 from app.services.run_store import RunStore
-from app.services.master_data import DuplicateSubject, SubjectStore, UnknownSubject
+from app.services.master_data import (
+    TABLES,
+    DuplicateRow,
+    MasterDataStore,
+    UnknownRow,
+    UnknownTable,
+)
 from app.services.migrations import adopt_legacy_page_limit
 from app.services.settings_store import SettingsStore
 
@@ -87,7 +94,7 @@ settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
 dataset_store = DatasetStore(DATASETS_PATH)
-subject_store = SubjectStore(DATABASE_PATH)
+master_data_store = MasterDataStore(DATABASE_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
 # The page limit used to be one number for the whole app; carry an existing
 # install's value into the pipeline that inherits the job, then write the
@@ -510,7 +517,7 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
                 prompts=settings.prompts,
                 entities=settings.prompts.entities,
                 gcp=settings.gcp,
-                subjects=subject_store,
+                master_data=master_data_store,
             )
         )
     except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
@@ -637,7 +644,8 @@ def _saved_pipeline(definition: PipelineDefinition) -> SavedPipeline:
         description=definition.description,
         page_limit=definition.page_limit,
         steps=definition.steps,
-        problems=describe_problems(definition, settings_store.read().prompts.entities),
+        problems=describe_problems(definition),
+        warnings=describe_warnings(definition, settings_store.read().prompts.entities),
     )
 
 
@@ -655,7 +663,7 @@ def _refuse_unusable(definition: PipelineDefinition) -> None:
             prompts=settings.prompts,
             entities=settings.prompts.entities,
             gcp=settings.gcp,
-            subjects=subject_store,
+            master_data=master_data_store,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -813,56 +821,109 @@ async def delete_pipeline(name: str) -> Response:
     return Response(status_code=204)
 
 
-@app.get("/api/master-data/subjects", response_model=list[Subject])
-async def list_subjects(query: str = "") -> list[Subject]:
-    return [Subject(**asdict(subject)) for subject in subject_store.list(query=query)]
+@app.get("/api/master-data/tables", response_model=list[MasterDataTable])
+async def list_master_data_tables() -> list[MasterDataTable]:
+    """What tables exist and what each column is, so the UI needs no copy of it."""
+    return [
+        MasterDataTable(
+            key=table.key,
+            label=table.label,
+            description=table.description,
+            id_column=table.id_column,
+            seed_entity=table.seed_entity,
+            match_column=table.match_column,
+            columns=[
+                MasterDataColumn(
+                    key=column.key,
+                    label=column.label,
+                    hint=column.hint,
+                    kind=column.kind,
+                    editable=column.editable,
+                )
+                for column in table.columns
+            ],
+        )
+        for table in TABLES.values()
+    ]
 
 
-@app.post("/api/master-data/subjects", response_model=Subject, status_code=201)
-async def add_subject(request: SubjectRequest) -> Subject:
+@app.get("/api/master-data/tables/{table_key}/rows", response_model=list[dict[str, Any]])
+async def list_master_data_rows(
+    table_key: str,
+    query: str = "",
+    sort: str = "",
+    descending: bool = False,
+) -> list[dict[str, Any]]:
     try:
-        return Subject(**asdict(subject_store.add(request.name)))
-    except DuplicateSubject as exc:
+        return master_data_store.rows(table_key, query=query, sort=sort, descending=descending)
+    except UnknownTable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/master-data/tables/{table_key}/rows", response_model=dict[str, Any], status_code=201)
+async def add_master_data_row(table_key: str, request: MasterDataRowRequest) -> dict[str, Any]:
+    try:
+        return master_data_store.add(table_key, request.values)
+    except UnknownTable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DuplicateRow as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/api/master-data/subjects/from-datasets", response_model=list[Subject])
-async def seed_subjects(request: SeedSubjectsRequest) -> list[Subject]:
-    """Register every supplier the labelled documents name, once each.
+@app.post("/api/master-data/tables/{table_key}/rows/from-datasets", response_model=list[dict[str, Any]])
+async def seed_master_data_rows(table_key: str) -> list[dict[str, Any]]:
+    """Fill a table from the labelled documents, adding only what is missing."""
+    try:
+        table = master_data_store.table(table_key)
+    except UnknownTable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not table.seed_entity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{table.label} is not built from a labelled field.",
+        )
 
-    Only what is missing is added: a row someone corrected keeps its spelling.
-    """
-    names: list[str] = []
+    values: list[str] = []
     for dataset in dataset_store.list_datasets():
         for document in dataset_store.list_documents(dataset.name):
             label_file = dataset_store.read_labels(dataset.name, document.name)
             if label_file is None:
                 continue
-            value = label_file.labels.get(request.entity)
+            value = label_file.labels.get(table.seed_entity)
             if isinstance(value, str) and value.strip():
-                names.append(value.strip())
-    return [Subject(**asdict(subject)) for subject in subject_store.seed(names)]
+                values.append(value.strip())
+    return master_data_store.seed(table_key, values)
 
 
-@app.patch("/api/master-data/subjects/{id_subject}", response_model=Subject)
-async def update_subject(id_subject: str, request: SubjectRequest) -> Subject:
+@app.patch("/api/master-data/tables/{table_key}/rows/{identifier}", response_model=dict[str, Any])
+async def update_master_data_row(
+    table_key: str,
+    identifier: str,
+    request: MasterDataRowRequest,
+) -> dict[str, Any]:
     try:
-        return Subject(**asdict(subject_store.update(id_subject, name=request.name)))
-    except UnknownSubject as exc:
+        return master_data_store.update(table_key, identifier, request.values)
+    except (UnknownTable, UnknownRow) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DuplicateSubject as exc:
+    except DuplicateRow as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.delete("/api/master-data/subjects/{id_subject}", status_code=204, response_class=Response)
-async def delete_subject(id_subject: str) -> Response:
+@app.delete(
+    "/api/master-data/tables/{table_key}/rows/{identifier}",
+    status_code=204,
+    response_class=Response,
+)
+async def delete_master_data_row(table_key: str, identifier: str) -> Response:
     try:
-        subject_store.delete(id_subject)
-    except UnknownSubject as exc:
+        master_data_store.delete(table_key, identifier)
+    except (UnknownTable, UnknownRow) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)
 
@@ -1248,7 +1309,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
             prompts=detail.prompts,
             entities=detail.prompts.entities,
             gcp=settings.gcp,
-            subjects=subject_store,
+            master_data=master_data_store,
         )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(

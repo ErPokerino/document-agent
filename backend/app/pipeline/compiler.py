@@ -16,17 +16,19 @@ from app.pipeline.definition import (
     StepKind,
     contract_for,
     describe_problems,
+    filled_entities,
 )
 from app.pipeline.regex_refine import RegexRule
 from app.pipeline.steps import (
     ExtractEntities,
     InspectPdf,
     LookUpInMasterData,
+    MarkUnfilledDerivedEntities,
     ReadWithDocumentAi,
     RefineWithRegex,
     RenderPages,
 )
-from app.services.master_data import SubjectStore
+from app.services.master_data import TABLES, MasterDataStore
 from app.services.similarity import ALGORITHMS, DEFAULT_ALGORITHM
 
 
@@ -46,6 +48,13 @@ def _required_entity(config: dict[str, Any], key: str) -> str:
     if not name:
         raise ValueError(f"no {key.replace('_', ' ')} is chosen")
     return name
+
+
+def _table(config: dict[str, Any]) -> str:
+    table = str(config.get("table") or "suppliers")
+    if table not in TABLES:
+        raise ValueError(f"{table!r} is not one of: {', '.join(TABLES)}")
+    return table
 
 
 def _algorithm(config: dict[str, Any]) -> str:
@@ -68,7 +77,7 @@ def _build_one(
     prompts: PromptConfiguration,
     entities: list[EntityDefinition],
     gcp: GcpSettings,
-    subjects: SubjectStore | None,
+    master_data: MasterDataStore | None,
 ) -> Any:
     config = step.config
     if step.kind is StepKind.render_pages:
@@ -87,11 +96,12 @@ def _build_one(
     if step.kind is StepKind.regex_refine:
         return RefineWithRegex(entities, _rules(config))
     if step.kind is StepKind.master_data_lookup:
-        if subjects is None:
-            raise PipelineError("No master data register is available to look anything up in")
+        if master_data is None:
+            raise PipelineError("No master data is available to look anything up in")
         return LookUpInMasterData(
             entities=entities,
-            subjects=subjects,
+            master_data=master_data,
+            table=_table(config),
             source_entity=_required_entity(config, "source_entity"),
             target_entity=_required_entity(config, "target_entity"),
             algorithm=_algorithm(config),
@@ -106,7 +116,7 @@ def build_steps(
     prompts: PromptConfiguration,
     entities: list[EntityDefinition],
     gcp: GcpSettings | None = None,
-    subjects: SubjectStore | None = None,
+    master_data: MasterDataStore | None = None,
     max_pages: int | None = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
@@ -125,10 +135,21 @@ def build_steps(
                     prompts=prompts,
                     entities=entities,
                     gcp=gcp or GcpSettings(),
-                    subjects=subjects,
+                    master_data=master_data,
                 )
             )
         except (ValidationError, ValueError) as exc:
             label = contract_for(step.kind).label
             raise PipelineError(f"Step {index} ({label}) is not usable: {exc}") from exc
+
+    # Whatever no step fills is stated as empty, with the reason, rather than
+    # quietly missing from the result.
+    filled = filled_entities(definition)
+    unfilled = [
+        entity.name
+        for entity in entities
+        if entity.source == "derived" and entity.name not in filled
+    ]
+    if unfilled:
+        steps.append(MarkUnfilledDerivedEntities(unfilled))
     return steps

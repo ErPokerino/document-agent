@@ -16,9 +16,9 @@ import type {
   PipelineDefinition,
   PromptConfiguration,
   PromptPreview,
+  MasterDataTable,
   SavedPipeline,
   StepCatalogueEntry,
-  Subject,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -106,16 +106,39 @@ export const api = {
       { method: "POST" },
     ),
 
-  subjects: (query = "") =>
-    request<Subject[]>(`/api/master-data/subjects?query=${encodeURIComponent(query)}`),
-  addSubject: (name: string) =>
-    request<Subject>("/api/master-data/subjects", json("POST", { name })),
-  updateSubject: (id: string, name: string) =>
-    request<Subject>(`/api/master-data/subjects/${segment(id)}`, json("PATCH", { name })),
-  deleteSubject: (id: string) =>
-    request<void>(`/api/master-data/subjects/${segment(id)}`, { method: "DELETE" }),
-  seedSubjects: (entity = "supplier_name") =>
-    request<Subject[]>("/api/master-data/subjects/from-datasets", json("POST", { entity })),
+  masterDataTables: () => request<MasterDataTable[]>("/api/master-data/tables"),
+  masterDataRows: (
+    table: string,
+    options: { query?: string; sort?: string; descending?: boolean } = {},
+  ) => {
+    const search = new URLSearchParams({
+      query: options.query ?? "",
+      sort: options.sort ?? "",
+      descending: String(options.descending ?? false),
+    });
+    return request<Record<string, string>[]>(
+      `/api/master-data/tables/${segment(table)}/rows?${search}`,
+    );
+  },
+  addMasterDataRow: (table: string, values: Record<string, string>) =>
+    request<Record<string, string>>(
+      `/api/master-data/tables/${segment(table)}/rows`,
+      json("POST", { values }),
+    ),
+  updateMasterDataRow: (table: string, identifier: string, values: Record<string, string>) =>
+    request<Record<string, string>>(
+      `/api/master-data/tables/${segment(table)}/rows/${segment(identifier)}`,
+      json("PATCH", { values }),
+    ),
+  deleteMasterDataRow: (table: string, identifier: string) =>
+    request<void>(`/api/master-data/tables/${segment(table)}/rows/${segment(identifier)}`, {
+      method: "DELETE",
+    }),
+  seedMasterDataRows: (table: string) =>
+    request<Record<string, string>[]>(
+      `/api/master-data/tables/${segment(table)}/rows/from-datasets`,
+      { method: "POST" },
+    ),
 
   pipelines: () => request<SavedPipeline[]>("/api/pipelines"),
   pipelineSteps: () => request<StepCatalogueEntry[]>("/api/pipelines/steps"),

@@ -199,9 +199,9 @@ async def test_the_text_a_reader_produced_reaches_the_model(monkeypatch) -> None
 
 def test_a_lookup_step_is_built_with_the_register_and_the_threshold(tmp_path) -> None:
     from app.pipeline.steps import LookUpInMasterData
-    from app.services.master_data import SubjectStore
+    from app.services.master_data import MasterDataStore
 
-    subjects = SubjectStore(tmp_path / "docuflow.db")
+    master_data = MasterDataStore(tmp_path / "docuflow.db")
     definition = PipelineDefinition(
         name="with lookup",
         steps=[
@@ -219,7 +219,7 @@ def test_a_lookup_step_is_built_with_the_register_and_the_threshold(tmp_path) ->
         ],
     )
 
-    step = build_steps(definition, prompts=PROMPTS, entities=ENTITIES, subjects=subjects)[-1]
+    step = build_steps(definition, prompts=PROMPTS, entities=ENTITIES, master_data=master_data)[-1]
 
     assert isinstance(step, LookUpInMasterData)
     assert step.source_entity == "supplier_name"
@@ -229,7 +229,7 @@ def test_a_lookup_step_is_built_with_the_register_and_the_threshold(tmp_path) ->
 
 
 def test_a_lookup_with_no_target_is_refused_before_the_run(tmp_path) -> None:
-    from app.services.master_data import SubjectStore
+    from app.services.master_data import MasterDataStore
 
     definition = PipelineDefinition(
         name="incomplete",
@@ -245,12 +245,12 @@ def test_a_lookup_with_no_target_is_refused_before_the_run(tmp_path) -> None:
             definition,
             prompts=PROMPTS,
             entities=ENTITIES,
-            subjects=SubjectStore(tmp_path / "docuflow.db"),
+            master_data=MasterDataStore(tmp_path / "docuflow.db"),
         )
 
 
 def test_a_lookup_with_an_unusable_threshold_is_refused(tmp_path) -> None:
-    from app.services.master_data import SubjectStore
+    from app.services.master_data import MasterDataStore
 
     definition = PipelineDefinition(
         name="bad threshold",
@@ -273,5 +273,94 @@ def test_a_lookup_with_an_unusable_threshold_is_refused(tmp_path) -> None:
             definition,
             prompts=PROMPTS,
             entities=ENTITIES,
-            subjects=SubjectStore(tmp_path / "docuflow.db"),
+            master_data=MasterDataStore(tmp_path / "docuflow.db"),
         )
+
+
+MIXED_ENTITIES = [
+    *ENTITIES,
+    EntityDefinition(name="id_subject", format=EntityFormat.text, description="x", source="derived"),
+]
+
+
+@pytest.mark.asyncio
+async def test_a_derived_entity_nobody_fills_comes_out_explicitly_empty(monkeypatch) -> None:
+    """Silence would look like the model returning nothing, which is not what
+    happened: this pipeline was never asked to produce the field."""
+    from app.pipeline import steps as step_module
+
+    class FakeClient:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
+            return {"document_number": FieldExtraction(value="INV-7", confidence="high")}
+
+    monkeypatch.setattr(step_module, "LMStudioClient", FakeClient)
+
+    import pymupdf
+
+    document = pymupdf.open()
+    document.new_page()
+    content = document.tobytes()
+    document.close()
+
+    steps = build_steps(
+        PipelineDefinition.default(),
+        prompts=PromptConfiguration(entities=MIXED_ENTITIES),
+        entities=MIXED_ENTITIES,
+    )
+    context = PipelineContext(filename="a.pdf", content=content, model="m", lm_studio_url="http://x")
+    result = await DocumentPipeline(steps).run(context)
+
+    missing = result.artifacts["extraction"]["id_subject"]
+    assert missing.value is None
+    assert missing.confidence == "low"
+    assert "does not fill" in missing.warning
+
+
+@pytest.mark.asyncio
+async def test_a_derived_entity_a_step_fills_is_left_to_that_step(tmp_path, monkeypatch) -> None:
+    from app.pipeline import steps as step_module
+    from app.services.master_data import MasterDataStore
+
+    master_data = MasterDataStore(tmp_path / "docuflow.db")
+    master_data.seed("suppliers", ["ACME"])
+
+    class FakeClient:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
+            return {"supplier_name": FieldExtraction(value="ACME S.r.l.", confidence="high")}
+
+    monkeypatch.setattr(step_module, "LMStudioClient", FakeClient)
+
+    import pymupdf
+
+    document = pymupdf.open()
+    document.new_page()
+    content = document.tobytes()
+    document.close()
+
+    definition = PipelineDefinition(
+        name="with lookup",
+        steps=[
+            PipelineStep(kind=StepKind.render_pages),
+            PipelineStep(kind=StepKind.llm_extract),
+            PipelineStep(
+                kind=StepKind.master_data_lookup,
+                config={"source_entity": "supplier_name", "target_entity": "id_subject"},
+            ),
+        ],
+    )
+    steps = build_steps(
+        definition,
+        prompts=PromptConfiguration(entities=MIXED_ENTITIES),
+        entities=MIXED_ENTITIES,
+        master_data=master_data,
+    )
+    context = PipelineContext(filename="a.pdf", content=content, model="m", lm_studio_url="http://x")
+    result = await DocumentPipeline(steps).run(context)
+
+    assert result.artifacts["extraction"]["id_subject"].value == "S0001"

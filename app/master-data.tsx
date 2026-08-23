@@ -2,6 +2,8 @@
 
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
   Check,
   FilterX,
   Library,
@@ -10,40 +12,60 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api } from "../lib/api";
 import { InfoHint } from "./info-hint";
-import type { Subject } from "../lib/types";
+import type { MasterDataTable } from "../lib/types";
+
+type Row = Record<string, string>;
 
 /** The reference tables a derived entity is looked up in. */
 export function MasterData() {
-  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [tables, setTables] = useState<MasterDataTable[]>([]);
+  const [tableKey, setTableKey] = useState<string>("");
+  const [rows, setRows] = useState<Row[]>([]);
   const [query, setQuery] = useState("");
-  const [newName, setNewName] = useState("");
+  const [sort, setSort] = useState<{ column: string; descending: boolean } | null>(null);
+  const [draft, setDraft] = useState<Row | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editValues, setEditValues] = useState<Row>({});
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [seeded, setSeeded] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function refresh(search = query) {
-    setSubjects(await api.subjects(search));
-  }
+  const table = tables.find((candidate) => candidate.key === tableKey);
 
   useEffect(() => {
-    void api.subjects().then(setSubjects).catch((cause) => setError(String(cause)));
+    void api
+      .masterDataTables()
+      .then((found) => {
+        setTables(found);
+        setTableKey((current) => current || found[0]?.key || "");
+      })
+      .catch((cause) => setError(String(cause)));
   }, []);
 
-  // Search on the server: the register is the kind of table that outgrows the
-  // browser long before anything else here does.
+  const refresh = useCallback(async () => {
+    if (!tableKey) return;
+    setRows(
+      await api.masterDataRows(tableKey, {
+        query,
+        sort: sort?.column ?? "",
+        descending: sort?.descending ?? false,
+      }),
+    );
+  }, [tableKey, query, sort]);
+
+  // Search and sort on the server: a reference table is the kind that outgrows
+  // the browser long before anything else here does.
   useEffect(() => {
-    const timer = window.setTimeout(() => void refresh(query).catch(() => undefined), 200);
+    const timer = window.setTimeout(() => void refresh().catch((cause) => setError(String(cause))), 200);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [refresh]);
 
   async function guard(action: () => Promise<void>) {
     setBusy(true);
@@ -55,6 +77,21 @@ export function MasterData() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggleSort(column: string) {
+    setSort((current) =>
+      current?.column === column
+        ? current.descending
+          ? null
+          : { column, descending: true }
+        : { column, descending: false },
+    );
+  }
+
+  function startAdding() {
+    if (!table) return;
+    setDraft(Object.fromEntries(table.columns.filter((c) => c.editable).map((c) => [c.key, ""])));
   }
 
   return (
@@ -71,148 +108,229 @@ export function MasterData() {
         <div className="alert error-alert" role="alert">
           <AlertCircle size={17} />
           <span>{error}</span>
+          <button onClick={() => setError(null)} aria-label="Close"><X size={15} /></button>
         </div>
       )}
 
-      <div className="settings-card">
-        <div className="settings-card-heading">
-          <span className="settings-card-icon"><Library size={18} /></span>
-          <div>
-            <h3>
-              Suppliers
-              <InfoHint text="One row per supplier. The normalized name is what a lookup compares against: accents folded, punctuation dropped, legal forms like S.r.l. or Ltd removed." />
-            </h3>
-            <p>{subjects.length} registered · matched by name to fill id_subject.</p>
-          </div>
-          <button
-            className="secondary-button small"
-            disabled={busy}
-            title="Add every supplier named in a labelled document that is not registered yet"
-            onClick={() => guard(async () => {
-              const added = await api.seedSubjects();
-              setSeeded(added.length);
-              await refresh();
-            })}
-          >
-            {busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} From datasets
-          </button>
-        </div>
-
-        {seeded !== null && (
-          <p className="field-help good-note">
-            <Check size={12} /> {seeded === 0 ? "Nothing to add: every labelled supplier is already registered." : `${seeded} added.`}
-          </p>
-        )}
-
-        <form
-          className="dataset-create"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const name = newName.trim();
-            if (!name) return;
-            void guard(async () => {
-              await api.addSubject(name);
-              setNewName("");
-              await refresh();
-            });
-          }}
-        >
-          <input
-            className="text-input"
-            placeholder="Add a supplier by name"
-            value={newName}
-            onChange={(event) => setNewName(event.target.value)}
-          />
-          <button type="submit" className="secondary-button small" disabled={busy || !newName.trim()}>
-            <Plus size={13} /> Add
-          </button>
-        </form>
-
-        <div className="subject-search">
-          <input
-            className="text-input"
-            placeholder="Search either spelling…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          {query && (
-            <button className="secondary-button small ghost" onClick={() => setQuery("")}>
-              <FilterX size={13} /> Clear
+      {tables.length > 1 && (
+        <div className="table-tabs">
+          {tables.map((candidate) => (
+            <button
+              key={candidate.key}
+              className={`table-tab ${candidate.key === tableKey ? "active" : ""}`}
+              onClick={() => { setTableKey(candidate.key); setQuery(""); setSort(null); setDraft(null); }}
+            >
+              {candidate.label}
             </button>
+          ))}
+        </div>
+      )}
+
+      {table && (
+        <div className="settings-card">
+          <div className="settings-card-heading">
+            <span className="settings-card-icon"><Library size={18} /></span>
+            <div>
+              <h3>{table.label}</h3>
+              <p>{table.description} · {rows.length} row{rows.length === 1 ? "" : "s"}{query ? " matching" : ""}.</p>
+            </div>
+            <button className="secondary-button small" onClick={startAdding} disabled={busy || draft !== null}>
+              <Plus size={13} /> Add row
+            </button>
+            {table.seed_entity && (
+              <button
+                className="secondary-button small"
+                disabled={busy}
+                title={`Add every ${table.seed_entity} named in a labelled document that is not here yet`}
+                onClick={() => guard(async () => {
+                  const added = await api.seedMasterDataRows(table.key);
+                  setSeeded(added.length);
+                  await refresh();
+                })}
+              >
+                {busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} From datasets
+              </button>
+            )}
+          </div>
+
+          {seeded !== null && (
+            <p className="field-help good-note">
+              <Check size={12} /> {seeded === 0 ? "Nothing to add: every labelled value is already here." : `${seeded} added.`}
+            </p>
+          )}
+
+          <div className="subject-search">
+            <input
+              className="text-input"
+              placeholder={`Search ${table.label.toLowerCase()}…`}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {(query || sort) && (
+              <button className="secondary-button small ghost" onClick={() => { setQuery(""); setSort(null); }}>
+                <FilterX size={13} /> Reset
+              </button>
+            )}
+          </div>
+
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  {table.columns.map((column) => (
+                    <th
+                      key={column.key}
+                      aria-sort={
+                        sort?.column === column.key ? (sort.descending ? "descending" : "ascending") : "none"
+                      }
+                    >
+                      <button className="sort-button" onClick={() => toggleSort(column.key)}>
+                        {column.label}
+                        {sort?.column === column.key && (sort.descending ? <ArrowDown size={11} /> : <ArrowUp size={11} />)}
+                      </button>
+                      {column.hint && <InfoHint text={column.hint} />}
+                    </th>
+                  ))}
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {draft && (
+                  <tr className="data-row drafting">
+                    {table.columns.map((column) => (
+                      <td key={column.key}>
+                        {column.editable ? (
+                          <input
+                            value={draft[column.key] ?? ""}
+                            aria-label={column.label}
+                            onChange={(event) => setDraft({ ...draft, [column.key]: event.target.value })}
+                          />
+                        ) : (
+                          <span className="generated">generated</span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="row-actions">
+                      <button
+                        className="secondary-button small"
+                        disabled={busy}
+                        onClick={() => guard(async () => {
+                          await api.addMasterDataRow(table.key, draft);
+                          setDraft(null);
+                          await refresh();
+                        })}
+                      >
+                        <Check size={13} /> Save
+                      </button>
+                      <button className="secondary-button small ghost" onClick={() => setDraft(null)}>Cancel</button>
+                    </td>
+                  </tr>
+                )}
+
+                {rows.map((row) => {
+                  const identifier = row[table.id_column];
+                  if (confirmingDelete === identifier) {
+                    return (
+                      <tr className="data-row" key={identifier}>
+                        <td colSpan={table.columns.length + 1}>
+                          <div className="row-confirm">
+                            <span><strong>Remove {identifier}?</strong> Documents already matched to it keep the value.</span>
+                            <button className="secondary-button small ghost" onClick={() => setConfirmingDelete(null)}>Cancel</button>
+                            <button
+                              className="secondary-button small danger"
+                              onClick={() => guard(async () => {
+                                await api.deleteMasterDataRow(table.key, identifier);
+                                setConfirmingDelete(null);
+                                await refresh();
+                              })}
+                            >
+                              <Trash2 size={13} /> Remove
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const isEditing = editing === identifier;
+                  return (
+                    <tr className="data-row" key={identifier}>
+                      {table.columns.map((column) => (
+                        <td key={column.key} className={column.kind}>
+                          {isEditing && column.editable ? (
+                            <input
+                              value={editValues[column.key] ?? ""}
+                              aria-label={`${column.label} of ${identifier}`}
+                              onChange={(event) => setEditValues({ ...editValues, [column.key]: event.target.value })}
+                            />
+                          ) : column.kind === "identifier" ? (
+                            <code>{row[column.key]}</code>
+                          ) : column.kind === "timestamp" ? (
+                            <span className="muted">{(row[column.key] ?? "").replace("T", " ").slice(0, 16)}</span>
+                          ) : (
+                            row[column.key]
+                          )}
+                        </td>
+                      ))}
+                      <td className="row-actions">
+                        {isEditing ? (
+                          <>
+                            <button
+                              className="secondary-button small"
+                              disabled={busy}
+                              onClick={() => guard(async () => {
+                                await api.updateMasterDataRow(table.key, identifier, editValues);
+                                setEditing(null);
+                                await refresh();
+                              })}
+                            >
+                              <Check size={13} /> Save
+                            </button>
+                            <button className="secondary-button small ghost" onClick={() => setEditing(null)}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="icon-button neutral"
+                              aria-label={`Edit ${identifier}`}
+                              title="Edit"
+                              onClick={() => {
+                                setEditing(identifier);
+                                setEditValues(
+                                  Object.fromEntries(
+                                    table.columns.filter((c) => c.editable).map((c) => [c.key, row[c.key] ?? ""]),
+                                  ),
+                                );
+                              }}
+                            >
+                              <Pencil size={15} />
+                            </button>
+                            <button
+                              className="icon-button"
+                              aria-label={`Remove ${identifier}`}
+                              title="Remove"
+                              onClick={() => setConfirmingDelete(identifier)}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {rows.length === 0 && !draft && (
+            <p className="field-help">
+              {query
+                ? "Nothing matches that."
+                : "This table is empty. Add a row, or fill it from the labelled documents."}
+            </p>
           )}
         </div>
-
-        {subjects.length === 0 ? (
-          <p className="field-help">
-            {query ? "No supplier matches that." : "The register is empty. Add one above, or fill it from the labelled documents."}
-          </p>
-        ) : (
-          <div className="subject-list">
-            {subjects.map((subject) => (
-              <div className="subject-row" key={subject.id_subject}>
-                {confirmingDelete === subject.id_subject ? (
-                  <div className="row-confirm">
-                    <span><strong>Remove {subject.name}?</strong> Documents already matched to it keep the id.</span>
-                    <button className="secondary-button small ghost" onClick={() => setConfirmingDelete(null)}>Cancel</button>
-                    <button
-                      className="secondary-button small danger"
-                      onClick={() => guard(async () => {
-                        await api.deleteSubject(subject.id_subject);
-                        setConfirmingDelete(null);
-                        await refresh();
-                      })}
-                    >
-                      <Trash2 size={13} /> Remove
-                    </button>
-                  </div>
-                ) : editing === subject.id_subject ? (
-                  <form
-                    className="rename-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void guard(async () => {
-                        await api.updateSubject(subject.id_subject, editValue.trim());
-                        setEditing(null);
-                        await refresh();
-                      });
-                    }}
-                  >
-                    {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
-                    <input autoFocus value={editValue} onChange={(event) => setEditValue(event.target.value)} aria-label={`New name for ${subject.name}`} />
-                    <button type="submit" className="secondary-button small"><Check size={13} /> Save</button>
-                    <button type="button" className="secondary-button small ghost" onClick={() => setEditing(null)}>Cancel</button>
-                  </form>
-                ) : (
-                  <>
-                    <code className="subject-id">{subject.id_subject}</code>
-                    <div className="subject-meta">
-                      <strong>{subject.name}</strong>
-                      <small>{subject.normalized_name}</small>
-                    </div>
-                    <span className={`status-tag ${subject.source === "manual" ? "" : "completed"}`}>{subject.source}</span>
-                    <button
-                      className="icon-button neutral"
-                      aria-label={`Rename ${subject.name}`}
-                      title="Rename"
-                      onClick={() => { setEditing(subject.id_subject); setEditValue(subject.name); }}
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label={`Remove ${subject.name}`}
-                      title="Remove"
-                      onClick={() => setConfirmingDelete(subject.id_subject)}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </section>
   );
 }

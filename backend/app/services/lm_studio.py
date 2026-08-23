@@ -52,6 +52,33 @@ SAFE_PROFILE_PARALLEL = 1
 SAFE_PROFILE_CONTEXT_LENGTH = 8192
 
 
+def page_note(*, total_pages: int, processed_pages: int) -> str:
+    """Tell the model how much of the document it is looking at.
+
+    Both numbers, always. A model handed page 1 of a 7-page invoice and told
+    nothing reads the first subtotal as the total; told the document is longer
+    than what it can see, it returns null instead of guessing.
+    """
+    document = f"This document has {total_pages} page" + ("" if total_pages == 1 else "s")
+    if processed_pages >= total_pages:
+        if total_pages == 1:
+            return f"{document}, and it is supplied here."
+        return f"{document}, and all {total_pages} of them are supplied here."
+
+    missing = total_pages - processed_pages
+    seen = (
+        "the first page only is supplied here"
+        if processed_pages == 1
+        else f"only the first {processed_pages} are supplied here"
+    )
+    return (
+        f"{document}, and {seen}: {missing} page" + ("" if missing == 1 else "s") + " "
+        "you cannot see follow. Do not infer anything from them. Return null for a value that "
+        "is not visible on the pages you were given, and never treat a subtotal or a "
+        "carried-forward amount as the final total."
+    )
+
+
 def parameter_billions(params_string: str | None) -> float | None:
     """LM Studio's `params_string` as a number of billions, or None.
 
@@ -523,15 +550,9 @@ class LMStudioClient:
         processed_pages: int,
         document_text: str = "",
     ) -> dict[str, FieldExtraction]:
-        page_note = (
-            f"Only the first {processed_pages} of {total_pages} pages are supplied. "
-            "Do not infer content from omitted pages. Return null for values that are not visible, "
-            "and do not treat subtotals or carried-forward amounts as the final total."
-            if processed_pages < total_pages
-            else "All pages of the document are supplied."
-        )
+        note = page_note(total_pages=total_pages, processed_pages=processed_pages)
         user_text = prompts.user_prompt.replace("{page_range}", page_range)
-        user_text = f"{user_text.strip()}\n\n{page_note}"
+        user_text = f"{user_text.strip()}\n\n{note}"
         if document_text.strip():
             user_text = f"{user_text}\n\n{DOCUMENT_TEXT_HEADER}\n\n{document_text.strip()}"
         content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]

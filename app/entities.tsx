@@ -3,6 +3,7 @@
 import { Braces, CheckCircle2, LoaderCircle, Plus, Save, Sparkles, Trash2, Workflow } from "lucide-react";
 
 import { InfoHint } from "./info-hint";
+import { SystemPrompts } from "./system-prompts";
 import { formatLabels } from "../lib/format";
 import type { AppSettings, EntityDefinition, EntityFormat } from "../lib/types";
 
@@ -19,14 +20,14 @@ type Source = EntityDefinition["source"];
 const groups: { source: Source; title: string; blurb: string; hint: string; icon: typeof Sparkles }[] = [
   {
     source: "model",
-    title: "Read from the document",
-    blurb: "Asked of the model, and constrained by the generated JSON schema.",
+    title: "Extracted",
+    blurb: "Read off the page: asked of the model, constrained by the generated JSON schema.",
     hint: "These are the fields the model is shown and asked to fill. Their names, formats and descriptions build the prompt and the schema.",
     icon: Sparkles,
   },
   {
     source: "derived",
-    title: "Worked out from the rest",
+    title: "Derived",
     blurb: "Never asked of the model: a step in the pipeline fills them.",
     hint: "A field the document does not carry, like an internal supplier id. The model is never shown it; a pipeline step works it out from the other fields or from a reference table. It is still labelled and scored like any other field.",
     icon: Workflow,
@@ -75,8 +76,8 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
       <div className="settings-intro">
         <Braces size={19} />
         <div>
-          <h2>Entities</h2>
-          <p>What a document produces. Datasets label these, and a test run scores these.</p>
+          <h2>Extraction</h2>
+          <p>What a document produces, and the words used to ask the model for it.</p>
         </div>
       </div>
 
@@ -166,11 +167,13 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
         );
       })}
 
+      <SystemPrompts draftSettings={draftSettings} setDraftSettings={setDraftSettings} />
+
       <div className="settings-actions sticky-actions">
         <p><Braces size={14} /> A derived field needs a pipeline step that fills it; Pipelines says so if none does.</p>
         <button className="primary-button save-button" disabled={settingsState === "saving"} onClick={onSave}>
           {settingsState === "saving" ? <LoaderCircle className="spin" size={15} /> : settingsState === "saved" ? <CheckCircle2 size={15} /> : <Save size={15} />}
-          {settingsState === "saving" ? "Saving…" : settingsState === "saved" ? "Saved" : "Save entities"}
+          {settingsState === "saving" ? "Saving…" : settingsState === "saved" ? "Saved" : "Save extraction"}
         </button>
       </div>
     </section>

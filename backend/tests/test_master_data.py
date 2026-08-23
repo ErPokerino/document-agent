@@ -1,117 +1,132 @@
-"""The supplier register: what a derived entity is looked up in."""
+"""Reference tables: one shape, many tables, and the rules that keep them usable."""
 
 import pytest
 
-from app.services.master_data import DuplicateSubject, SubjectStore, UnknownSubject
+from app.services.master_data import (
+    TABLES,
+    DuplicateRow,
+    MasterDataStore,
+    UnknownRow,
+    UnknownTable,
+)
 
 
 @pytest.fixture
-def store(tmp_path) -> SubjectStore:
-    return SubjectStore(tmp_path / "docuflow.db")
+def store(tmp_path) -> MasterDataStore:
+    return MasterDataStore(tmp_path / "docuflow.db")
 
 
-def test_a_new_register_is_empty(store) -> None:
-    assert store.list() == []
+def test_the_tables_on_offer_describe_their_own_columns() -> None:
+    suppliers = TABLES["suppliers"]
+
+    assert suppliers.label == "Suppliers"
+    assert suppliers.id_column == "id_subject"
+    assert [column.key for column in suppliers.columns] == [
+        "id_subject",
+        "name",
+        "source",
+        "created_at",
+    ]
+    assert suppliers.column("id_subject").editable is False
+    assert suppliers.column("name").editable is True
 
 
-def test_adding_a_supplier_gives_it_an_identifier_and_a_normalized_name(store) -> None:
-    subject = store.add("ACME S.r.l.")
+def test_a_table_nobody_defined_is_refused(store) -> None:
+    with pytest.raises(UnknownTable, match="invoices"):
+        store.rows("invoices")
 
-    assert subject.id_subject == "S0001"
-    assert subject.name == "ACME S.r.l."
-    assert subject.normalized_name == "acme"
+
+def test_a_new_table_is_empty(store) -> None:
+    assert store.rows("suppliers") == []
+
+
+def test_a_row_gets_an_identifier_and_its_name_normalized(store) -> None:
+    row = store.add("suppliers", {"name": "ACME S.r.l."})
+
+    assert row["id_subject"] == "S0001"
+    # Only the normalized spelling is kept: the name on an invoice varies
+    # between invoices from the same supplier, so it identifies nothing.
+    assert row["name"] == "acme"
 
 
 def test_identifiers_run_in_order_and_are_never_reused(store) -> None:
-    store.add("First")
-    second = store.add("Second")
-    store.delete(second.id_subject)
+    store.add("suppliers", {"name": "First"})
+    second = store.add("suppliers", {"name": "Second"})
+    store.delete("suppliers", second["id_subject"])
 
-    assert store.add("Third").id_subject == "S0003"
+    assert store.add("suppliers", {"name": "Third"})["id_subject"] == "S0003"
 
 
 def test_the_same_supplier_cannot_be_registered_twice(store) -> None:
-    store.add("ACME S.r.l.")
+    store.add("suppliers", {"name": "ACME S.r.l."})
 
-    # Same company, written differently: the register must stay one row per
-    # supplier, or a lookup has two right answers.
-    with pytest.raises(DuplicateSubject, match="ACME"):
-        store.add("acme srl")
+    with pytest.raises(DuplicateRow, match="S0001"):
+        store.add("suppliers", {"name": "acme srl"})
 
 
-def test_a_supplier_can_be_corrected(store) -> None:
-    subject = store.add("ACME")
+def test_a_row_can_be_corrected(store) -> None:
+    row = store.add("suppliers", {"name": "ACME"})
 
-    updated = store.update(subject.id_subject, name="ACME International")
+    updated = store.update("suppliers", row["id_subject"], {"name": "ACME International"})
 
-    assert updated.name == "ACME International"
-    assert updated.normalized_name == "acme international"
-    assert store.read(subject.id_subject).name == "ACME International"
+    assert updated["name"] == "acme international"
 
 
-def test_renaming_onto_another_supplier_is_refused(store) -> None:
-    store.add("ACME")
-    other = store.add("Zeta")
+def test_a_generated_column_cannot_be_written(store) -> None:
+    row = store.add("suppliers", {"name": "ACME"})
 
-    with pytest.raises(DuplicateSubject):
-        store.update(other.id_subject, name="acme")
-
-
-def test_a_deleted_supplier_is_gone(store) -> None:
-    subject = store.add("ACME")
-
-    store.delete(subject.id_subject)
-
-    assert store.list() == []
-    with pytest.raises(UnknownSubject):
-        store.read(subject.id_subject)
+    with pytest.raises(ValueError, match="id_subject"):
+        store.update("suppliers", row["id_subject"], {"id_subject": "S9999"})
 
 
-def test_acting_on_a_supplier_that_is_not_there_says_so(store) -> None:
-    with pytest.raises(UnknownSubject):
-        store.delete("S9999")
-    with pytest.raises(UnknownSubject):
-        store.update("S9999", name="x")
+def test_acting_on_a_row_that_is_not_there_says_so(store) -> None:
+    with pytest.raises(UnknownRow):
+        store.update("suppliers", "S9999", {"name": "x"})
+    with pytest.raises(UnknownRow):
+        store.delete("suppliers", "S9999")
 
 
-def test_the_register_is_listed_by_name(store) -> None:
-    store.add("Zeta")
-    store.add("Acme")
+def test_rows_can_be_sorted_by_any_column_in_either_direction(store) -> None:
+    for name in ("Zeta", "Acme", "Mid"):
+        store.add("suppliers", {"name": name})
 
-    assert [subject.name for subject in store.list()] == ["Acme", "Zeta"]
+    ascending = [row["name"] for row in store.rows("suppliers", sort="name")]
+    descending = [row["name"] for row in store.rows("suppliers", sort="name", descending=True)]
+    by_id = [row["id_subject"] for row in store.rows("suppliers", sort="id_subject")]
 
-
-def test_the_register_can_be_searched_by_either_spelling(store) -> None:
-    store.add("ACME S.r.l.")
-    store.add("Zeta Trasporti")
-
-    assert [s.name for s in store.list(query="acme")] == ["ACME S.r.l."]
-    assert [s.name for s in store.list(query="TRASP")] == ["Zeta Trasporti"]
+    assert ascending == ["acme", "mid", "zeta"]
+    assert descending == ["zeta", "mid", "acme"]
+    assert by_id == ["S0001", "S0002", "S0003"]
 
 
-def test_seeding_adds_the_names_it_is_given_and_skips_the_ones_it_has(store) -> None:
-    store.add("ACME S.r.l.")
-
-    added = store.seed(["acme srl", "Zeta Trasporti", "Zeta Trasporti"])
-
-    assert [subject.name for subject in added] == ["Zeta Trasporti"]
-    assert len(store.list()) == 2
+def test_sorting_by_a_column_that_does_not_exist_is_refused(store) -> None:
+    with pytest.raises(ValueError, match="turnover"):
+        store.rows("suppliers", sort="turnover")
 
 
-def test_seeding_never_overwrites_a_spelling_someone_corrected(store) -> None:
-    store.add("ACME S.r.l.")
+def test_rows_can_be_filtered_by_any_text_they_hold(store) -> None:
+    store.add("suppliers", {"name": "ACME S.r.l."})
+    store.add("suppliers", {"name": "Zeta Trasporti"})
 
-    # Same supplier once normalized, so the row is left exactly as it was.
-    store.seed(["acme"])
-
-    assert [subject.name for subject in store.list()] == ["ACME S.r.l."]
+    assert [row["name"] for row in store.rows("suppliers", query="trasp")] == ["zeta trasporti"]
+    assert [row["id_subject"] for row in store.rows("suppliers", query="S0001")] == ["S0001"]
 
 
-def test_two_genuinely_different_names_are_two_suppliers(store) -> None:
-    """The register matches exactly; deciding that two names mean the same
-    company is the lookup's job, and it is not allowed to guess here."""
-    store.add("ACME International")
+def test_seeding_adds_what_is_missing_and_leaves_the_rest(store) -> None:
+    store.add("suppliers", {"name": "ACME S.r.l."})
 
-    store.seed(["ACME"])
+    added = store.seed("suppliers", ["acme srl", "Zeta Trasporti", "Zeta Trasporti"])
 
-    assert len(store.list()) == 2
+    assert [row["name"] for row in added] == ["zeta trasporti"]
+    assert len(store.rows("suppliers")) == 2
+
+
+def test_a_row_can_be_read_back_by_identifier(store) -> None:
+    row = store.add("suppliers", {"name": "ACME"})
+
+    assert store.read("suppliers", row["id_subject"])["name"] == "acme"
+
+
+def test_a_name_that_normalizes_to_nothing_is_refused(store) -> None:
+    with pytest.raises(ValueError):
+        store.add("suppliers", {"name": "   "})
