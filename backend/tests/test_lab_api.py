@@ -194,7 +194,7 @@ def test_an_evaluation_blocks_document_processing_while_it_runs(api) -> None:
     )
 
     assert response.status_code == 409
-    assert "Prompt Lab" in response.json()["detail"]
+    assert "Lab" in response.json()["detail"]
 
 
 def test_an_unknown_evaluation_is_a_404(api) -> None:

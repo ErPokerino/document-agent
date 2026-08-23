@@ -89,8 +89,12 @@ type Props = {
   processState: string;
 };
 
-/** Which model answers, how it is reached, and what it costs to run. */
-export function Models(props: Props) {
+/** Which language model answers, how it is reached, and what it costs to run.
+
+    Named for what it holds. "Models" would cover the ML components a pipeline
+    may call one day, which are a different thing configured elsewhere.
+ */
+export function LanguageModels(props: Props) {
   const {
     models,
     draftSettings,
@@ -136,7 +140,7 @@ export function Models(props: Props) {
     <section className="settings-layout wide">
       <div className="settings-intro">
         <Cpu size={19} />
-        <div><h2>Models</h2><p>Where extraction runs: a model in LM Studio on this machine, or the Gemini API.</p></div>
+        <div><h2>LLM</h2><p>Which language model answers, and where it runs: LM Studio on this machine, or the Gemini API.</p></div>
       </div>
 
       {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}

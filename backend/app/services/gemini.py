@@ -121,7 +121,7 @@ class GeminiClient:
 
     def _headers(self) -> dict[str, str]:
         if not self.api_key:
-            raise GeminiError("No Gemini API key is configured. Add one in Models.")
+            raise GeminiError("No Gemini API key is configured. Add one in LLM.")
         # Never the `?key=` query form: keys do not belong in URLs, which end up
         # in logs and in browser history.
         return {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}

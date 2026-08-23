@@ -490,7 +490,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
 
                   {step.kind === "llm_extract" && (
                     <div className="flow-step-body">
-                      <p className="field-help">Uses the model selected in Models and the prompts written in Prompts. One call per document.</p>
+                      <p className="field-help">Uses the model selected in LLM and the prompts written in Extraction. One call per document.</p>
                     </div>
                   )}
 

@@ -222,7 +222,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
         </button>
       )}
         </div>
-        {!isModelReady && <p className="field-help">Load and warm up the model in Models before running a test.</p>}
+        {!isModelReady && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
         {running && (
       <div className="run-progress">
         <LoaderCircle className="spin" size={15} />
@@ -439,7 +439,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
           </span>
         )}
         {runCost(openEvaluation) !== null && (
-          <span className="cost-tag" title="Derived from the token and page counts and the rates configured in Models, not from what Google billed">
+          <span className="cost-tag" title="Derived from the token and page counts and the rates configured in LLM, not from what Google billed">
             {formatUsd(runCost(openEvaluation))}
           </span>
         )}
@@ -463,7 +463,7 @@ export function Lab({ draftSettings, isModelReady }: Props) {
           <button
             className="secondary-button"
             disabled={busy || !!running || !isModelReady}
-            title={running ? "Another run is in progress" : !isModelReady ? "Load and warm up the model in Models first" : "Process the documents this run did not score"}
+            title={running ? "Another run is in progress" : !isModelReady ? "Load and warm up the model in LLM first" : "Process the documents this run did not score"}
             onClick={() => guard(async () => {
               await api.retryEvaluation(openEvaluation.id);
               await refreshEvaluations();

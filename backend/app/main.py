@@ -199,12 +199,15 @@ async def _ensure_model_ready(settings: AppSettings) -> None:
         if not settings.gemini.api_key.strip():
             raise HTTPException(
                 status_code=409,
-                detail="No Gemini API key is configured. Add one in Models.",
+                detail="No Gemini API key is configured. Add one in LLM.",
             )
         return
 
     try:
-        available = await LMStudioClient(settings.lm_studio_url).list_vision_models()
+        # Every installed model, not only the ones that can see: a text-only
+        # model behind an OCR step is a legitimate choice, and looking for it
+        # among the vision models found nothing and called it "not ready".
+        available = await LMStudioClient(settings.lm_studio_url).list_models()
     except LMStudioError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     selected = next((model for model in available if model.id == settings.model), None)
@@ -213,14 +216,14 @@ async def _ensure_model_ready(settings: AppSettings) -> None:
             status_code=409,
             detail=(
                 f"{settings.model} is loaded with LM Studio's default profile, which puts it on "
-                "the integrated GPU and loses the Vulkan device on the first image. Open Settings "
+                "the integrated GPU and loses the Vulkan device on the first image. Open LLM "
                 "and use Load & warm up to reload it with the CPU-safe profile."
             ),
         )
     if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
         raise HTTPException(
             status_code=409,
-            detail="The active model is not ready. Open Settings and use Load & warm up first.",
+            detail="The active model is not ready. Open LLM and use Load & warm up first.",
         )
 
 
@@ -260,7 +263,7 @@ def _busy_message() -> str:
         return "A document is currently being processed. Wait for it to finish before changing models."
     if active_model_operation == "evaluating":
         return (
-            "An evaluation is running in Prompt Lab. Only one model operation can run at a "
+            "An evaluation is running in Lab. Only one model operation can run at a "
             "time, so wait for it to finish or cancel it."
         )
     return "A model is currently loading or warming up. Wait until it is ready."
@@ -270,7 +273,7 @@ def _busy_message() -> str:
 async def health() -> HealthStatus:
     settings = settings_store.read()
     try:
-        await LMStudioClient(settings.lm_studio_url).list_vision_models()
+        await LMStudioClient(settings.lm_studio_url).list_models()
         connected = True
     except LMStudioError:
         connected = False
@@ -305,7 +308,7 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
         raise HTTPException(
             status_code=400,
             detail="This model runs on Google's servers and does not need loading. "
-            "Add an API key in Models and it is ready.",
+            "Add an API key in LLM and it is ready.",
         )
     if request.model in settings.excluded_model_ids:
         raise HTTPException(
@@ -586,7 +589,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
         )
 
 
-# --- Prompt Lab -------------------------------------------------------------
+# --- datasets, master data and evaluation runs -------------------------------------------------------------
 
 
 def _metrics_model(metrics: Any) -> Metrics:
@@ -1314,7 +1317,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"This run used {detail.model}. Select and warm up that model in Models, "
+                f"This run used {detail.model}. Select and warm up that model in LLM, "
                 "so the retried documents are scored the same way as the rest of the run."
             ),
         )

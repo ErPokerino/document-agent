@@ -274,7 +274,7 @@ class ExtractionResponse(BaseModel):
     processing: ProcessingInfo
 
 
-# --- Prompt Lab -------------------------------------------------------------
+# --- datasets, master data and evaluation runs -------------------------------------------------------------
 
 
 class Dataset(BaseModel):

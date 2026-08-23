@@ -130,7 +130,7 @@ async def test_rendering_stops_when_the_image_budget_is_exhausted(monkeypatch) -
     context = make_context(40)
     await InspectPdf(page_limit=40).run(context)
 
-    with pytest.raises(ValueError, match="Maximum pages per extraction"):
+    with pytest.raises(ValueError, match="page limit"):
         await ExtractConfiguredEntities(PromptConfiguration()).run(context)
 
 

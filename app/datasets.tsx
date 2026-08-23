@@ -372,7 +372,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
               </div>
               <span className={`label-pill ${document.labelled ? "ok" : "missing"}`}>{document.labelled ? <Check size={11} /> : <AlertCircle size={11} />}</span>
               <button className="icon-button" aria-label={`Preview ${document.name}`} title="Open the document" onClick={() => setPreview({ dataset: selectedDataset, document: document.name })}><Eye size={15} /></button>
-              <button className="secondary-button small" disabled={!isModelReady || busy} title={isModelReady ? "Extract with the active model, then review the result" : "Load and warm up the model in Models first"} onClick={() => draftWithModel(document.name)}>
+              <button className="secondary-button small" disabled={!isModelReady || busy} title={isModelReady ? "Extract with the active model, then review the result" : "Load and warm up the model in LLM first"} onClick={() => draftWithModel(document.name)}>
                 {drafting === document.name ? <LoaderCircle className="spin" size={13} /> : <Wand2 size={13} />} Draft
               </button>
               <button className="secondary-button small" onClick={() => openLabels(document.name)}>{document.labelled ? "Edit" : "Label"}</button>

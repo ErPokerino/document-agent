@@ -32,11 +32,12 @@ import { ChangeEvent, DragEvent, Fragment, useEffect, useRef, useState } from "r
 
 import { api } from "../lib/api";
 import { resolveBootstrap } from "../lib/bootstrap";
+import { describeDataFlow } from "../lib/data-flow";
 import { Datasets } from "./datasets";
 import { Entities } from "./entities";
 import { MasterData } from "./master-data";
 import { Lab } from "./lab";
-import { Models, formatBytes, modelStateLabels } from "./models";
+import { LanguageModels, formatBytes, modelStateLabels } from "./llm";
 import { Pipelines } from "./pipeline";
 import { Settings } from "./settings";
 import { stepLabels } from "../lib/pipeline-editor";
@@ -61,7 +62,7 @@ type View =
   | "master-data"
   | "datasets"
   | "lab"
-  | "models"
+  | "llm"
   | "settings";
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
@@ -70,7 +71,7 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   pipelines: { eyebrow: "How a document is processed", title: "Pipelines" },
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
   lab: { eyebrow: "Extraction quality", title: "Lab" },
-  models: { eyebrow: "Configuration", title: "Models" },
+  llm: { eyebrow: "Where extraction runs", title: "LLM" },
   settings: { eyebrow: "Preferences", title: "Settings" },
 };
 
@@ -115,6 +116,7 @@ export default function Home() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [draftSettings, setDraftSettings] = useState<AppSettings | null>(null);
   const [pipelineShape, setPipelineShape] = useState<string[]>([]);
+  const [pipelineKinds, setPipelineKinds] = useState<string[]>([]);
   const [settingsState, setSettingsState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
@@ -166,6 +168,7 @@ export default function Home() {
         if (!active) return;
         const pipeline = saved.find((candidate) => candidate.name === chosen);
         setPipelineShape(pipeline ? stepLabels(pipeline.steps, catalogue) : []);
+        setPipelineKinds(pipeline ? pipeline.steps.map((step) => step.kind) : []);
       })
       .catch(() => undefined);
     return () => {
@@ -249,7 +252,7 @@ export default function Home() {
   async function processDocument() {
     if (!file) return;
     if (!isModelReady) {
-      setError("The active model is not ready. Open Settings and use Load & warm up first.");
+      setError("The active model is not ready. Open LLM and use Load & warm up first.");
       return;
     }
     setProcessState("processing");
@@ -428,10 +431,9 @@ export default function Home() {
   // Where documents actually go. Saying "local" while pages are being uploaded
   // to Google would be the worst kind of wrong copy.
   const usingHostedModel = settings?.provider === "gemini";
-  const privacyHeading = usingHostedModel ? "Sent to Google" : "Private processing";
-  const privacyDetail = usingHostedModel
-    ? "Page images are uploaded to the Gemini API for extraction."
-    : "Files and data are processed exclusively by the local model.";
+  // Not only the model: a Document AI step uploads the page whatever answers
+  // afterwards, so a pipeline with one is not local processing.
+  const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds);
   const configuredEntities = settings?.prompts.entities ?? [];
   const activeModelName = settings ? formatModelName(settings.model, models) : "No model selected";
   const isConnected = health?.lm_studio === true;
@@ -516,7 +518,7 @@ export default function Home() {
 
       <div className="schema-footer">
         <span><FileJson size={13} /> Dynamic JSON Schema</span>
-        <button className="export-button" disabled={!result?.run_id || reviewState === "saving"} onClick={markReviewed} title="Store these values as verified, so this document can become ground truth in Prompt Lab">
+        <button className="export-button" disabled={!result?.run_id || reviewState === "saving"} onClick={markReviewed} title="Store these values as verified, so this document can become ground truth in Datasets">
           {reviewState === "saved" ? <><Check size={14} /> Saved as verified</> : <><ShieldCheck size={14} /> Mark as reviewed</>}
         </button>
         <button className="export-button" disabled={!result} onClick={downloadJson}><Download size={14} /> Export JSON</button>
@@ -551,8 +553,8 @@ export default function Home() {
           <button className={`nav-item ${view === "lab" ? "active" : ""}`} onClick={() => setView("lab")}>
             <FlaskConical size={17} /> Lab
           </button>
-          <button className={`nav-item ${view === "models" ? "active" : ""}`} onClick={() => setView("models")}>
-            <Cpu size={17} /> Models
+          <button className={`nav-item ${view === "llm" ? "active" : ""}`} onClick={() => setView("llm")}>
+            <Cpu size={17} /> LLM
           </button>
           <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
             <SlidersHorizontal size={17} /> Settings
@@ -587,7 +589,7 @@ export default function Home() {
               <span className="model-icon"><Workflow size={15} /></span>
               <div><small>Pipeline</small><strong>{settings?.pipeline ?? "—"}</strong></div>
             </button>
-            <button className="model-chip" onClick={() => setView("models")} title="Change it in Models">
+            <button className="model-chip" onClick={() => setView("llm")} title="Change it in LLM">
               <span className="model-icon"><Cpu size={15} /></span>
               <div><small>{activeModelStatus}</small><strong>{activeModelName}</strong></div>
               <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />
@@ -630,7 +632,7 @@ export default function Home() {
                     <small>Maximum 20 MB · Large files follow the configured page limit</small>
                   </div>
                   <input ref={fileInput} type="file" accept="application/pdf,.pdf" onChange={handleFileInput} hidden />
-                  <div className={`privacy-note ${usingHostedModel ? "hosted" : ""}`}>{usingHostedModel ? <Cloud size={16} /> : <ShieldCheck size={16} />}<p><strong>{privacyHeading}</strong> {privacyDetail}</p></div>
+                  <div className={`privacy-note ${dataFlow.leavesTheMachine ? "hosted" : ""}`}>{dataFlow.leavesTheMachine ? <Cloud size={16} /> : <ShieldCheck size={16} />}<p><strong>{dataFlow.heading}</strong> {dataFlow.detail}</p></div>
                 </section>
                 {extractionPanel}
               </div>
@@ -653,7 +655,7 @@ export default function Home() {
                     <button className="icon-button" onClick={resetDocument} aria-label="Remove document"><Trash2 size={16} /></button>
                   </div>
                   {!isConnected && <small className="session-warning">Start LM Studio to process this document</small>}
-                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("models")}>Prepare the active model in Models before processing</button>}
+                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("llm")}>Prepare the active model in LLM before processing</button>}
                 </section>
                 <div className="review-grid">
                   {previewUrl && (
@@ -735,7 +737,7 @@ export default function Home() {
         ) : view === "lab" ? (
           <Lab draftSettings={draftSettings} isModelReady={isModelReady} />
         ) : (
-          <Models
+          <LanguageModels
             models={models}
             draftSettings={draftSettings}
             setDraftSettings={setDraftSettings}

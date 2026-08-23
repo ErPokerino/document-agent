@@ -120,9 +120,13 @@ test("steps are offered grouped by what they do", () => {
     "Read the document",
     "Ask a model",
     "Derived",
+    "Post processing",
   ]);
   assert.deepEqual(grouped[0].entries.map((entry) => entry.kind), ["render_pages", "document_ai_ocr"]);
-  assert.deepEqual(grouped[2].entries.map((entry) => entry.kind), ["regex_refine", "master_data_lookup"]);
+  // Deriving a field and tidying one up are different jobs, and a rule can be
+  // applied to a derived field just as well as to an extracted one.
+  assert.deepEqual(grouped[2].entries.map((entry) => entry.kind), ["master_data_lookup"]);
+  assert.deepEqual(grouped[3].entries.map((entry) => entry.kind), ["regex_refine"]);
 });
 
 test("a step nobody grouped still gets offered", () => {

@@ -1,6 +1,6 @@
 # DocuFlow — local document agent
 
-POC for extracting structured data from invoice PDFs with local vision models running in LM Studio.
+POC for extracting structured data from invoice PDFs, through composable pipelines: page rendering or Google Document AI, a local model in LM Studio or the Gemini API, then deterministic steps over the result.
 
 ## Included features
 
@@ -24,7 +24,7 @@ POC for extracting structured data from invoice PDFs with local vision models ru
 
 ## Start
 
-Requirements: Python 3.11+, Node.js 22+ and LM Studio with at least one vision model.
+Requirements: Python 3.11+, Node.js 22+ and LM Studio with at least one model installed. A vision model is needed only for a pipeline that renders pages; one that reads OCR text does not need vision.
 
 ```powershell
 python -m venv .venv
@@ -77,11 +77,13 @@ DocumentPipeline
              JSON Schema + Pydantic
 ```
 
-`DocumentPipeline` runs independent steps. Future steps can add document classification, logical splitting of compound PDFs, OCR, validation with a second model and tool calls without changing the UI contract.
+`DocumentPipeline` runs independent steps, each declaring what it needs and what it leaves behind, so a pipeline can be checked while it is being written. Today's steps: render pages, Document AI OCR, Document AI Layout Parser, the model call, master-data lookup and regex refinement. Future steps — document classification, splitting compound PDFs, validation with a second model — are a contract and a compiler case, not a UI change.
 
 ## Model lifecycle and timing
 
-The Settings model flow is `select → Load & warm up → process`. DocuFlow unloads other vision models before loading the selected one, uses an 8,192-token context and runs a minimal warm-up. On this device, models of at least 8 GB are loaded through the LM Studio CLI with GPU-layer offload disabled, one parallel request and MTP speculative decoding. This CPU-safe profile avoids exhausting the integrated GPU's shared memory; smaller models keep LM Studio's default profile. The incompatible `Qwen3.8 27B UD` variant is excluded locally.
+The LLM section's flow is `select → Load & warm up → process`. DocuFlow unloads other models before loading the selected one, uses an 8,192-token context and runs a minimal warm-up — with an image only when the selected pipeline actually sends images, since some models answer text and kill the runtime on any image.
+
+A model is kept off the integrated GPU when any of three signals says it will not fit: an IQ quantization, a file of at least 8 GB, or at least 20 billion parameters. That last one is not redundant: `bonsai-27b` is 27B in a 4.4 GB Q1_0 file, and the runtime allocates for the parameter count, not the file size. Those models are loaded through the LM Studio CLI with GPU-layer offload disabled and one parallel request. The incompatible `Qwen3.8 27B UD` variant is excluded locally.
 
 The UI reports load, warm-up and document-processing times separately. Extraction is rejected until the active model is loaded, so LM Studio cannot silently auto-load it inside the document timer.
 
@@ -89,7 +91,7 @@ The UI reports load, warm-up and document-processing times separately. Extractio
 
 The app deliberately does not extract page blocks and merge their values. A large PDF may contain multiple invoices or document types, so merging independent extractions could create an incoherent record.
 
-Instead, it sends the configured maximum number of initial pages together in one model call. The parameter count and theoretical context length are not used to choose a page limit. If the selected maximum exceeds the context actually available to the loaded model, LM Studio rejects the request and its context must be changed when loading the model.
+Instead, it sends the number of initial pages the pipeline allows together in one model call. The parameter count and theoretical context length are not used to choose a page limit. If the selected maximum exceeds the context actually available to the loaded model, LM Studio rejects the request and its context must be changed when loading the model.
 
 The UI reports `pages 1–N of M`. If `N < M`, the remaining pages were not sent to the model. The complete original PDF remains available in the preview for human review.
 
@@ -99,7 +101,7 @@ message instead of exhausting the backend process.
 
 ## Confidence
 
-Confidence is a qualitative model assessment, not a calibrated probability. Its rubric is editable in Settings. By default:
+Confidence is a qualitative model assessment, not a calibrated probability. Its rubric is editable in Extraction. By default:
 
 - `high`: clearly visible, explicitly labelled and unambiguous;
 - `medium`: readable but identified through context or with minor ambiguity;
