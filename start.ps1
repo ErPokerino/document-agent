@@ -5,8 +5,14 @@ $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 $runtime = Join-Path $projectRoot ".runtime"
 $backend = Join-Path $projectRoot "backend"
 
+# A clone that has never been set up is the common case on a new machine, and
+# the failure it produces otherwise is a stack trace from whichever step got
+# furthest. Name the missing piece instead.
 if (-not (Test-Path -LiteralPath $python)) {
-    throw "Python environment not found. Run first: python -m venv .venv"
+    throw "Python environment not found. Run .\setup.ps1 first."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "node_modules"))) {
+    throw "Node dependencies are not installed. Run .\setup.ps1 first."
 }
 
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null

@@ -1,0 +1,86 @@
+<#
+    One command to make a fresh clone runnable.
+
+    Everything under backend/data is ignored by git, so a checkout arrives with
+    no settings, no database and no credentials. That part is deliberate: it is
+    where API keys and real invoices live. This script builds what can be built
+    automatically and then says plainly what only a person can supply.
+
+    Safe to run again: every step checks before it acts.
+#>
+
+$ErrorActionPreference = "Stop"
+$projectRoot = $PSScriptRoot
+$python = Join-Path $projectRoot ".venv\Scripts\python.exe"
+
+function Require-Command([string]$Name, [string]$Hint) {
+    $found = Get-Command $Name -ErrorAction SilentlyContinue
+    if (-not $found) { throw "$Name was not found on PATH. $Hint" }
+    return $found
+}
+
+Write-Host "Checking prerequisites..."
+Require-Command "python" "Install Python 3.11 or newer from python.org." | Out-Null
+Require-Command "npm" "Install Node.js 22 or newer from nodejs.org." | Out-Null
+
+$nodeVersion = (& node --version) -replace "^v", ""
+if ([int]($nodeVersion -split "\.")[0] -lt 22) {
+    throw "Node.js $nodeVersion is too old. This project needs 22 or newer."
+}
+$pythonVersion = (& python --version) -replace "^Python ", ""
+$pythonParts = $pythonVersion -split "\."
+if ([int]$pythonParts[0] -lt 3 -or ([int]$pythonParts[0] -eq 3 -and [int]$pythonParts[1] -lt 11)) {
+    throw "Python $pythonVersion is too old. This project needs 3.11 or newer."
+}
+
+if (-not (Test-Path -LiteralPath $python)) {
+    Write-Host "Creating the Python environment..."
+    & python -m venv (Join-Path $projectRoot ".venv")
+    if ($LASTEXITCODE -ne 0) { throw "Could not create .venv" }
+}
+
+Write-Host "Installing Python dependencies..."
+& $python -m pip install --quiet --upgrade pip
+& $python -m pip install --quiet -r (Join-Path $projectRoot "backend\requirements.txt")
+if ($LASTEXITCODE -ne 0) { throw "Python dependencies failed to install" }
+
+Write-Host "Installing Node dependencies..."
+Push-Location $projectRoot
+try {
+    & npm.cmd install
+    if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+    Write-Host "Building the frontend..."
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+}
+finally { Pop-Location }
+
+New-Item -ItemType Directory -Path (Join-Path $projectRoot "backend\data") -Force | Out-Null
+
+# What no script can do for you. Stated as a list of facts, not as a warning:
+# each one is optional depending on which pipelines you intend to run.
+Write-Host ""
+Write-Host "Setup finished. Start the app with: .\start.ps1 -OpenBrowser"
+Write-Host ""
+Write-Host "Still to do by hand, depending on what you want to run:"
+
+$lms = Get-Command lms -ErrorAction SilentlyContinue
+if ($lms) {
+    Write-Host "  [ok]   LM Studio CLI found. DocuFlow reads this machine's hardware through it."
+} else {
+    Write-Host "  [todo] LM Studio is not on PATH. Install it and run 'lms bootstrap' to use local models."
+}
+
+$credentials = Join-Path $projectRoot "backend\data\gcp-service-account.json"
+if (Test-Path -LiteralPath $credentials) {
+    Write-Host "  [ok]   Document AI service-account key is in place."
+} else {
+    Write-Host "  [todo] For the OCR and Layout pipelines, save a Google service-account key as"
+    Write-Host "         backend\data\gcp-service-account.json, then fill in the project and"
+    Write-Host "         processor ids under Settings."
+}
+
+Write-Host "  [todo] For the hosted models, paste a Gemini API key under LLM. It is stored in"
+Write-Host "         backend\data\settings.json on this machine and never sent to the browser."
+Write-Host "  [todo] Choose a model under LLM. A fresh install has none selected, because which"
+Write-Host "         models exist depends on this machine."

@@ -20,47 +20,72 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 - initial schema with `date`, `document_number`, `supplier_name`, `currency` and `total_amount`;
 - JSON constrained by JSON Schema and validated with Pydantic;
 - JSON export;
-- no document data sent to external services.
+- a data-flow note on every run stating where the pages actually go: a
+  pipeline built only from local steps keeps them on the machine, one with a
+  Document AI step uploads them to Google, and a hosted model sends them to
+  its API.
 
 ## Start
 
-Requirements: Python 3.11+, Node.js 22+ and LM Studio with at least one model installed. A vision model is needed only for a pipeline that renders pages; one that reads OCR text does not need vision.
+Requirements: Python 3.11+, Node.js 22+, and LM Studio if you want to run models
+locally. A vision model is needed only for a pipeline that renders pages; one
+that reads OCR text does not need vision.
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-npm install
+.\setup.ps1
 .\start.ps1 -OpenBrowser
 ```
 
-`npm run start` serves a production build and never creates one, so `start.ps1`
-runs `npm run build` itself when `dist/` is missing.
+`setup.ps1` creates the virtual environment, installs both dependency sets and
+builds the frontend. It is safe to run again — every step checks before it acts —
+and it finishes by listing what only a person can supply.
 
-After changing any frontend code, restart with a rebuild in one step:
+### On a machine DocuFlow has not run on before
+
+Nothing under `backend/data` is in the repository: it holds API keys, run history
+and real invoices. A fresh clone therefore starts empty, and three things are
+yours to provide.
+
+**A model.** No model is selected by default, because which models exist depends
+on the machine. Open **LLM**, pick one from the list LM Studio reports, and use
+`Load & warm up`.
+
+**A Gemini key**, only for the hosted models. Paste it under **LLM**. It is stored
+in `backend/data/settings.json` on that machine and is never sent back to the
+browser.
+
+**A Document AI service account**, only for the OCR and Layout Parser pipelines.
+Save the JSON key as `backend/data/gcp-service-account.json`, then fill in the
+project id, region and processor ids under **Settings**.
+
+Nothing else is machine-specific. How models are loaded adapts on its own: the
+app reads the accelerator from LM Studio and derives its own limits from it, so a
+laptop with integrated graphics and a workstation with a discrete card each get
+the right decision without a setting to change. **LLM** shows what it found.
+
+Datasets, pipelines and Master Data do not travel either. Pipelines are recreated
+from the built-in default on first run; datasets and register rows are yours to
+re-import if you want them on the new machine — copy `backend/data` across to
+carry everything, including the run history.
+
+
+## Working on it
 
 ```powershell
-.
-estart.ps1
+.\stop.ps1      # stop the frontend and backend
+.\restart.ps1   # rebuild the frontend and restart both
 ```
 
-Building under a running server is what breaks the app silently: `vinext start`
-loads `dist/server/index.js` once and serves client chunks by content hash, so a
-rebuild leaves it pointing at hashes that no longer exist. The page still renders,
-but React never hydrates and every click does nothing.
+`npm test` is the type check, the frontend tests and the backend tests. It does
+not build, so it is safe to run against a live app. `npm run verify` adds the
+build, and a build landing under a running server leaves it stale.
 
-`npm test` no longer builds, so it is safe to run against a live app: it is the
-type check, the frontend tests and the backend tests. `npm run verify` adds the
-build, and leaves a running frontend stale — re-run `.\restart.ps1` after it.
-
-`start.ps1` and `restart.ps1` detect the stale state on their own too. They ask
-for every chunk the served page names, not just the page, because this failure
-answers 200 on the page itself.
-
-To stop the frontend and backend:
-
-```powershell
-.\stop.ps1
-```
+That staleness is worth recognising, because it does not look like a fault:
+`vinext start` reads its manifest once and serves client chunks by content hash,
+so after a rebuild the page still answers 200 while the scripts it names are
+gone. React never boots, the sidebar renders, and every click does nothing.
+`start.ps1` and `restart.ps1` detect it — they ask for each chunk the page names,
+not just the page — and rebuild.
 
 ## Architecture
 
@@ -87,7 +112,11 @@ DocumentPipeline
 
 The LLM section's flow is `select → Load & warm up → process`. DocuFlow unloads other models before loading the selected one, uses an 8,192-token context and runs a minimal warm-up — with an image only when the selected pipeline actually sends images, since some models answer text and kill the runtime on any image.
 
-A model is kept off the integrated GPU when any of three signals says it will not fit: an IQ quantization, a file of at least 8 GB, or at least 20 billion parameters. That last one is not redundant: `bonsai-27b` is 27B in a 4.4 GB Q1_0 file, and the runtime allocates for the parameter count, not the file size. Those models are loaded through the LM Studio CLI with GPU-layer offload disabled and one parallel request. The incompatible `Qwen3.8 27B UD` variant is excluded locally.
+Whether a model is offloaded to the accelerator is decided from the machine, not from a threshold in the code. `lms runtime survey` reports the accelerator available to the runtime LM Studio currently has selected; an integrated adapter is budgeted well below the figure it advertises, because that figure is a slice of system RAM a single allocation cannot rely on. What a model needs is the larger of its file and what its parameter count implies — `bonsai-27b` is 27B in a 4.4 GB Q1_0 file, and the runtime allocates for the parameters, not the file. When the second exceeds the first, the model is loaded through the LM Studio CLI with offload disabled, an 8,192-token context and one parallel request.
+
+The LLM section reports the accelerator found and the budget derived from it, which is how you check what the app concluded about a machine it has never run on. A machine it cannot read loads conservatively: offloading blind is what ends a run mid-way.
+
+Note that `--gpu off` governs the model's own layers. A vision projector follows the selected runtime, so on a GPU build page images are encoded on the GPU whatever the load flags said.
 
 The UI reports load, warm-up and document-processing times separately. Extraction is rejected until the active model is loaded, so LM Studio cannot silently auto-load it inside the document timer.
 
