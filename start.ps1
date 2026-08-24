@@ -33,14 +33,31 @@ if (-not (Get-ListenerPid 8000)) {
 }
 
 # A build that landed under the running server leaves it importing chunk
-# names that no longer exist, and every page becomes a 500. `npm test` runs a
-# build, so this is one `npm test` away at any time: recover instead of
-# leaving someone to read a stack trace.
+# names that no longer exist. Sometimes that is a 500, but more often the page
+# itself still renders and only its scripts 404: the browser shows the first
+# screen, no navigation works, and nothing looks broken. Recover instead of
+# leaving someone clicking a dead sidebar.
 $frontendPid = Get-ListenerPid 3000
 if ($frontendPid) {
     try {
         $probe = Invoke-WebRequest "http://localhost:3000" -UseBasicParsing -TimeoutSec 15
         $healthy = $probe.StatusCode -eq 200
+        if ($healthy) {
+            # A 200 on the page is not enough. The server keeps the manifest of
+            # the build it started with, so it can name chunks that a later
+            # build has already replaced. Ask for each one.
+            $chunks = [regex]::Matches($probe.Content, '_next/static/chunks/[A-Za-z0-9_\-]+\.js') |
+                ForEach-Object { $_.Value } |
+                Select-Object -Unique
+            foreach ($chunk in $chunks) {
+                try {
+                    $asset = Invoke-WebRequest "http://localhost:3000/$chunk" -UseBasicParsing -TimeoutSec 15
+                    if ($asset.StatusCode -ne 200) { $healthy = $false }
+                } catch {
+                    $healthy = $false
+                }
+            }
+        }
     } catch {
         $healthy = $false
     }
