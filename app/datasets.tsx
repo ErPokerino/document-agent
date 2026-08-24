@@ -57,6 +57,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
+  const archiveInput = useRef<HTMLInputElement>(null);
 
   const visibleDocuments = filterByName(documents, documentQuery);
 
@@ -225,14 +226,14 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
         </div>
 
         <div className="dataset-import">
-          <label className="secondary-button small" htmlFor="dataset-archive">
+          <button type="button" className="secondary-button small" onClick={() => archiveInput.current?.click()}>
             <UploadCloud size={13} /> Import a .zip
-          </label>
+          </button>
           <input
-            id="dataset-archive"
+            ref={archiveInput}
             type="file"
             accept=".zip,application/zip"
-            className="visually-hidden"
+            hidden
             onChange={(event) => {
               const picked = event.target.files?.[0];
               event.target.value = "";
@@ -338,7 +339,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
           <strong>Drop PDFs here</strong>
           <small>Several at once is fine</small>
         </div>
-        <button className="secondary-button small" onClick={() => uploadInput.current?.click()}>Browse</button>
+        <button type="button" className="secondary-button small" onClick={() => uploadInput.current?.click()}>Browse</button>
       </div>
       <input ref={uploadInput} type="file" accept="application/pdf,.pdf" multiple onChange={handleUpload} hidden />
 

@@ -2,6 +2,7 @@
 
 import {
   AlertCircle,
+  BarChart3,
   ArrowDown,
   ArrowUp,
   CheckCircle2,
@@ -27,8 +28,9 @@ import {
 import { useEffect, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
-import { CompareRuns } from "./compare";
+import { Analytics } from "./analytics";
 import { InfoHint } from "./info-hint";
+import { RunFiltersBar } from "./run-filters-bar";
 import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
@@ -70,6 +72,9 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [openEvaluation, setOpenEvaluation] = useState<EvaluationDetail | null>(null);
   const [filters, setFilters] = useState<EvaluationFilters>(emptyFilters);
+  // Two ways of reading the same runs. Both were on one page and it grew
+  // taller than anything anyone would scroll.
+  const [view, setView] = useState<"runs" | "analytics">("runs");
   const [sort, setSort] = useState<Sort>({ key: "id", direction: "desc" });
   // Scoring a run again without a field, in the view only: the stored run
   // is what happened, and this is a question about it.
@@ -259,60 +264,39 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
         <p className="field-help">A test uses the model, so document processing in Workspace is refused while it runs.</p>
       </div>
 
+      <div className="settings-tabs lab-tabs">
+        <button type="button" className={view === "runs" ? "active" : ""} onClick={() => setView("runs")}>
+          <History size={14} /> Past runs <span>{visibleEvaluations.length}</span>
+        </button>
+        <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}>
+          <BarChart3 size={14} /> Analytics
+        </button>
+      </div>
+
       <div className="settings-card">
         <div className="settings-card-heading">
-      <span className="settings-card-icon"><History size={18} /></span>
-      <div><h3>Past runs</h3><p>Each run remembers the prompts, the model and the page limit it used.</p></div>
+      <span className="settings-card-icon">{view === "runs" ? <History size={18} /> : <BarChart3 size={18} />}</span>
+      <div>
+        <h3>{view === "runs" ? "Past runs" : "Analytics"}</h3>
+        <p>{view === "runs"
+          ? "Each run remembers the prompts, the model and the page limit it used."
+          : "Approaches compared over the runs these filters leave in view."}</p>
+      </div>
         </div>
 
-        <div className="run-filters">
-      <label><span>Dataset</span>
-        <select value={filters.dataset} onChange={(event) => setFilters({ ...filters, dataset: event.target.value })}>
-          <option value="">Any</option>
-          {distinctDatasets(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <label><span>Model</span>
-        <select value={filters.model} onChange={(event) => setFilters({ ...filters, model: event.target.value })}>
-          <option value="">Any</option>
-          {distinctModels(evaluations).map((model) => <option key={model} value={model}>{model}</option>)}
-        </select>
-      </label>
-      <label><span>Pipeline</span>
-        <select value={filters.pipeline} onChange={(event) => setFilters({ ...filters, pipeline: event.target.value })}>
-          <option value="">Any</option>
-          {distinctPipelines(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <label><span>Runs on</span>
-        <select value={filters.runsOn} onChange={(event) => setFilters({ ...filters, runsOn: event.target.value as EvaluationFilters["runsOn"] })}>
-          <option value="">Anywhere</option>
-          <option value="lm_studio">On this machine</option>
-          <option value="gemini">Through an API</option>
-        </select>
-      </label>
-      <label><span>From</span>
-        <input type="date" value={filters.since} onChange={(event) => setFilters({ ...filters, since: event.target.value })} />
-      </label>
-      <label><span>Min accuracy %</span>
-        <input type="number" min="0" max="100" placeholder="Any" value={filters.minAccuracy} onChange={(event) => setFilters({ ...filters, minAccuracy: event.target.value })} />
-      </label>
-      <label><span>Min documents</span>
-        <input type="number" min="0" placeholder="Any" value={filters.minDocuments} onChange={(event) => setFilters({ ...filters, minDocuments: event.target.value })} />
-      </label>
-      <button
-        className="secondary-button small"
-        disabled={visibleEvaluations.length === 0}
-        title="One row per run: pipeline, model, where it ran, accuracy, timing, tokens, pages and cost"
-        onClick={() => downloadRunsCsv()}
-      >
-        <Download size={13} /> Export {visibleEvaluations.length} runs
-      </button>
-      <button className="secondary-button small" disabled={!hasActiveFilters(filters)} onClick={() => setFilters(emptyFilters)}>
-        <FilterX size={13} /> Clear
-      </button>
-        </div>
+        <RunFiltersBar evaluations={evaluations} filters={filters} setFilters={setFilters}>
+          {view === "runs" && <button
+            type="button"
+            className="secondary-button small"
+            disabled={visibleEvaluations.length === 0}
+            title="One row per run: pipeline, model, where it ran, accuracy, timing, tokens, pages and cost"
+            onClick={() => downloadRunsCsv()}
+          >
+            <Download size={13} /> Export {visibleEvaluations.length} runs
+          </button>}
+        </RunFiltersBar>
 
+        {view === "runs" ? (<>
       <div className="score-without">
           <span>
             Score without
@@ -344,7 +328,6 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
       <div className="models-empty"><AlertCircle size={18} /><span>No run matches these filters. {evaluations.length} hidden.</span></div>
         ) : (
       <>
-      <CompareRuns evaluations={visibleEvaluations} costOf={runCost} />
 
       <div className="runs-table-wrap">
         <table className="runs-table">
@@ -437,6 +420,9 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
         </table>
       </div>
       </>
+        )}
+        </>) : (
+          <Analytics evaluations={visibleEvaluations} costOf={runCost} />
         )}
       </div>
 

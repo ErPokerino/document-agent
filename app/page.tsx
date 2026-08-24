@@ -630,7 +630,7 @@ export default function Home() {
                     <div className="upload-icon"><UploadCloud size={23} /></div>
                     <h3>Drop the document here</h3>
                     <p>or select an invoice from your computer</p>
-                    <button className="primary-button" onClick={() => fileInput.current?.click()}>Select PDF</button>
+                    <button type="button" className="primary-button" onClick={() => fileInput.current?.click()}>Select PDF</button>
                     <small>Maximum 20 MB · Large files follow the configured page limit</small>
                   </div>
                   <input ref={fileInput} type="file" accept="application/pdf,.pdf" onChange={handleFileInput} hidden />
