@@ -259,7 +259,7 @@ export function LanguageModels(props: Props) {
             <div className="model-loader-copy">
               <strong>{modelStateLabels[selectedRuntimeState]}</strong>
               <span>{selectedRuntimeState === "profile_mismatch"
-                ? "Something loaded this model with LM Studio's defaults, which offload it to the integrated GPU. Loading it here applies the profile that holds its layers on the processor."
+                ? "Something loaded this model with LM Studio's defaults, which offload it to the GPU. Loading it here applies the profile that holds its layers on the processor."
                 : selectedDraftModel.vision
                   ? "Loading and warm-up are timed separately from document processing, and the vision path is prepared here rather than inside the first document's timer."
                   : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images."}</span>

@@ -80,6 +80,9 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
   const [busy, setBusy] = useState(false);
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
+  // Reads this machine's own history rather than assuming a cost, so it
+  // still tells the truth on a machine this one knows nothing about.
+  const runNote = runWarning(activeModel, pipelineKinds, evaluations, draftSettings.pipeline);
   const visibleEvaluations = sortEvaluations(
     filterEvaluations(evaluations, filters),
     sort.key,
@@ -234,10 +237,10 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
       )}
         </div>
         {!isModelReady && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
-        {runWarning(activeModel, pipelineKinds) && (
+        {runNote && (
           <div className="alert warning-alert" role="status">
             <Info size={17} />
-            <span>{runWarning(activeModel, pipelineKinds)}</span>
+            <span>{runNote}</span>
           </div>
         )}
         {running && (
