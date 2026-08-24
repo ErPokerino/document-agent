@@ -32,7 +32,7 @@ _RUNTIME_GONE = (
     "engine protocol predict request failed",
     "fetch failed",
     "is not reachable",
-    "stopped while processing the document image",
+    "failed to encode the page image",
 )
 
 
@@ -87,10 +87,12 @@ async def run_evaluation(
                         evaluation_id,
                         "partial" if any(s == "ok" for s in scored.values()) else "failed",
                         error=(
-                            f"The run stopped after {name}: the model is no longer serving. "
-                            f"{exc} Nothing after this point would have been scored, so the "
-                            f"remaining documents were left unprocessed — retry the run once "
-                            f"the model is ready again."
+                            f"The run stopped at {name}, with "
+                            f"{len([s for s in scored.values() if s == 'ok'])} of "
+                            f"{evaluations.get_evaluation(evaluation_id).total_documents} "
+                            f"documents scored. {exc} The model stopped serving at that point, "
+                            f"so the remaining documents were left unprocessed rather than "
+                            f"recorded as wrong."
                         ),
                     )
                     return

@@ -100,8 +100,9 @@ class RenderPages:
                     budget_mb = MAX_TOTAL_IMAGE_BYTES // (1024 * 1024)
                     raise ValueError(
                         f"Rendering page {page_index + 1} exceeded the {budget_mb} MB image "
-                        f"budget for a single request. Lower this pipeline's page limit "
-                        f"in Pipelines and try again."
+                        f"budget for a single request. The budget covers every page this "
+                        f"pipeline renders, so it is reached sooner the higher the page "
+                        f"limit is set."
                     )
                 images.append(encoded)
         finally:

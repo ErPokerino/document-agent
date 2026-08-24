@@ -22,7 +22,8 @@ test("a model kept off the GPU that is also sent images is", () => {
   const warning = runWarning(model({ requires_safe_profile: true }), ["render_pages", "llm_extract"]);
 
   assert.match(warning ?? "", /minutes/);
-  assert.match(warning ?? "", /OCR/);
+  // States what the configuration implies; recommends nothing.
+  assert.doesNotMatch(warning ?? "", /OCR|instead|should|try/i);
 });
 
 test("the same model reading text instead is fine", () => {

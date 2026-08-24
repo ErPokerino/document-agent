@@ -106,8 +106,8 @@ def explain_load_failure(detail: str, cli_output: str) -> str:
         architecture = cause.split("unknown model architecture:", 1)[-1].strip().strip("'\"")
         return (
             f"LM Studio's runtime does not know the {architecture} architecture, so it cannot "
-            f"open this model at all. Nothing in DocuFlow can change that: update the LM Studio "
-            f"runtime to a build that supports it, or choose another model."
+            f"open this model at all. This is a property of the installed runtime, not of "
+            f"anything DocuFlow sends it."
         )
     return f"{detail} LM Studio reported: {cause}"
 
@@ -687,8 +687,9 @@ class LMStudioClient:
                     # from an exhausted output budget. Fail with the real cause.
                     raise LMStudioError(
                         "The model reached its output token limit before finishing the JSON "
-                        "object. Reduce the number of configured entities, or shorten their "
-                        "names, and run the extraction again."
+                        "object, so the answer was cut off mid-value. The limit is on the "
+                        "answer, not the document: it is reached by the number and length of "
+                        "the entity names being written out."
                     )
                 raw_content = choice["message"]["content"]
                 if not isinstance(raw_content, str) or not raw_content.strip():
@@ -747,28 +748,26 @@ class LMStudioClient:
     def _friendly_engine_error(detail: str, prefix: str) -> str:
         if "ErrorDeviceLost" in detail or "DeviceLost" in detail:
             return (
-                "The GPU/Vulkan device was lost during inference. Reload the model from "
-                "LLM; DocuFlow will keep it off the GPU."
+                "The Vulkan device was lost during inference: the GPU driver dropped the "
+                "context the runtime was using, and LM Studio cannot continue with it."
             )
         if "failed to process image" in detail.lower():
             return (
-                "LM Studio stopped while processing the document image, more than once. "
-                "Reload it from LLM to try again — a large model on this device often needs "
-                "a second go at its first image. If it keeps failing, this model cannot read "
-                "images here: use it behind a pipeline that reads the page with OCR or the "
-                "Layout Parser instead."
+                "LM Studio failed to encode the page image. Its log reports the Vulkan "
+                "device being lost inside the vision encoder, which runs on the GPU even when "
+                "the model's own layers are held on the processor."
             )
         if "exited before becoming healthy" in detail:
             return (
                 "LM Studio's inference runtime crashed while loading this model, before it "
-                "could serve anything. The model file is the usual cause: draft and MTP "
-                "companion files are not complete models and always fail this way, and so do "
-                "interrupted downloads. Verify the model in LM Studio, or select another one."
+                "could serve anything. It reported no cause. Files that are not complete "
+                "models — draft and MTP companions, interrupted downloads — fail at exactly "
+                "this point."
             )
         if '"terminated"' in detail or "request terminated" in detail.lower():
             return (
                 "LM Studio terminated the request because the model was unloaded, replaced, "
-                "or stopped during inference. Wait until the model is ready, then retry."
+                "or stopped part way through inference."
             )
         return f"{prefix}: {detail}"
 

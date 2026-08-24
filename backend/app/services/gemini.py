@@ -237,8 +237,8 @@ class GeminiClient:
             )
         if finish_reason == "MAX_TOKENS":
             raise GeminiError(
-                "Gemini hit its output token limit before finishing the JSON object. "
-                "Reduce the number of configured entities and try again."
+                "Gemini hit its output token limit before finishing the JSON object, so "
+                "the answer was cut off mid-value."
             )
         try:
             payload = json.loads(text)

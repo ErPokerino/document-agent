@@ -493,13 +493,15 @@ async def test_large_model_recovers_one_vision_startup_failure(monkeypatch) -> N
     assert result["preparation_attempts"] == 2
 
 
-def test_device_lost_error_is_actionable() -> None:
+def test_device_lost_error_names_what_the_driver_did() -> None:
     message = LMStudioClient._friendly_engine_error(
         "vk::Queue::submit: ErrorDeviceLost",
         "Request failed",
     )
-    assert "GPU/Vulkan" in message
-    assert "Reload" in message
+    # What happened, in the reader's terms. No instruction on what to do next:
+    # that depends on things the backend cannot see.
+    assert "Vulkan device was lost" in message
+    assert "Reload" not in message
 
 
 def test_terminated_error_explains_model_lifecycle() -> None:
@@ -508,7 +510,7 @@ def test_terminated_error_explains_model_lifecycle() -> None:
         "Request failed",
     )
     assert "unloaded, replaced" in message
-    assert "ready" in message
+    assert "part way through inference" in message
 
 
 def test_image_processing_error_says_to_retry_and_what_it_means_if_it_persists() -> None:
@@ -517,11 +519,10 @@ def test_image_processing_error_says_to_retry_and_what_it_means_if_it_persists()
         "Request failed",
     )
 
-    assert "document image" in message
-    # A big model on CPU often needs a second go, so retrying is the first
-    # advice; only a repeated failure means the model cannot read images here.
-    assert "Reload it from LLM" in message
-    assert "OCR" in message
+    # States what LM Studio reported and where, and recommends nothing.
+    assert "page image" in message
+    assert "Vulkan" in message
+    assert "OCR" not in message
 
 
 def test_output_token_budget_grows_with_long_entity_names() -> None:

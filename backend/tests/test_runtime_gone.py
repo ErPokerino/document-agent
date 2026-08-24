@@ -26,7 +26,8 @@ def test_the_engine_process_being_gone_is_recognised() -> None:
 
 def test_a_crash_while_reading_the_page_is_recognised() -> None:
     assert model_is_gone(
-        "LM Studio stopped while processing the document image, more than once."
+        "LM Studio failed to encode the page image. Its log reports the Vulkan device "
+        "being lost inside the vision encoder."
     )
 
 

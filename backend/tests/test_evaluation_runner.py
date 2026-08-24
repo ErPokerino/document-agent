@@ -323,4 +323,6 @@ async def test_a_run_stops_when_the_runtime_dies_instead_of_hammering_it(workspa
     assert detail.failed_documents == 1
     assert detail.pending_documents == 3
     assert detail.status == "partial"
-    assert "no longer serving" in (detail.error or "")
+    # The error says how far the run got and why it stopped there.
+    assert "1 of 5 documents scored" in (detail.error or "")
+    assert "stopped serving" in (detail.error or "")

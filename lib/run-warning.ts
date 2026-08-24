@@ -1,10 +1,9 @@
 /**
  * What is worth saying before a run that is about to take a very long time.
  *
- * Not a block: it is a legitimate thing to try, and the only way to know the
- * real number is to measure. But a model kept off the GPU and handed page
- * images is minutes per document here, and that is better known before a run
- * than after twenty of them.
+ * A statement of what the configuration implies, not a recommendation: how
+ * long is too long is the reader's call, and a slow run on a test bench is a
+ * perfectly reasonable thing to start.
  */
 
 import type { ModelInfo } from "./types";
@@ -17,9 +16,7 @@ export function runWarning(model: ModelInfo | undefined, steps: string[]): strin
   if (!steps.includes(RENDERS_IMAGES)) return null;
 
   return (
-    `${model.name} is too large for this machine's GPU, so it runs on the processor, and ` +
-    `this pipeline sends it a full page image per document. Expect minutes per document, ` +
-    `and a runtime that may give up part way. A pipeline that reads the page with OCR or ` +
-    `the Layout Parser sends this model text instead, which is far quicker.`
+    `${model.name} runs on the processor here, and this pipeline sends it one full page ` +
+    `image per document. Both the load and each document take minutes rather than seconds.`
   );
 }
