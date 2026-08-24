@@ -50,6 +50,12 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # on demand.
 SAFE_PROFILE_PARALLEL = 1
 SAFE_PROFILE_CONTEXT_LENGTH = 8192
+# A large model on CPU often fails the first image and succeeds on the next:
+# qwen3.6-35b-a3b takes 95 seconds over a blank warm-up page and needed two
+# goes. Each attempt reloads the model, so they are not cheap — but reporting a
+# usable model as broken costs more.
+VISION_WARMUP_ATTEMPTS = 3
+VISION_WARMUP_SETTLE_SECONDS = 5
 
 
 def page_note(*, total_pages: int, processed_pages: int) -> str:
@@ -335,7 +341,7 @@ class LMStudioClient:
         if not skip_warmup:
             if phase_callback:
                 phase_callback("warming_up")
-            for attempt in range(2):
+            for attempt in range(VISION_WARMUP_ATTEMPTS):
                 preparation_attempts += 1
                 warmup_started = time.perf_counter()
                 try:
@@ -351,13 +357,16 @@ class LMStudioClient:
                     warmup_ms += round((time.perf_counter() - warmup_started) * 1000)
                     recoverable_vision_startup = (
                         large_model
-                        and attempt == 0
+                        and attempt < VISION_WARMUP_ATTEMPTS - 1
                         and "processing the document image" in str(exc)
                     )
                     if not recoverable_vision_startup:
                         raise
                     if phase_callback:
                         phase_callback("loading")
+                    # The runtime has just failed on an image; give it a moment
+                    # to release what it was holding before asking again.
+                    await asyncio.sleep(VISION_WARMUP_SETTLE_SECONDS)
                     load_ms += await self._reload_large_model_with_cli(model)
                     if phase_callback:
                         phase_callback("warming_up")
@@ -732,12 +741,15 @@ class LMStudioClient:
         if "ErrorDeviceLost" in detail or "DeviceLost" in detail:
             return (
                 "The GPU/Vulkan device was lost during inference. Reload the model from "
-                "Models; DocuFlow will keep it off the GPU."
+                "LLM; DocuFlow will keep it off the GPU."
             )
         if "failed to process image" in detail.lower():
             return (
-                "LM Studio stopped while processing the document image. Reload the model from "
-                "Models; large models will use the low-memory single-request profile."
+                "LM Studio stopped while processing the document image, more than once. "
+                "Reload it from LLM to try again — a large model on this device often needs "
+                "a second go at its first image. If it keeps failing, this model cannot read "
+                "images here: use it behind a pipeline that reads the page with OCR or the "
+                "Layout Parser instead."
             )
         if "exited before becoming healthy" in detail:
             return (

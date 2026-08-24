@@ -511,13 +511,17 @@ def test_terminated_error_explains_model_lifecycle() -> None:
     assert "ready" in message
 
 
-def test_image_processing_error_recommends_low_memory_reload() -> None:
+def test_image_processing_error_says_to_retry_and_what_it_means_if_it_persists() -> None:
     message = LMStudioClient._friendly_engine_error(
         '{"message":"failed to process image"}',
         "Request failed",
     )
+
     assert "document image" in message
-    assert "low-memory" in message
+    # A big model on CPU often needs a second go, so retrying is the first
+    # advice; only a repeated failure means the model cannot read images here.
+    assert "Reload it from LLM" in message
+    assert "OCR" in message
 
 
 def test_output_token_budget_grows_with_long_entity_names() -> None:

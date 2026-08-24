@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.services.lm_studio import LMStudioClient, requires_cpu_safe_profile
+from app.services.lm_studio import LMStudioClient, LMStudioError, requires_cpu_safe_profile
 
 
 def item(
@@ -354,3 +354,61 @@ def test_nothing_from_the_cli_leaves_the_original_message_alone() -> None:
     assert explain_load_failure("Something went wrong", "Loading 10%\nLoading 20%") == (
         "Something went wrong"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_large_model_gets_more_than_one_second_chance_at_the_image(monkeypatch) -> None:
+    """The vision path of a big model on CPU often fails once and then works.
+
+    qwen3.6-35b-a3b needs 95 seconds to look at a blank warm-up page, and its
+    first attempt after loading fails; the second succeeds. Giving up after one
+    retry left a usable model reported as broken.
+    """
+    client = LMStudioClient("http://127.0.0.1:1234")
+    monkeypatch.setattr(
+        LMStudioClient,
+        "_fetch_model_items",
+        make_items(item("big", "Q4_K_M", 20.5, vision=True)),
+    )
+    monkeypatch.setattr(LMStudioClient, "_load_large_model_with_cli", lambda self, model: _load_ms())
+    monkeypatch.setattr(LMStudioClient, "_reload_large_model_with_cli", lambda self, model: _load_ms())
+    monkeypatch.setattr("app.services.lm_studio.asyncio.sleep", lambda seconds: _noop())
+
+    attempts = {"count": 0}
+
+    async def fails_twice(self, model, entities, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise LMStudioError("LM Studio stopped while processing the document image.")
+
+    monkeypatch.setattr(LMStudioClient, "_warm_up_structured_output", fails_twice)
+
+    report = await client.load_and_warm_model("big")
+
+    assert report["status"] == "ready"
+    assert report["preparation_attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_never_manages_it_still_fails(monkeypatch) -> None:
+    client = LMStudioClient("http://127.0.0.1:1234")
+    monkeypatch.setattr(
+        LMStudioClient,
+        "_fetch_model_items",
+        make_items(item("big", "Q4_K_M", 20.5, vision=True)),
+    )
+    monkeypatch.setattr(LMStudioClient, "_load_large_model_with_cli", lambda self, model: _load_ms())
+    monkeypatch.setattr(LMStudioClient, "_reload_large_model_with_cli", lambda self, model: _load_ms())
+    monkeypatch.setattr("app.services.lm_studio.asyncio.sleep", lambda seconds: _noop())
+
+    async def always_fails(self, model, entities, **kwargs):
+        raise LMStudioError("LM Studio stopped while processing the document image.")
+
+    monkeypatch.setattr(LMStudioClient, "_warm_up_structured_output", always_fails)
+
+    with pytest.raises(LMStudioError, match="document image"):
+        await client.load_and_warm_model("big")
+
+
+async def _load_ms() -> int:
+    return 1
