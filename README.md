@@ -46,11 +46,15 @@ estart.ps1
 Building under a running server is what breaks the app silently: `vinext start`
 loads `dist/server/index.js` once and serves client chunks by content hash, so a
 rebuild leaves it pointing at hashes that no longer exist. The page still renders,
-but React never hydrates and every click does nothing. `npm test` runs a build,
-so re-run `.
-estart.ps1` after it.
+but React never hydrates and every click does nothing.
 
-Run `npm test` for the type check, the frontend tests and the backend tests.
+`npm test` no longer builds, so it is safe to run against a live app: it is the
+type check, the frontend tests and the backend tests. `npm run verify` adds the
+build, and leaves a running frontend stale — re-run `.\restart.ps1` after it.
+
+`start.ps1` and `restart.ps1` detect the stale state on their own too. They ask
+for every chunk the served page names, not just the page, because this failure
+answers 200 on the page itself.
 
 To stop the frontend and backend:
 
