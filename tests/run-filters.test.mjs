@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  distinctDatasets,
   distinctModels,
   distinctPipelines,
   emptyFilters,
@@ -162,4 +163,23 @@ test("a run recorded before the provider was stored is treated as local", () => 
   delete older.provider;
   assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: "lm_studio" }).length, 1);
   assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: "gemini" }).length, 0);
+});
+
+test("runs can be narrowed to one dataset, because scores across datasets do not compare", () => {
+  const runs = [
+    evaluation({ id: 1, dataset: "Invoices" }),
+    evaluation({ id: 2, dataset: "Receipts" }),
+  ];
+  const only = filterEvaluations(runs, { ...emptyFilters, dataset: "Invoices" });
+  assert.deepEqual(only.map((run) => run.id), [1]);
+  assert.equal(filterEvaluations(runs, emptyFilters).length, 2);
+});
+
+test("the datasets on offer are the ones that were actually run", () => {
+  const runs = [
+    evaluation({ dataset: "Receipts" }),
+    evaluation({ dataset: "Invoices" }),
+    evaluation({ dataset: "Invoices" }),
+  ];
+  assert.deepEqual(distinctDatasets(runs), ["Invoices", "Receipts"]);
 });

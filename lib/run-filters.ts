@@ -3,6 +3,9 @@ import type { Evaluation } from "./types";
 export type EvaluationFilters = {
   model: string;
   pipeline: string;
+  // Accuracy on one dataset says nothing about accuracy on another, so
+  // comparing approaches means holding the dataset still.
+  dataset: string;
   // Where the run happened. Same three choices as the model list in LLM, in
   // the same words, so the two places do not describe one idea differently.
   runsOn: "" | "lm_studio" | "gemini";
@@ -14,6 +17,7 @@ export type EvaluationFilters = {
 export const emptyFilters: EvaluationFilters = {
   model: "",
   pipeline: "",
+  dataset: "",
   runsOn: "",
   since: "",
   minAccuracy: "",
@@ -36,6 +40,7 @@ export function filterEvaluations(
   return evaluations.filter((evaluation) => {
     if (filters.model && evaluation.model !== filters.model) return false;
     if (filters.pipeline && evaluation.pipeline !== filters.pipeline) return false;
+    if (filters.dataset && evaluation.dataset !== filters.dataset) return false;
     // A payload from a backend older than the provider column has no field at
     // all; those runs were local, because hosted models came later.
     if (filters.runsOn && (evaluation.provider ?? "lm_studio") !== filters.runsOn) return false;
@@ -52,6 +57,10 @@ export function filterEvaluations(
 
 export function distinctModels(evaluations: Evaluation[]): string[] {
   return [...new Set(evaluations.map((evaluation) => evaluation.model))].sort();
+}
+
+export function distinctDatasets(evaluations: Evaluation[]): string[] {
+  return [...new Set(evaluations.map((evaluation) => evaluation.dataset))].sort();
 }
 
 export function distinctPipelines(evaluations: Evaluation[]): string[] {

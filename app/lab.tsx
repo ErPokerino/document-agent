@@ -27,11 +27,13 @@ import {
 import { useEffect, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
+import { CompareRuns } from "./compare";
 import { InfoHint } from "./info-hint";
 import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import {
+  distinctDatasets,
   distinctModels,
   distinctPipelines,
   emptyFilters,
@@ -264,6 +266,12 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
         </div>
 
         <div className="run-filters">
+      <label><span>Dataset</span>
+        <select value={filters.dataset} onChange={(event) => setFilters({ ...filters, dataset: event.target.value })}>
+          <option value="">Any</option>
+          {distinctDatasets(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
       <label><span>Model</span>
         <select value={filters.model} onChange={(event) => setFilters({ ...filters, model: event.target.value })}>
           <option value="">Any</option>
@@ -335,6 +343,9 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
         ) : visibleEvaluations.length === 0 ? (
       <div className="models-empty"><AlertCircle size={18} /><span>No run matches these filters. {evaluations.length} hidden.</span></div>
         ) : (
+      <>
+      <CompareRuns evaluations={visibleEvaluations} costOf={runCost} />
+
       <div className="runs-table-wrap">
         <table className="runs-table">
           <thead>
@@ -425,6 +436,7 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
           </tbody>
         </table>
       </div>
+      </>
         )}
       </div>
 
