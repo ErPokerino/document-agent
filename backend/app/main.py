@@ -648,6 +648,7 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "error",
                 "max_pages",
                 "pipeline",
+                "provider",
                 "steps",
                 "succeeded_documents",
                 "failed_documents",
@@ -1274,6 +1275,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         total_documents=len(documents),
         max_pages=pipeline_definition.page_limit,
         pipeline=settings.pipeline,
+        provider=settings.provider,
         steps=[step.kind.value for step in pipeline_definition.steps],
     )
     evaluation_cancelled = asyncio.Event()

@@ -18,6 +18,7 @@ def detail(documents) -> EvaluationDetail:
         finished_at="2026-08-20T20:14:00+00:00",
         dataset="Test-Dataset",
         model="qwen/qwen3.8-27b",
+        provider="lm_studio",
         status="completed",
         total_documents=len(documents),
         completed_documents=len(documents),

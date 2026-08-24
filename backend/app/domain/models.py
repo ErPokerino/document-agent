@@ -410,6 +410,9 @@ class Evaluation(BaseModel):
     error: str | None = None
     max_pages: int
     pipeline: str
+    # Where the work went, recorded when the run started. Past runs filter on
+    # it, and it cannot be recovered from the model id afterwards.
+    provider: Literal["lm_studio", "gemini"] = "lm_studio"
     steps: list[str] = Field(default_factory=list)
     succeeded_documents: int
     failed_documents: int

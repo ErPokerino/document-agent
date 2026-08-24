@@ -87,6 +87,7 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
     filterEvaluations(evaluations, filters),
     sort.key,
     sort.direction,
+    runCost,
   );
 
   function runCost(evaluation: Evaluation): number | null {
@@ -275,6 +276,13 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
           {distinctPipelines(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
       </label>
+      <label><span>Runs on</span>
+        <select value={filters.runsOn} onChange={(event) => setFilters({ ...filters, runsOn: event.target.value as EvaluationFilters["runsOn"] })}>
+          <option value="">Anywhere</option>
+          <option value="lm_studio">On this machine</option>
+          <option value="gemini">Through an API</option>
+        </select>
+      </label>
       <label><span>From</span>
         <input type="date" value={filters.since} onChange={(event) => setFilters({ ...filters, since: event.target.value })} />
       </label>
@@ -340,6 +348,7 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
                 ["total_elapsed_ms", "Total time", true],
                 ["max_pages", "Max pages", true],
                 ["accuracy", "Accuracy", true],
+                ["cost", "Cost", true],
               ] as [SortKey, string, boolean][]).map(([key, label, numeric]) => (
                 <th key={key} className={numeric ? "numeric" : ""} aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
                   <button className="sort-button" onClick={() => setSort(nextSort(sort, key))}>
@@ -348,7 +357,6 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
                   </button>
                 </th>
               ))}
-              <th className="numeric">Cost</th>
               <th aria-label="Actions" />
             </tr>
           </thead>

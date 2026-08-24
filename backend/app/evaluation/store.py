@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS evaluations (
     error               TEXT,
     max_pages           INTEGER NOT NULL DEFAULT 0,
     pipeline            TEXT,
-    steps               TEXT
+    steps               TEXT,
+    provider            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_documents (
@@ -99,6 +100,10 @@ class EvaluationSummary:
     error: str | None
     max_pages: int
     pipeline: str
+    # Where the work went. Not derivable afterwards from the model id: a local
+    # model can be uninstalled and a hosted one renamed, and either way the run
+    # already happened somewhere.
+    provider: str
     # What actually ran, in order. The pipeline name is a label and can be
     # edited or reused; this is the only record of the shape of the run.
     steps: list[str]
@@ -157,6 +162,24 @@ class EvaluationStore:
         if "steps" not in existing:
             # A run from before this says nothing rather than claiming a shape.
             connection.execute("ALTER TABLE evaluations ADD COLUMN steps TEXT")
+        if "provider" not in existing:
+            connection.execute("ALTER TABLE evaluations ADD COLUMN provider TEXT")
+        # Runs recorded before the column exists still happened somewhere. The
+        # registry of hosted models is the best evidence available in
+        # hindsight; anything it does not know ran through LM Studio.
+        from app.services.gemini import GEMINI_MODELS
+
+        hosted = [model.id for model in GEMINI_MODELS]
+        placeholders = ",".join("?" for _ in hosted) or "NULL"
+        connection.execute(
+            f"""
+            UPDATE evaluations
+               SET provider = CASE WHEN model IN ({placeholders}) THEN 'gemini'
+                                   ELSE 'lm_studio' END
+             WHERE provider IS NULL
+            """,
+            hosted,
+        )
 
         document_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
@@ -204,14 +227,15 @@ class EvaluationStore:
         max_pages: int = 0,
         pipeline: str | None = None,
         steps: list[str] | None = None,
+        provider: str = "lm_studio",
     ) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO evaluations
                     (created_at, dataset, model, prompts_json, status, total_documents,
-                     max_pages, pipeline, steps)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
+                     max_pages, pipeline, steps, provider)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -222,6 +246,7 @@ class EvaluationStore:
                     max_pages,
                     pipeline or PipelineDefinition.default().name,
                     ",".join(steps or []),
+                    provider,
                 ),
             )
             return int(cursor.lastrowid)
@@ -466,6 +491,7 @@ class EvaluationStore:
             error=row["error"],
             max_pages=row["max_pages"],
             pipeline=row["pipeline"] or PipelineDefinition.default().name,
+            provider=row["provider"] or "lm_studio",
             steps=[step for step in (row["steps"] or "").split(",") if step],
             succeeded_documents=int(progress["succeeded"] or 0),
             failed_documents=int(progress["failed"] or 0),

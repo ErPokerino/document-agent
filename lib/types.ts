@@ -80,6 +80,7 @@ export type Evaluation = {
   error: string | null;
   max_pages: number;
   pipeline: string;
+  provider: "lm_studio" | "gemini";
   steps: string[];
   succeeded_documents: number;
   failed_documents: number;
@@ -105,6 +106,7 @@ export type EvaluationDetail = {
   error: string | null;
   max_pages: number;
   pipeline: string;
+  provider: "lm_studio" | "gemini";
   steps: string[];
   succeeded_documents: number;
   failed_documents: number;

@@ -45,7 +45,7 @@ const rows = (csv) => csv.trim().split("\n").map((line) => line.split(","));
 test("one row per run, with the columns an analysis needs", () => {
   const [header, first] = rows(runsToCsv([run()], null));
 
-  assert.deepEqual(header.slice(0, 6), ["run_id", "created_at", "dataset", "pipeline", "model", "status"]);
+  assert.deepEqual(header.slice(0, 7), ["run_id", "created_at", "dataset", "pipeline", "model", "runs_on", "status"]);
   assert.equal(first[0], "16");
   assert.equal(first[3], "OCR then model");
   assert.equal(header.length, first.length);
@@ -103,4 +103,23 @@ test("a field left out of the accuracy on screen is left out of the export", () 
 
   assert.equal(withEverything[header.indexOf("scored_fields")], "50");
   assert.equal(without[header.indexOf("scored_fields")], "40");
+});
+
+test("the export carries where the run happened, so a filtered view survives it", () => {
+  const csv = runsToCsv(
+    [run({ id: 1, provider: "gemini", model: "gemini-3.7-flash" })],
+    null,
+  );
+  const [header, row] = csv.split("\n");
+  const column = header.split(",").indexOf("runs_on");
+  assert.ok(column > -1, "runs_on must be a column");
+  assert.equal(row.split(",")[column], "gemini");
+});
+
+test("a run from before the field existed exports as local", () => {
+  const older = run({ id: 2 });
+  delete older.provider;
+  const csv = runsToCsv([older], null);
+  const [header, row] = csv.split("\n");
+  assert.equal(row.split(",")[header.split(",").indexOf("runs_on")], "lm_studio");
 });

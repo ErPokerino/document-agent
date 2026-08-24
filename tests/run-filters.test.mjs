@@ -129,3 +129,37 @@ test("the pipelines to choose from are the ones that actually ran", () => {
 
   assert.deepEqual(distinctPipelines(runs), ["OCR then model", "Vision extraction"]);
 });
+
+test("runs can be narrowed to the ones that stayed on this machine", () => {
+  const runs = [
+    evaluation({ id: 1, provider: "lm_studio", model: "qwen/qwen3.6-35b-a3b" }),
+    evaluation({ id: 2, provider: "gemini", model: "gemini-3.7-flash" }),
+  ];
+  const local = filterEvaluations(runs, { ...emptyFilters, runsOn: "lm_studio" });
+  assert.deepEqual(local.map((run) => run.id), [1]);
+});
+
+test("runs can be narrowed to the ones that went to an API", () => {
+  const runs = [
+    evaluation({ id: 1, provider: "lm_studio" }),
+    evaluation({ id: 2, provider: "gemini" }),
+    evaluation({ id: 3, provider: "gemini" }),
+  ];
+  const hosted = filterEvaluations(runs, { ...emptyFilters, runsOn: "gemini" });
+  assert.deepEqual(hosted.map((run) => run.id), [2, 3]);
+});
+
+test("no choice shows both, and counts as no active filter", () => {
+  const runs = [evaluation({ id: 1, provider: "lm_studio" }), evaluation({ id: 2, provider: "gemini" })];
+  assert.equal(filterEvaluations(runs, emptyFilters).length, 2);
+  assert.equal(emptyFilters.runsOn, "");
+});
+
+test("a run recorded before the provider was stored is treated as local", () => {
+  // The backfill writes lm_studio, but a payload from an older backend can
+  // still arrive without the field at all.
+  const older = evaluation({ id: 9 });
+  delete older.provider;
+  assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: "lm_studio" }).length, 1);
+  assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: "gemini" }).length, 0);
+});

@@ -3,6 +3,9 @@ import type { Evaluation } from "./types";
 export type EvaluationFilters = {
   model: string;
   pipeline: string;
+  // Where the run happened. Same three choices as the model list in LLM, in
+  // the same words, so the two places do not describe one idea differently.
+  runsOn: "" | "lm_studio" | "gemini";
   since: string;
   minAccuracy: string;
   minDocuments: string;
@@ -11,6 +14,7 @@ export type EvaluationFilters = {
 export const emptyFilters: EvaluationFilters = {
   model: "",
   pipeline: "",
+  runsOn: "",
   since: "",
   minAccuracy: "",
   minDocuments: "",
@@ -32,6 +36,9 @@ export function filterEvaluations(
   return evaluations.filter((evaluation) => {
     if (filters.model && evaluation.model !== filters.model) return false;
     if (filters.pipeline && evaluation.pipeline !== filters.pipeline) return false;
+    // A payload from a backend older than the provider column has no field at
+    // all; those runs were local, because hosted models came later.
+    if (filters.runsOn && (evaluation.provider ?? "lm_studio") !== filters.runsOn) return false;
     // created_at is ISO, so a date-only prefix compares correctly as text.
     if (filters.since && evaluation.created_at.slice(0, 10) < filters.since) return false;
     if (minAccuracy !== null) {

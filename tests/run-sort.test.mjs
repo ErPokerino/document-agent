@@ -87,3 +87,26 @@ test("clicking the same column again reverses it", () => {
   assert.deepEqual(nextSort({ key: "id", direction: "desc" }, "id"), { key: "id", direction: "asc" });
   assert.deepEqual(nextSort({ key: "id", direction: "asc" }, "id"), { key: "id", direction: "desc" });
 });
+
+test("runs sort by what they cost", () => {
+  const runs = [run(1), run(2), run(3)];
+  const costs = new Map([[1, 0.5], [2, 0.02], [3, 1.4]]);
+  const sorted = sortEvaluations(runs, "cost", "asc", (evaluation) => costs.get(evaluation.id));
+  assert.deepEqual(ids(sorted), [2, 1, 3]);
+  const descending = sortEvaluations(runs, "cost", "desc", (evaluation) => costs.get(evaluation.id));
+  assert.deepEqual(ids(descending), [3, 1, 2]);
+});
+
+test("a local run has no cost, and does not win the top of the table for it", () => {
+  // Cost is null when there is nothing to compute from, which is not zero:
+  // a free run and an unpriced one look the same from here.
+  const runs = [run(1), run(2)];
+  const costs = new Map([[1, null], [2, 0.3]]);
+  const sorted = sortEvaluations(runs, "cost", "asc", (evaluation) => costs.get(evaluation.id));
+  assert.deepEqual(ids(sorted), [2, 1]);
+});
+
+test("sorting by cost without a way to work it out leaves the order alone", () => {
+  const runs = [run(1), run(2), run(3)];
+  assert.deepEqual(ids(sortEvaluations(runs, "cost", "desc")), [1, 2, 3]);
+});
