@@ -26,7 +26,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { InfoHint } from "./info-hint";
 import { describeHost, describeRuntimeEngine } from "../lib/runtime-engine";
-import { formatBytes } from "../lib/format";
+import { formatBytes, modelStateLabels } from "../lib/format";
 import {
   filterModels,
   sizeBuckets,
@@ -35,16 +35,6 @@ import {
   type VisionFilter,
 } from "../lib/model-filter";
 import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelRuntimeState, RuntimeEngineInfo } from "../lib/types";
-
-export const modelStateLabels: Record<ModelRuntimeState, string> = {
-  not_loaded: "Model not loaded",
-  loaded: "Model in memory",
-  loading: "Loading model",
-  warming_up: "Warming up model",
-  ready: "Model ready",
-  error: "Model preparation failed",
-  profile_mismatch: "Loaded with the wrong profile",
-};
 
 export const modelBadgeLabels: Record<ModelRuntimeState, string> = {
   not_loaded: "Available",

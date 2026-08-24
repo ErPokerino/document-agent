@@ -236,7 +236,10 @@ class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Literal["lm_studio", "gemini"] = "lm_studio"
-    model: str = "qwen/qwen3.8-27b"
+    # No default: which models exist is a property of the machine DocuFlow
+    # was installed on, and naming one here opens a fresh install already
+    # configured for a model the user does not have.
+    model: str = ""
     excluded_model_ids: list[str] = Field(default_factory=list)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     gcp: GcpSettings = Field(default_factory=GcpSettings)

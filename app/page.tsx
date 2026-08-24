@@ -37,8 +37,8 @@ import { Datasets } from "./datasets";
 import { Entities } from "./entities";
 import { MasterData } from "./master-data";
 import { Lab } from "./lab";
-import { formatBytes } from "../lib/format";
-import { LanguageModels, modelStateLabels } from "./llm";
+import { formatBytes, modelDisplayName, modelStatusLabel } from "../lib/format";
+import { LanguageModels } from "./llm";
 import { Pipelines } from "./pipeline";
 import { Settings } from "./settings";
 import { stepLabels } from "../lib/pipeline-editor";
@@ -91,10 +91,6 @@ const confidenceLabels: Record<Confidence, string> = {
   medium: "Medium",
   high: "High",
 };
-
-function formatModelName(modelId: string, models: ModelInfo[]) {
-  return models.find((model) => model.id === modelId)?.name ?? modelId;
-}
 
 function prettyName(name: string) {
   return name.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
@@ -441,11 +437,11 @@ export default function Home() {
   // afterwards, so a pipeline with one is not local processing.
   const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds);
   const configuredEntities = settings?.prompts.entities ?? [];
-  const activeModelName = settings ? formatModelName(settings.model, models) : "No model selected";
+  const activeModelName = modelDisplayName(settings?.model ?? "", models);
   const isConnected = health?.lm_studio === true;
   const activeModel = models.find((model) => model.id === settings?.model);
   const isModelReady = activeModel?.ready === true;
-  const activeModelStatus = activeModel ? modelStateLabels[activeModel.runtime_state] : "Model unavailable";
+  const activeModelStatus = modelStatusLabel(settings?.model ?? "", activeModel);
   const unresolvedWarningCount = result
     ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name)).length
     : 0;

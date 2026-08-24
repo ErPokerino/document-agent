@@ -1,4 +1,4 @@
-import type { EntityFormat } from "./types";
+import type { EntityFormat, ModelInfo, ModelRuntimeState } from "./types";
 import type { LabelMode } from "./labels";
 
 export const formatLabels: Record<EntityFormat, string> = {
@@ -40,4 +40,38 @@ export function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+export const modelStateLabels: Record<ModelRuntimeState, string> = {
+  not_loaded: "Model not loaded",
+  loaded: "Model in memory",
+  loading: "Loading model",
+  warming_up: "Warming up",
+  ready: "Model ready",
+  error: "Model error",
+  profile_mismatch: "Needs reload",
+};
+
+/**
+ * The model to show, given what this machine actually has installed.
+ *
+ * Three cases, and they are genuinely different: a model that is here, a model
+ * named in settings that is not (a settings file can arrive from another
+ * machine), and no choice made at all, which is how a fresh install starts.
+ */
+export function modelDisplayName(
+  modelId: string,
+  models: Pick<ModelInfo, "id" | "name">[],
+): string {
+  if (!modelId.trim()) return "No model selected";
+  return models.find((model) => model.id === modelId)?.name ?? modelId;
+}
+
+export function modelStatusLabel(
+  modelId: string,
+  model: Pick<ModelInfo, "runtime_state"> | undefined,
+): string {
+  if (model) return modelStateLabels[model.runtime_state];
+  // Having chosen nothing is not the same as having chosen something missing.
+  return modelId.trim() ? "Model unavailable" : "Choose a model in LLM";
 }
