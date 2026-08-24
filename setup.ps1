@@ -13,6 +13,27 @@ $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 
+function Invoke-Native {
+    <#
+        Run an external tool and judge it by its exit code.
+
+        Native tools write progress and warnings to stderr as a matter of
+        course — the frontend build prints a plugin timing note there on every
+        successful run. With $ErrorActionPreference = "Stop" PowerShell turns
+        each of those lines into a terminating error, so the script fails while
+        the tool it ran succeeded. The exit code is the only thing that says
+        what actually happened.
+    #>
+    param(
+        [Parameter(Mandatory)][scriptblock]$Command,
+        [Parameter(Mandatory)][string]$WhatFailed
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $Command } finally { $ErrorActionPreference = $previous }
+    if ($LASTEXITCODE -ne 0) { throw $WhatFailed }
+}
+
 function Require-Command([string]$Name, [string]$Hint) {
     $found = Get-Command $Name -ErrorAction SilentlyContinue
     if (-not $found) { throw "$Name was not found on PATH. $Hint" }
@@ -35,23 +56,21 @@ if ([int]$pythonParts[0] -lt 3 -or ([int]$pythonParts[0] -eq 3 -and [int]$python
 
 if (-not (Test-Path -LiteralPath $python)) {
     Write-Host "Creating the Python environment..."
-    & python -m venv (Join-Path $projectRoot ".venv")
-    if ($LASTEXITCODE -ne 0) { throw "Could not create .venv" }
+    Invoke-Native { & python -m venv (Join-Path $projectRoot ".venv") } "Could not create .venv"
 }
 
 Write-Host "Installing Python dependencies..."
-& $python -m pip install --quiet --upgrade pip
-& $python -m pip install --quiet -r (Join-Path $projectRoot "backend\requirements.txt")
-if ($LASTEXITCODE -ne 0) { throw "Python dependencies failed to install" }
+Invoke-Native { & $python -m pip install --quiet --upgrade pip } "pip could not update itself"
+Invoke-Native {
+    & $python -m pip install --quiet -r (Join-Path $projectRoot "backend\requirements.txt")
+} "Python dependencies failed to install"
 
 Write-Host "Installing Node dependencies..."
 Push-Location $projectRoot
 try {
-    & npm.cmd install
-    if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+    Invoke-Native { & npm.cmd install } "npm install failed"
     Write-Host "Building the frontend..."
-    & npm.cmd run build
-    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+    Invoke-Native { & npm.cmd run build } "Frontend build failed"
 }
 finally { Pop-Location }
 
