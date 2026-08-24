@@ -367,6 +367,11 @@ export type PromptPreviewRequest = {
   provider: "lm_studio" | "gemini";
 };
 
+export type RuntimeEngineInfo = {
+  engine: string | null;
+  uses_gpu: boolean;
+};
+
 export type SavedPipeline = {
   name: string;
   description: string;

@@ -112,6 +112,40 @@ def explain_load_failure(detail: str, cli_output: str) -> str:
     return f"{detail} LM Studio reported: {cause}"
 
 
+# LM Studio compiles one llama.cpp build per accelerator and lets exactly one
+# be selected at a time, for the whole application. The choice matters here
+# because `--gpu off` only holds the *model's* layers on the processor: the
+# vision projector follows the engine. Load a large model with `--gpu off` on
+# a Vulkan build and the page image is still encoded on the GPU, which is how
+# an integrated adapter ends up losing its device mid-run.
+_ACCELERATED_RUNTIMES = ("vulkan", "cuda", "rocm", "metal", "sycl")
+
+
+def runtime_uses_gpu(alias: str | None) -> bool:
+    """Whether this engine build talks to an accelerator.
+
+    Unknown reads as no: an engine nobody recognises is more likely a plain
+    build than a reason to warn someone who has nothing to act on.
+    """
+    lowered = (alias or "").lower()
+    return any(marker in lowered for marker in _ACCELERATED_RUNTIMES)
+
+
+def parse_selected_runtime(cli_output: str) -> str | None:
+    """The GGUF engine `lms runtime ls` marks as selected, if any.
+
+    Other model formats carry their own selection in the same table — the ASR
+    engine has one — and they say nothing about how an LLM will run.
+    """
+    for line in (cli_output or "").splitlines():
+        if "✓" not in line or "GGUF" not in line:
+            continue
+        alias = line.split()[0]
+        if alias and alias != "LLM":
+            return alias
+    return None
+
+
 def parameter_billions(params_string: str | None) -> float | None:
     """LM Studio's `params_string` as a number of billions, or None.
 
@@ -459,6 +493,40 @@ class LMStudioClient:
         # image. A short settling window prevents an immediate false failure.
         await asyncio.sleep(10)
         return round((time.perf_counter() - started) * 1000)
+
+    async def selected_runtime(self) -> str | None:
+        """The engine LM Studio will use for GGUF models, if it can be read.
+
+        Only the CLI exposes this — it is an application preference, not part
+        of the server API — so a remote endpoint or a machine without `lms`
+        yields None, and callers say nothing rather than guess.
+        """
+        from urllib.parse import urlparse
+
+        if urlparse(self.base_url).hostname not in LOCAL_HOSTS:
+            return None
+        executable = shutil.which("lms")
+        if executable is None:
+            return None
+
+        def run() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [executable, "runtime", "ls"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+                check=False,
+            )
+
+        try:
+            completed = await asyncio.to_thread(run)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if completed.returncode != 0:
+            return None
+        return parse_selected_runtime(completed.stdout or "")
 
     async def _cli_load_failure_cause(self, model: str) -> str:
         """Run the CLI load so its error message can be read. Loads nothing.

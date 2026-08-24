@@ -13,6 +13,7 @@ import type {
   HealthStatus,
   ModelInfo,
   ModelLoadResponse,
+  RuntimeEngineInfo,
   PipelineDefinition,
   PromptConfiguration,
   PromptPreview,
@@ -59,6 +60,7 @@ export const apiUrls = {
 export const api = {
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
+  runtimeEngine: () => request<RuntimeEngineInfo>("/api/runtime-engine"),
   loadModel: (model: string) => request<ModelLoadResponse>("/api/models/load", json("POST", { model })),
   settings: () => request<AppSettings>("/api/settings"),
   saveSettings: (settings: AppSettings) => request<AppSettings>("/api/settings", json("PUT", settings)),

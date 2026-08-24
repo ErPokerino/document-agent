@@ -30,6 +30,7 @@ from app.domain.models import (
     MetricTally,
     Metrics,
     ModelInfo,
+    RuntimeEngineInfo,
     ModelLoadRequest,
     ModelLoadResponse,
     ProcessingInfo,
@@ -59,7 +60,7 @@ from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.store import InvalidPipelineName, PipelineStore, UnknownPipeline
 from app.services.document_ai import DocumentAiClient, DocumentAiError, ServiceAccount
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
-from app.services.lm_studio import LMStudioClient, LMStudioError
+from app.services.lm_studio import LMStudioClient, LMStudioError, runtime_uses_gpu
 from app.services.run_store import RunStore
 from app.services.master_data import (
     TABLES,
@@ -299,6 +300,13 @@ async def models() -> list[ModelInfo]:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return hosted
     return [*_models_with_runtime_state(discovered), *hosted]
+
+
+@app.get("/api/runtime-engine", response_model=RuntimeEngineInfo)
+async def runtime_engine() -> RuntimeEngineInfo:
+    settings = settings_store.read()
+    engine = await LMStudioClient(settings.lm_studio_url).selected_runtime()
+    return RuntimeEngineInfo(engine=engine, uses_gpu=runtime_uses_gpu(engine))
 
 
 @app.post("/api/models/load", response_model=ModelLoadResponse)

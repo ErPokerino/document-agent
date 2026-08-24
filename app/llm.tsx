@@ -21,10 +21,11 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
 import { InfoHint } from "./info-hint";
+import { describeRuntimeEngine } from "../lib/runtime-engine";
 import {
   filterModels,
   sizeBuckets,
@@ -32,7 +33,7 @@ import {
   type SizeFilter,
   type VisionFilter,
 } from "../lib/model-filter";
-import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelRuntimeState } from "../lib/types";
+import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelRuntimeState, RuntimeEngineInfo } from "../lib/types";
 
 export const modelStateLabels: Record<ModelRuntimeState, string> = {
   not_loaded: "Model not loaded",
@@ -123,6 +124,25 @@ export function LanguageModels(props: Props) {
   const [runsFilter, setRunsFilter] = useState<RunsFilter>("any");
   const [visionFilter, setVisionFilter] = useState<VisionFilter>("any");
   const [sizeFilter, setSizeFilter] = useState<SizeFilter>("any");
+  // Which llama.cpp build LM Studio has selected. A machine-wide setting
+  // changed from LM Studio itself, so it is read once rather than polled.
+  const [runtimeEngine, setRuntimeEngine] = useState<RuntimeEngineInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .runtimeEngine()
+      .then((info) => {
+        if (!cancelled) setRuntimeEngine(info);
+      })
+      .catch(() => {
+        // The engine is context, not a feature. Failing to read it leaves
+        // the panel as it was rather than putting an error in front of it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const visibleModels = filterModels(models, {
     runs: runsFilter,
@@ -133,6 +153,12 @@ export function LanguageModels(props: Props) {
 
   const selectedDraftModel = models.find((model) => model.id === draftSettings.model);
   const selectedRuntimeState = selectedDraftModel?.runtime_state ?? "not_loaded";
+  const engineNote = selectedDraftModel
+    ? describeRuntimeEngine(runtimeEngine, {
+        vision: selectedDraftModel.vision,
+        safeProfile: selectedDraftModel.requires_safe_profile,
+      })
+    : null;
   const selectedModelPreparing =
     selectedRuntimeState === "loading" || selectedRuntimeState === "warming_up" || modelLoadState === "loading";
 
@@ -233,10 +259,11 @@ export function LanguageModels(props: Props) {
             <div className="model-loader-copy">
               <strong>{modelStateLabels[selectedRuntimeState]}</strong>
               <span>{selectedRuntimeState === "profile_mismatch"
-                ? "Something loaded this model with LM Studio's defaults, which put it on the integrated GPU. The first image would lose the Vulkan device, so reload it here first."
+                ? "Something loaded this model with LM Studio's defaults, which offload it to the integrated GPU. Loading it here applies the profile that holds its layers on the processor."
                 : selectedDraftModel.vision
-                  ? "Loading and warm-up are timed separately from document processing, and the vision path is prepared here rather than inside the first document's timer. A large model is kept off the integrated GPU, which cannot hold it."
-                  : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images; it fits a pipeline that reads the page with OCR or the Layout Parser."}</span>
+                  ? "Loading and warm-up are timed separately from document processing, and the vision path is prepared here rather than inside the first document's timer."
+                  : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images."}</span>
+              {engineNote && <small className="model-loader-engine">{engineNote}</small>}
               {modelLoadReport && modelLoadReport.model === selectedDraftModel.id && (
                 <small>{modelLoadReport.profile === "compatibility" ? "CPU-safe" : "LM Studio default"} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
               )}

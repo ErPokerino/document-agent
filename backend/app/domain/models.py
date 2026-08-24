@@ -115,6 +115,18 @@ class FieldExtraction(BaseModel):
     score: float | None = None
 
 
+class RuntimeEngineInfo(BaseModel):
+    """Which llama.cpp build LM Studio will run a local model on.
+
+    `--gpu off` holds a model's own layers on the processor but leaves the
+    vision projector on whatever this engine targets, so a GPU build and a
+    CPU-safe load are not the same thing.
+    """
+
+    engine: str | None = None
+    uses_gpu: bool = False
+
+
 class ModelInfo(BaseModel):
     id: str
     name: str

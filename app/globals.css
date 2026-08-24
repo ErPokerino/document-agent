@@ -216,6 +216,9 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .model-loader-copy strong { font-size: 9px; }
 .model-loader-copy span { color: var(--muted); font-size: 8px; line-height: 1.45; }
 .model-loader-copy small { color: var(--accent); font: 600 8px var(--font-mono), monospace; }
+/* Where the work runs is prose, not a measurement: it must not read as
+   part of the load-timing report directly above it. */
+.model-loader-copy small.model-loader-engine { color: var(--muted); font: 400 8px/1.45 inherit; }
 .model-load-button { min-height: 35px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--paper); padding: 0 12px; cursor: pointer; font-size: 9px; font-weight: 750; }
 .model-load-button:disabled { border-color: var(--line-strong); background: var(--line-strong); cursor: not-allowed; }
 .structured-output-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid #cfe2da; border-radius: 9px; background: var(--surface); color: var(--accent); }
