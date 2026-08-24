@@ -41,7 +41,7 @@ class LMStudioError(RuntimeError):
 INFERENCE_TIMEOUT_SECONDS = 600
 VISION_PREPARATION_TIMEOUT_SECONDS = 600
 LARGE_MODEL_THRESHOLD_BYTES = 8 * 1024**3
-# A model this big cannot be given to the integrated GPU on this device
+# A model this big loses the integrated GPU's Vulkan device when offloaded to it
 # whatever its file weighs: the runtime allocates for the parameter count.
 LARGE_MODEL_THRESHOLD_BILLIONS = 20
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}

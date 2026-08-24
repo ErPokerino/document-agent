@@ -216,9 +216,9 @@ async def _ensure_model_ready(settings: AppSettings) -> None:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"{settings.model} is loaded with LM Studio's default profile, which puts it on "
-                "the integrated GPU and loses the Vulkan device on the first image. Open LLM "
-                "and use Load & warm up to reload it with the CPU-safe profile."
+                f"{settings.model} is loaded with LM Studio's default profile, which offloads "
+                "it to the GPU. The CPU-safe profile, which holds its layers on the processor, "
+                "is applied by Load & warm up in LLM."
             ),
         )
     if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":

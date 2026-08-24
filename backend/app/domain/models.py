@@ -136,8 +136,9 @@ class ModelInfo(BaseModel):
     size_bytes: int | None = None
     context_length: int | None = None
     parallel: int | None = None
-    # This device cannot give a large or IQ-quantized model to the integrated
-    # GPU without losing the Vulkan device, so those need the CPU-safe profile.
+    # A large or IQ-quantized model offloaded to this machine's integrated GPU
+    # loses the Vulkan device, so those are loaded with `--gpu off`. That covers
+    # the model's layers only; see RuntimeEngineInfo for what it does not.
     requires_safe_profile: bool = False
     # False when the loaded instance was not the one we prepared: LM Studio
     # loads on demand with its own defaults, and that instance crashes here.
