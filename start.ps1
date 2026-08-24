@@ -63,7 +63,11 @@ if ($frontendPid) {
     }
     if (-not $healthy) {
         Write-Host "The running frontend cannot serve its own build. Rebuilding..."
-        & (Join-Path $projectRoot "stop.ps1") | Out-Null
+        # Only the frontend. stop.ps1 takes the backend down too, and the block
+        # that starts the backend has already run and found it healthy, so
+        # stopping it here would leave it down for the rest of this run.
+        Stop-Process -Id $frontendPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
         Push-Location $projectRoot
         try {
             & npm.cmd run build
