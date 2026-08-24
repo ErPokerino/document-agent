@@ -211,7 +211,7 @@ class GeminiClient:
         if response.status_code in (401, 403):
             raise GeminiError(
                 f"Gemini rejected the API key ({response.status_code}). "
-                f"Check it in Settings. {detail}".strip()
+                f"The key is under LLM. {detail}".strip()
             )
         if response.status_code == 429:
             raise GeminiError(f"Gemini rate limit or quota reached. {detail}".strip())

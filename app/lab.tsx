@@ -295,7 +295,7 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
       <button
         className="secondary-button small"
         disabled={visibleEvaluations.length === 0}
-        title="One row per run: pipeline, model, accuracy, timing, tokens, pages and cost"
+        title="One row per run: pipeline, model, where it ran, accuracy, timing, tokens, pages and cost"
         onClick={() => downloadRunsCsv()}
       >
         <Download size={13} /> Export {visibleEvaluations.length} runs
