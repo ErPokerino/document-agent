@@ -15,6 +15,7 @@ import {
   FilterX,
   FlaskConical,
   History,
+  Info,
   LoaderCircle,
   Play,
   RefreshCw,
@@ -40,18 +41,28 @@ import {
 } from "../lib/run-filters";
 import { runsToCsv } from "../lib/runs-csv";
 import { stepLabel } from "../lib/pipeline-editor";
+import { runWarning } from "../lib/run-warning";
 import { entitiesIn, scoreWithout } from "../lib/scoring-view";
 import { nextSort, sortEvaluations, type Sort, type SortKey } from "../lib/run-sort";
-import type { AppSettings, Dataset, Evaluation, EvaluationDetail, MetricTally } from "../lib/types";
+import type {
+  AppSettings,
+  Dataset,
+  Evaluation,
+  EvaluationDetail,
+  MetricTally,
+  ModelInfo,
+} from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
 
 type Props = {
   draftSettings: AppSettings;
   isModelReady: boolean;
+  activeModel: ModelInfo | undefined;
+  pipelineKinds: string[];
 };
 
 /** Run the configured extraction over a dataset and score what comes back. */
-export function Lab({ draftSettings, isModelReady }: Props) {
+export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
@@ -223,6 +234,12 @@ export function Lab({ draftSettings, isModelReady }: Props) {
       )}
         </div>
         {!isModelReady && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
+        {runWarning(activeModel, pipelineKinds) && (
+          <div className="alert warning-alert" role="status">
+            <Info size={17} />
+            <span>{runWarning(activeModel, pipelineKinds)}</span>
+          </div>
+        )}
         {running && (
       <div className="run-progress">
         <LoaderCircle className="spin" size={15} />

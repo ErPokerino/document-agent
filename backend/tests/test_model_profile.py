@@ -412,3 +412,31 @@ async def test_a_model_that_never_manages_it_still_fails(monkeypatch) -> None:
 
 async def _load_ms() -> int:
     return 1
+
+
+def test_cli_output_is_decoded_as_utf8_whatever_the_console_codepage_is(monkeypatch) -> None:
+    """`lms` prints spinner and box characters that cp1252 cannot decode.
+
+    Without an explicit encoding, Python decodes a subprocess's output with the
+    console codepage, and the reader thread dies with UnicodeDecodeError before
+    anything is read — turning a working load into a mystery.
+    """
+    import subprocess
+
+    from app.services import lm_studio
+
+    captured: dict = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(lm_studio.subprocess, "run", fake_run)
+    monkeypatch.setattr(lm_studio.shutil, "which", lambda name: "lms")
+
+    import asyncio
+
+    asyncio.run(lm_studio.LMStudioClient("http://127.0.0.1:1234")._cli_load_failure_cause("m"))
+
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"

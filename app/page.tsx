@@ -740,7 +740,12 @@ export default function Home() {
         ) : view === "datasets" ? (
           <Datasets savedEntities={configuredEntities} isModelReady={isModelReady} />
         ) : view === "lab" ? (
-          <Lab draftSettings={draftSettings} isModelReady={isModelReady} />
+          <Lab
+            draftSettings={draftSettings}
+            isModelReady={isModelReady}
+            activeModel={activeModel}
+            pipelineKinds={pipelineKinds}
+          />
         ) : (
           <LanguageModels
             models={models}

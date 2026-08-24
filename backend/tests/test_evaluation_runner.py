@@ -272,3 +272,55 @@ async def test_a_document_ai_failure_costs_one_document_not_the_whole_run(worksp
     assert detail.status == "failed"
     assert len(detail.failures) == 2
     assert "Permission denied" in detail.failures[0][1]
+
+
+async def test_a_run_stops_when_the_runtime_dies_instead_of_hammering_it(workspace, monkeypatch) -> None:
+    """qwen3.6-35b-a3b crashed LM Studio on the second page image.
+
+    The eight documents after it each failed in milliseconds against a runtime
+    that was no longer there, filling the run with identical errors and hiding
+    what had actually happened.
+    """
+    datasets, evaluations = workspace
+    asked: list[str] = []
+
+    class DiesOnTheSecond:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
+            asked.append("call")
+            if len(asked) == 1:
+                return {entity.name: FieldExtraction(value="EUR", confidence="high") for entity in ENTITIES}
+            raise LMStudioError('LM Studio rejected the request: {"error":"Model is unloaded."}')
+
+    monkeypatch.setattr("app.pipeline.steps.LMStudioClient", DiesOnTheSecond)
+    evaluation_id = evaluations.start(
+        dataset="invoices", model="m", prompts=PromptConfiguration(), total_documents=5
+    )
+
+    await run_evaluation(
+        evaluation_id=evaluation_id,
+        evaluations=evaluations,
+        datasets=datasets,
+        run_store=None,
+        dataset="invoices",
+        documents=[(f"{n}.pdf", {"currency": "EUR"}) for n in "abcde"],
+        entities=ENTITIES,
+        prompts=PromptConfiguration(entities=ENTITIES),
+        model="vision-model",
+        max_pages=1,
+        steps=default_steps(),
+        make_context=lambda name, content: PipelineContext(
+            filename=name, content=content, model="m", lm_studio_url="http://x"
+        ),
+    )
+
+    detail = evaluations.get_evaluation(evaluation_id)
+    # One success, one failure that killed it, and nothing attempted after.
+    assert len(asked) == 2
+    assert detail.succeeded_documents == 1
+    assert detail.failed_documents == 1
+    assert detail.pending_documents == 3
+    assert detail.status == "partial"
+    assert "no longer serving" in (detail.error or "")

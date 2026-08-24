@@ -437,6 +437,11 @@ class LMStudioClient:
                 command,
                 capture_output=True,
                 text=True,
+                # `lms` prints spinner and box-drawing characters. Without this
+                # Python decodes them with the console codepage — cp1252 here —
+                # and the reader thread dies on the first one.
+                encoding="utf-8",
+                errors="replace",
                 timeout=600,
                 check=False,
             )
@@ -474,6 +479,8 @@ class LMStudioClient:
                 [executable, "load", model, "--identifier", model, "-y"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=180,
                 check=False,
             )

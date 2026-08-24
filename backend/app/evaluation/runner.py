@@ -22,6 +22,26 @@ from app.services.lm_studio import LMStudioError
 from app.services.run_store import RunStore
 
 
+# Anything here means the inference runtime is no longer serving: it was
+# unloaded, it crashed, or the process is gone. Every document after one of
+# these fails in milliseconds against nothing, so the run stops instead of
+# filling the table with nine identical errors.
+_RUNTIME_GONE = (
+    "model is unloaded",
+    "unloaded, replaced, or stopped",
+    "engine protocol predict request failed",
+    "fetch failed",
+    "is not reachable",
+    "stopped while processing the document image",
+)
+
+
+def model_is_gone(message: str) -> bool:
+    """Whether this failure means there is nothing left to ask."""
+    lowered = (message or "").lower()
+    return any(marker in lowered for marker in _RUNTIME_GONE)
+
+
 async def run_evaluation(
     *,
     evaluation_id: int,
@@ -61,6 +81,19 @@ async def run_evaluation(
                 raise
             except (OSError, ValueError, LMStudioError, GeminiError, DocumentAiError) as exc:
                 evaluations.record_document_failure(evaluation_id, name, str(exc))
+                if model_is_gone(str(exc)):
+                    scored = evaluations.attempted_documents(evaluation_id)
+                    evaluations.finish(
+                        evaluation_id,
+                        "partial" if any(s == "ok" for s in scored.values()) else "failed",
+                        error=(
+                            f"The run stopped after {name}: the model is no longer serving. "
+                            f"{exc} Nothing after this point would have been scored, so the "
+                            f"remaining documents were left unprocessed — retry the run once "
+                            f"the model is ready again."
+                        ),
+                    )
+                    return
                 continue
 
             elapsed_ms = round((time.perf_counter() - started) * 1000)
