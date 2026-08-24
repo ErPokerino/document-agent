@@ -52,8 +52,17 @@ test("no accelerator is stated plainly, not as a fault", () => {
   assert.doesNotMatch(described, /error|problem|cannot|unsupported/i);
 });
 
-test("a machine that could not be read is not described", () => {
-  assert.equal(describeHost(unreadable), null);
+test("a machine that could not be read says so, because it changes every load", () => {
+  // Without the LM Studio CLI there is no survey, so nothing can be offloaded
+  // and every model goes to the processor. On a new machine that looks like a
+  // fault in the app unless it says why.
+  const described = describeHost(unreadable) ?? "";
+  assert.match(described, /could not read/i);
+  assert.match(described, /processor/i);
+  assert.match(described, /lms|command line/i);
+});
+
+test("no answer at all is not described", () => {
   assert.equal(describeHost(null), null);
 });
 

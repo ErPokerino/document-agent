@@ -4,6 +4,7 @@ import {
   AlertCircle,
   Check,
   Database,
+  Download,
   Eye,
   FilterX,
   History,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 
-import { api } from "../lib/api";
+import { api, apiUrls } from "../lib/api";
 import { filterByName } from "../lib/document-filter";
 import { formatLabels, labelModes } from "../lib/format";
 import { draftFromModel, draftToLabels, labelsToDraft, type LabelDraft, type LabelMode } from "../lib/labels";
@@ -223,8 +224,32 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
       </button>
         </div>
 
+        <div className="dataset-import">
+          <label className="secondary-button small" htmlFor="dataset-archive">
+            <UploadCloud size={13} /> Import a .zip
+          </label>
+          <input
+            id="dataset-archive"
+            type="file"
+            accept=".zip,application/zip"
+            className="visually-hidden"
+            onChange={(event) => {
+              const picked = event.target.files?.[0];
+              event.target.value = "";
+              if (!picked) return;
+              void guard(async () => {
+                const created = await api.importDataset(picked);
+                await refreshDatasets();
+                setSelectedDataset(created.name);
+                setLabelling(null);
+              });
+            }}
+          />
+          <small>A dataset exported from DocuFlow: the PDFs and their ground truth in one file. It arrives under the name the archive carries.</small>
+        </div>
+
         {datasets.length === 0 ? (
-      <div className="models-empty"><AlertCircle size={18} /><span>No dataset yet. Create one, or drop PDFs and their JSON labels into backend/data/datasets/.</span></div>
+      <div className="models-empty"><AlertCircle size={18} /><span>No dataset yet. Create one, import a .zip, or drop PDFs and their JSON labels into backend/data/datasets/.</span></div>
         ) : (
       <div className="dataset-list">
         {datasets.map((dataset) => (
@@ -277,6 +302,9 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
                   <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
                 </button>
                 {dataset.labelled_count === 0 && <em className="warn">No ground truth</em>}
+                <a className="icon-button" href={apiUrls.datasetArchive(dataset.name)} download aria-label={`Export dataset ${dataset.name}`} title="Download the PDFs and their ground truth as one zip">
+                  <Download size={14} />
+                </a>
                 <button className="icon-button" aria-label={`Rename dataset ${dataset.name}`} onClick={() => { setRenameValue(dataset.name); setRenaming(dataset.name); setConfirmingDataset(null); }}>
                   <Pencil size={14} />
                 </button>

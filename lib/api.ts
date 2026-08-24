@@ -55,11 +55,19 @@ export const apiUrls = {
   documentFile: (dataset: string, document: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/documents/${segment(document)}/file`,
   evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
+  datasetArchive: (dataset: string) =>
+    `${API_BASE}/api/datasets/${segment(dataset)}/export.zip`,
 };
 
 export const api = {
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
+  importDataset: (file: File, name?: string) => {
+    const body = new FormData();
+    body.append("file", file);
+    if (name?.trim()) body.append("name", name.trim());
+    return request<Dataset>("/api/datasets/import", { method: "POST", body });
+  },
   runtimeEngine: () => request<RuntimeEngineInfo>("/api/runtime-engine"),
   loadModel: (model: string) => request<ModelLoadResponse>("/api/models/load", json("POST", { model })),
   settings: () => request<AppSettings>("/api/settings"),

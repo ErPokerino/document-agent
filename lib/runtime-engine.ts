@@ -40,8 +40,15 @@ export function describeRuntimeEngine(
  * the app has never seen, this line is the way to check what it concluded.
  */
 export function describeHost(info: RuntimeEngineInfo | null): string | null {
-  if (!info || info.offload_budget_bytes === null || info.offload_budget_bytes === undefined) {
-    return null;
+  if (!info) return null;
+  if (info.offload_budget_bytes === null || info.offload_budget_bytes === undefined) {
+    // The survey comes from the `lms` command line, not from the LM Studio
+    // server, so a machine without it on PATH reports nothing. Everything then
+    // loads on the processor, which looks like a fault unless it says why.
+    return (
+      "DocuFlow could not read this machine's hardware: the LM Studio command line " +
+      "(lms) is not available here. Models are loaded on the processor until it is."
+    );
   }
   if (!info.accelerator || !info.accelerator_bytes) {
     return "The selected runtime reports no accelerator, so every model is loaded on the processor.";

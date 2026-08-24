@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, AsyncIterator
 
 import pymupdf
-from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.domain.models import (
@@ -44,6 +44,7 @@ from app.domain.models import (
     MasterDataTable,
     StepCatalogueEntry,
 )
+from app.evaluation.dataset_archive import ArchiveError, read_archive, write_archive
 from app.evaluation.datasets import DatasetStore, InvalidName
 from app.evaluation.export import evaluation_to_csv
 from app.evaluation.runner import run_evaluation
@@ -74,6 +75,9 @@ from app.services.settings_store import SettingsStore
 
 
 MAX_FILE_SIZE = 20 * 1024 * 1024
+# A dataset archive is many PDFs at once, so it needs its own ceiling: ten
+# documents at the single-file limit already exceed that one.
+MAX_ARCHIVE_SIZE = 500 * 1024 * 1024
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 DATABASE_PATH = DATA_DIR / "docuflow.db"
@@ -1015,6 +1019,47 @@ async def delete_dataset(name: str) -> Response:
 async def list_dataset_documents(name: str) -> list[DatasetDocument]:
     _require_dataset(name)
     return [DatasetDocument(**asdict(document)) for document in dataset_store.list_documents(name)]
+
+
+@app.get("/api/datasets/{name}/export.zip", response_class=Response)
+async def export_dataset(name: str) -> Response:
+    """The whole dataset as one file: the PDFs, their ground truth, a manifest."""
+    _require_dataset(name)
+    try:
+        archive = write_archive(dataset_store, name)
+    except ArchiveError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
+    )
+
+
+@app.post("/api/datasets/import", response_model=Dataset, status_code=201)
+async def import_dataset(
+    file: UploadFile = File(...),
+    name: str | None = Form(default=None),
+) -> Dataset:
+    """Create a dataset from an archive someone else exported.
+
+    `name` overrides what the archive calls itself, which is how the same
+    archive can be imported twice under two names, and how an archive that
+    carries no manifest gets one at all.
+    """
+    content = await file.read(MAX_ARCHIVE_SIZE + 1)
+    if len(content) > MAX_ARCHIVE_SIZE:
+        limit = MAX_ARCHIVE_SIZE // (1024 * 1024)
+        raise HTTPException(
+            status_code=413, detail=f"The archive exceeds the {limit} MB limit"
+        )
+    try:
+        summary = read_archive(dataset_store, content, name=(name or "").strip() or None)
+    except InvalidName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ArchiveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Dataset(**asdict(summary))
 
 
 @app.post("/api/datasets/{name}/documents", response_model=DatasetDocument, status_code=201)
