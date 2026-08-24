@@ -16,6 +16,35 @@ from app.services.field_validation import validate_result
 from app.services.lm_studio import LMStudioClient, LMStudioError, _representative_warmup_image
 
 
+# Every test here states the machine it assumes, instead of inheriting whatever
+# hardware happens to run the suite. Without this the decision falls back to
+# the careful case and the assertions describe nothing.
+LAPTOP_SURVEY = """Survey by llama.cpp-win-x86_64-vulkan-avx2 (2.29.1)
+GPU/ACCELERATORS                             VRAM
+Intel(R) UHD Graphics (Vulkan, Integrated)   19.82 GiB
+
+CPU: x86_64 (AVX, AVX2)
+RAM: 39.64 GiB
+"""
+
+
+@pytest.fixture(autouse=True)
+def integrated_laptop(monkeypatch):
+    """The machine the current thresholds were measured on."""
+    from app.services.host import parse_survey
+    from app.services.lm_studio import LMStudioClient
+
+    host = parse_survey(LAPTOP_SURVEY)
+
+    async def read_host(self):
+        return host
+
+    monkeypatch.setattr(LMStudioClient, "host_capabilities", read_host)
+    monkeypatch.setattr(LMStudioClient, "_host_cache", None)
+    return host
+
+
+
 def test_default_invoice_entities_are_present() -> None:
     assert [entity.name for entity in default_entities()] == [
         "date",

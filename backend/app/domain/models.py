@@ -116,15 +116,25 @@ class FieldExtraction(BaseModel):
 
 
 class RuntimeEngineInfo(BaseModel):
-    """Which llama.cpp build LM Studio will run a local model on.
+    """Which llama.cpp build LM Studio will run a local model on, and on what.
 
     `--gpu off` holds a model's own layers on the processor but leaves the
     vision projector on whatever this engine targets, so a GPU build and a
     CPU-safe load are not the same thing.
+
+    The accelerator and the budget are reported because they decide how every
+    model here is loaded. On a machine DocuFlow has never seen, that decision
+    is the thing worth being able to check.
     """
 
     engine: str | None = None
     uses_gpu: bool = False
+    accelerator: str | None = None
+    accelerator_bytes: int | None = None
+    accelerator_integrated: bool = False
+    # How much model this host will be trusted to hold. Zero means every model
+    # is loaded on the processor; null means the machine could not be read.
+    offload_budget_bytes: int | None = None
 
 
 class ModelInfo(BaseModel):

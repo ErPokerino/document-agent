@@ -10,12 +10,18 @@ import time
 import zlib
 from datetime import date, datetime
 from functools import lru_cache
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 import httpx
 from pydantic import ValidationError
 
 from app.services.field_validation import parse_named_value, validate_result
+from app.services.host import (
+    HostCapabilities,
+    estimated_working_set_bytes,
+    parameter_billions,
+    parse_survey,
+)
 from app.domain.models import (
     EntityDefinition,
     EntityFormat,
@@ -40,10 +46,6 @@ class LMStudioError(RuntimeError):
 
 INFERENCE_TIMEOUT_SECONDS = 600
 VISION_PREPARATION_TIMEOUT_SECONDS = 600
-LARGE_MODEL_THRESHOLD_BYTES = 8 * 1024**3
-# A model this big loses the integrated GPU's Vulkan device when offloaded to it
-# whatever its file weighs: the runtime allocates for the parameter count.
-LARGE_MODEL_THRESHOLD_BILLIONS = 20
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # What the CPU-safe profile looks like once applied. LM Studio's own default is
 # four parallel slots, so `parallel` tells our instance apart from one it loaded
@@ -146,44 +148,32 @@ def parse_selected_runtime(cli_output: str) -> str | None:
     return None
 
 
-def parameter_billions(params_string: str | None) -> float | None:
-    """LM Studio's `params_string` as a number of billions, or None.
-
-    It writes things like "27B", "0.8B", "8x7B" and "700M". The last number
-    before the unit is the size of one expert, which is what has to fit.
-    """
-    if not params_string:
-        return None
-    match = re.search(r"(\d+(?:\.\d+)?)\s*([BM])\b", str(params_string).upper())
-    if match is None:
-        return None
-    value = float(match.group(1))
-    return value if match.group(2) == "B" else value / 1000
-
-
 def requires_cpu_safe_profile(
     quantization: str | None,
     size_bytes: int | None,
     params_string: str | None = None,
+    host: HostCapabilities | None = None,
 ) -> bool:
-    """Whether this model must be kept off the integrated GPU on this device.
+    """Whether this model must be kept off the accelerator on *this* machine.
 
-    Three signals, because each one alone missed a model that then lost the
-    Vulkan device mid-run:
+    Asked of the host rather than of a constant. What the accelerator can be
+    trusted with is derived in `host.py`; what the model asks for is derived
+    from its file and its parameter count. When the second exceeds the first,
+    offloading is what loses the device mid-run.
 
-    - an IQ quant, whose codebook lookups are the configuration that first
-      raised vk::Queue::submit: ErrorDeviceLost;
-    - a large file, which cannot fit whatever it contains;
-    - a large parameter count, because bonsai-27b is 27B in a 4.4 GB Q1_0
-      file: the file says "small" and the runtime still allocates
-      activations, KV cache and a vision projector for 27 billion parameters.
+    An unreadable host, and a runtime with no accelerator at all, both answer
+    yes: offloading blind is the failure that costs a run, and holding a model
+    on the processor only costs speed.
     """
-    parameters = parameter_billions(params_string)
-    return (
-        (quantization or "").upper().startswith("IQ")
-        or int(size_bytes or 0) >= LARGE_MODEL_THRESHOLD_BYTES
-        or (parameters is not None and parameters >= LARGE_MODEL_THRESHOLD_BILLIONS)
-    )
+    budget = host.offload_budget_bytes if host else 0
+    if budget <= 0:
+        return True
+    # IQ codebook lookups are what first raised vk::Queue::submit:
+    # ErrorDeviceLost, on an integrated adapter. The observation belongs to
+    # that class of hardware, so it is not charged to a dedicated card.
+    if host.has_integrated_only and (quantization or "").upper().startswith("IQ"):
+        return True
+    return estimated_working_set_bytes(size_bytes, params_string) > budget
 
 
 @lru_cache(maxsize=1)
@@ -233,6 +223,7 @@ class LMStudioClient:
         no use for vision, and paying for it would be waste.
         """
         excluded = set(excluded_model_ids or [])
+        host = await self.host_capabilities()
         models: list[ModelInfo] = []
         for item in await self._fetch_model_items():
             capabilities = item.get("capabilities") or {}
@@ -242,7 +233,7 @@ class LMStudioClient:
             loaded_config = (loaded_instances[0].get("config") or {}) if loaded_instances else {}
             quantization = (item.get("quantization") or {}).get("name")
             needs_safe = requires_cpu_safe_profile(
-                quantization, item.get("size_bytes"), item.get("params_string")
+                quantization, item.get("size_bytes"), item.get("params_string"), host
             )
             parallel = loaded_config.get("parallel")
             models.append(
@@ -294,7 +285,8 @@ class LMStudioClient:
         quantization = ((selected_item.get("quantization") or {}).get("name") or "").upper()
         size_bytes = int(selected_item.get("size_bytes") or 0)
         large_model = requires_cpu_safe_profile(
-            quantization, size_bytes, selected_item.get("params_string")
+            quantization, size_bytes, selected_item.get("params_string"),
+            await self.host_capabilities(),
         )
         profile = "compatibility" if large_model else "default"
         # A model without vision has no projector to initialize, so the only
@@ -302,7 +294,10 @@ class LMStudioClient:
         has_vision = has_vision and warm_vision
         if not has_vision:
             warmup_mode = "schema"
-        elif size_bytes >= LARGE_MODEL_THRESHOLD_BYTES:
+        elif large_model:
+            # Warming the schema path as well doubles the wait on a model the
+            # host cannot offload, for a second capability the run does not
+            # exercise until after the first image has already proved it.
             warmup_mode = "vision"
         else:
             warmup_mode = "vision_and_schema"
@@ -493,6 +488,52 @@ class LMStudioClient:
         # image. A short settling window prevents an immediate false failure.
         await asyncio.sleep(10)
         return round((time.perf_counter() - started) * 1000)
+
+    # The survey costs a subprocess and the answer changes only when someone
+    # swaps hardware or picks another runtime in LM Studio, so it is held for
+    # a short while rather than run on every model refresh.
+    _host_cache: ClassVar[tuple[float, HostCapabilities] | None] = None
+    HOST_CACHE_SECONDS: ClassVar[int] = 60
+
+    async def host_capabilities(self) -> HostCapabilities | None:
+        """What this machine can lend a model, or None if it cannot be read.
+
+        None is not "no accelerator": it means the question went unanswered,
+        and callers treat that as the careful case rather than assuming a card
+        is there.
+        """
+        cached = LMStudioClient._host_cache
+        if cached is not None and time.monotonic() - cached[0] < self.HOST_CACHE_SECONDS:
+            return cached[1]
+
+        from urllib.parse import urlparse
+
+        if urlparse(self.base_url).hostname not in LOCAL_HOSTS:
+            return None
+        executable = shutil.which("lms")
+        if executable is None:
+            return None
+
+        def run() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [executable, "runtime", "survey"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+                check=False,
+            )
+
+        try:
+            completed = await asyncio.to_thread(run)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if completed.returncode != 0:
+            return None
+        host = parse_survey(completed.stdout or "")
+        LMStudioClient._host_cache = (time.monotonic(), host)
+        return host
 
     async def selected_runtime(self) -> str | None:
         """The engine LM Studio will use for GGUF models, if it can be read.

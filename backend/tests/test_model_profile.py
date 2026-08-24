@@ -5,6 +5,35 @@ import pytest
 from app.services.lm_studio import LMStudioClient, LMStudioError, requires_cpu_safe_profile
 
 
+# Every test here states the machine it assumes, instead of inheriting whatever
+# hardware happens to run the suite. Without this the decision falls back to
+# the careful case and the assertions describe nothing.
+LAPTOP_SURVEY = """Survey by llama.cpp-win-x86_64-vulkan-avx2 (2.29.1)
+GPU/ACCELERATORS                             VRAM
+Intel(R) UHD Graphics (Vulkan, Integrated)   19.82 GiB
+
+CPU: x86_64 (AVX, AVX2)
+RAM: 39.64 GiB
+"""
+
+
+@pytest.fixture(autouse=True)
+def integrated_laptop(monkeypatch):
+    """The machine the current thresholds were measured on."""
+    from app.services.host import parse_survey
+    from app.services.lm_studio import LMStudioClient
+
+    host = parse_survey(LAPTOP_SURVEY)
+
+    async def read_host(self):
+        return host
+
+    monkeypatch.setattr(LMStudioClient, "host_capabilities", read_host)
+    monkeypatch.setattr(LMStudioClient, "_host_cache", None)
+    return host
+
+
+
 def item(
     key: str,
     quantization: str = "Q4_K_M",
@@ -34,19 +63,19 @@ def loaded(parallel: int, context_length: int = 8192) -> list:
     return [{"id": "i1", "config": {"parallel": parallel, "context_length": context_length}}]
 
 
-def test_a_large_model_needs_the_cpu_safe_profile() -> None:
-    assert requires_cpu_safe_profile("Q4_K_M", int(16.5 * 1024**3)) is True
+def test_a_large_model_needs_the_cpu_safe_profile(integrated_laptop) -> None:
+    assert requires_cpu_safe_profile("Q4_K_M", int(16.5 * 1024**3), host=integrated_laptop) is True
 
 
-def test_an_iq_quant_needs_it_even_below_the_size_threshold() -> None:
+def test_an_iq_quant_needs_it_even_below_the_size_threshold(integrated_laptop) -> None:
     # IQ2_XXS at 7.6 GB used to take the REST path with GPU offload still on:
     # the compatibility profile was applied by halves.
-    assert requires_cpu_safe_profile("IQ2_XXS", int(7.63 * 1024**3)) is True
+    assert requires_cpu_safe_profile("IQ2_XXS", int(7.63 * 1024**3), host=integrated_laptop) is True
 
 
-def test_a_small_ordinary_quant_does_not_need_it() -> None:
-    assert requires_cpu_safe_profile("Q8_0", int(0.95 * 1024**3)) is False
-    assert requires_cpu_safe_profile("Q5_K_S", int(1.97 * 1024**3)) is False
+def test_a_small_ordinary_quant_does_not_need_it(integrated_laptop) -> None:
+    assert requires_cpu_safe_profile("Q8_0", int(0.95 * 1024**3), host=integrated_laptop) is False
+    assert requires_cpu_safe_profile("Q5_K_S", int(1.97 * 1024**3), host=integrated_laptop) is False
 
 
 @pytest.mark.asyncio
@@ -191,25 +220,25 @@ async def test_a_text_only_model_is_warmed_up_without_an_image(monkeypatch) -> N
     )
 
 
-def test_a_27b_model_needs_the_safe_profile_however_small_its_file_is() -> None:
+def test_a_27b_model_needs_the_safe_profile_however_small_its_file_is(integrated_laptop) -> None:
     """bonsai-27b is 27B parameters in a 4.4 GB Q1_0 file.
 
     The file size says "small"; the runtime allocates activations, KV cache and
     a vision projector for 27B parameters, and the Vulkan device is lost part
     way through a run. The parameter count is the honest signal.
     """
-    assert requires_cpu_safe_profile("Q1_0", int(4.41 * 1024**3), "27B") is True
+    assert requires_cpu_safe_profile("Q1_0", int(4.41 * 1024**3), "27B", host=integrated_laptop) is True
 
 
-def test_a_small_model_is_still_left_on_the_gpu() -> None:
-    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), "4B") is False
-    assert requires_cpu_safe_profile("Q8_0", int(0.95 * 1024**3), "0.8B") is False
+def test_a_small_model_is_still_left_on_the_gpu(integrated_laptop) -> None:
+    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), "4B", host=integrated_laptop) is False
+    assert requires_cpu_safe_profile("Q8_0", int(0.95 * 1024**3), "0.8B", host=integrated_laptop) is False
 
 
-def test_an_unreadable_parameter_count_falls_back_to_the_other_signals() -> None:
-    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), None) is False
-    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), "who knows") is False
-    assert requires_cpu_safe_profile("IQ2_M", int(2.6 * 1024**3), "who knows") is True
+def test_an_unreadable_parameter_count_falls_back_to_the_other_signals(integrated_laptop) -> None:
+    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), None, host=integrated_laptop) is False
+    assert requires_cpu_safe_profile("Q4_K_M", int(2.6 * 1024**3), "who knows", host=integrated_laptop) is False
+    assert requires_cpu_safe_profile("IQ2_M", int(2.6 * 1024**3), "who knows", host=integrated_laptop) is True
 
 
 def test_parameter_counts_are_read_the_way_lm_studio_writes_them() -> None:

@@ -25,7 +25,8 @@ import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
 import { InfoHint } from "./info-hint";
-import { describeRuntimeEngine } from "../lib/runtime-engine";
+import { describeHost, describeRuntimeEngine } from "../lib/runtime-engine";
+import { formatBytes } from "../lib/format";
 import {
   filterModels,
   sizeBuckets,
@@ -54,12 +55,6 @@ export const modelBadgeLabels: Record<ModelRuntimeState, string> = {
   error: "Preparation failed",
   profile_mismatch: "Needs reload",
 };
-
-export function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
 
 export function formatDuration(ms: number) {
   return `${(ms / 1000).toFixed(1)} s`;
@@ -159,6 +154,7 @@ export function LanguageModels(props: Props) {
         safeProfile: selectedDraftModel.requires_safe_profile,
       })
     : null;
+  const hostNote = describeHost(runtimeEngine);
   const selectedModelPreparing =
     selectedRuntimeState === "loading" || selectedRuntimeState === "warming_up" || modelLoadState === "loading";
 
@@ -179,6 +175,12 @@ export function LanguageModels(props: Props) {
         </div>
         <label className="input-label" htmlFor="endpoint">Local endpoint</label>
         <input id="endpoint" className="text-input" value={draftSettings.lm_studio_url} onChange={(event) => setDraftSettings({ ...draftSettings, lm_studio_url: event.target.value })} />
+        {hostNote && (
+          <p className="host-note">
+            <Cpu size={13} />
+            <span>{hostNote}<InfoHint text="Read from LM Studio on this machine, for the runtime it currently has selected. The budget is derived from the accelerator, not fixed in DocuFlow, so it follows the machine the app is installed on." /></span>
+          </p>
+        )}
       </div>
 
       <div className="settings-card">

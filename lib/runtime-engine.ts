@@ -1,3 +1,4 @@
+import { formatBytes } from "./format.ts";
 import type { RuntimeEngineInfo } from "./types.ts";
 
 /**
@@ -29,4 +30,30 @@ export function describeRuntimeEngine(
     return `LM Studio is running ${name}, which offloads to the GPU, but this model's layers are held on the processor.`;
   }
   return `LM Studio is running ${name}, which offloads to the GPU. This model's layers are held on the processor; its vision encoder is not, so each page image is encoded on the GPU.`;
+}
+
+/**
+ * The machine DocuFlow found, and the budget it derived from it.
+ *
+ * This is the number that decides how every local model here is loaded, and
+ * it is computed from the host rather than fixed in the code — so on a machine
+ * the app has never seen, this line is the way to check what it concluded.
+ */
+export function describeHost(info: RuntimeEngineInfo | null): string | null {
+  if (!info || info.offload_budget_bytes === null || info.offload_budget_bytes === undefined) {
+    return null;
+  }
+  if (!info.accelerator || !info.accelerator_bytes) {
+    return "The selected runtime reports no accelerator, so every model is loaded on the processor.";
+  }
+  // An integrated adapter's figure is a slice of system memory, and a single
+  // allocation cannot count on all of it. Saying so explains the gap between
+  // the two numbers on the same line.
+  const memory = info.accelerator_integrated
+    ? `${formatBytes(info.accelerator_bytes)} shared with system memory`
+    : `${formatBytes(info.accelerator_bytes)} dedicated`;
+  return (
+    `${info.accelerator} — ${memory}. DocuFlow offloads models up to ` +
+    `${formatBytes(info.offload_budget_bytes)} to it, and holds larger ones on the processor.`
+  );
 }

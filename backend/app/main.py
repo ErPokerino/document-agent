@@ -305,8 +305,22 @@ async def models() -> list[ModelInfo]:
 @app.get("/api/runtime-engine", response_model=RuntimeEngineInfo)
 async def runtime_engine() -> RuntimeEngineInfo:
     settings = settings_store.read()
-    engine = await LMStudioClient(settings.lm_studio_url).selected_runtime()
-    return RuntimeEngineInfo(engine=engine, uses_gpu=runtime_uses_gpu(engine))
+    client = LMStudioClient(settings.lm_studio_url)
+    engine = await client.selected_runtime()
+    host = await client.host_capabilities()
+    best = (
+        max(host.accelerators, key=lambda adapter: adapter.memory_bytes)
+        if host and host.accelerators
+        else None
+    )
+    return RuntimeEngineInfo(
+        engine=engine,
+        uses_gpu=runtime_uses_gpu(engine),
+        accelerator=best.name if best else None,
+        accelerator_bytes=best.memory_bytes if best else None,
+        accelerator_integrated=bool(best and best.integrated),
+        offload_budget_bytes=host.offload_budget_bytes if host else None,
+    )
 
 
 @app.post("/api/models/load", response_model=ModelLoadResponse)

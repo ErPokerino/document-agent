@@ -370,6 +370,10 @@ export type PromptPreviewRequest = {
 export type RuntimeEngineInfo = {
   engine: string | null;
   uses_gpu: boolean;
+  accelerator: string | null;
+  accelerator_bytes: number | null;
+  accelerator_integrated: boolean;
+  offload_budget_bytes: number | null;
 };
 
 export type SavedPipeline = {

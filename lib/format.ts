@@ -34,3 +34,10 @@ export function seconds(ms: number | null | undefined): string {
 export function describeValue(value: unknown): string {
   return value === null || value === undefined ? "—" : String(value);
 }
+
+/** Sizes as people read them on a model card or a spec sheet. */
+export function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
