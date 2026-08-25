@@ -107,9 +107,15 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
               </p>
             ) : (
               <div className="entity-list">
-                {inGroup.map((entity) => (
-                  <div className="entity-editor" key={entity.name}>
-                    <div className="entity-index">{entities.indexOf(entity) + 1}</div>
+                {inGroup.map((entity) => {
+                  // Keyed by position, not by name. The name is edited in the
+                  // input two lines down, so keying by it gave React a new key
+                  // on every keystroke: it discarded the row, built another,
+                  // and the field lost focus after each letter.
+                  const position = entities.indexOf(entity);
+                  return (
+                  <div className="entity-editor" key={position}>
+                    <div className="entity-index">{position + 1}</div>
                     <div className="entity-fields">
                       <div className="entity-row">
                         <label>
@@ -160,7 +166,8 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
                       <Trash2 size={15} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
