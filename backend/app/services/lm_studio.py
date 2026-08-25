@@ -148,6 +148,20 @@ def parse_selected_runtime(cli_output: str) -> str | None:
     return None
 
 
+# A large model often fails its very first image and succeeds on the next, so
+# that one failure is worth another go. The test that matches this against
+# what the engine mapper actually produces is the point: this used to be a
+# substring of a sentence, and rewriting the sentence silently disabled every
+# retry.
+_VISION_STARTUP_FAILURE = ("failed to encode the page image", "vision encoder")
+
+
+def is_vision_startup_failure(message: str) -> bool:
+    """Whether this failure is the vision path stumbling as it starts."""
+    lowered = (message or "").lower()
+    return any(marker in lowered for marker in _VISION_STARTUP_FAILURE)
+
+
 def requires_cpu_safe_profile(
     quantization: str | None,
     size_bytes: int | None,
@@ -388,21 +402,29 @@ class LMStudioClient:
         if not already_loaded:
             if phase_callback:
                 phase_callback("loading")
-            if large_model:
+            if large_model and shutil.which("lms") is not None:
                 load_ms = await self._load_large_model_with_cli(model)
             else:
+                if large_model:
+                    # No CLI on this machine, and the profile is mostly a load
+                    # configuration that REST accepts. Only `--gpu off` needs
+                    # the CLI, so that part is dropped and the report says so.
+                    # Refusing to load anything at all was the worse answer:
+                    # without the CLI the host cannot be surveyed either, so
+                    # every model took this path and none could be loaded.
+                    profile = "compatibility_partial"
                 load_payload: dict[str, Any] = {
                     "model": model,
                     "echo_load_config": True,
                 }
-                if profile == "compatibility":
+                if profile.startswith("compatibility"):
                     load_payload.update(
                         {
-                            "context_length": 8192,
+                            "context_length": SAFE_PROFILE_CONTEXT_LENGTH,
                             "eval_batch_size": 512,
                             "flash_attention": True,
                             "offload_kv_cache_to_gpu": False,
-                            "parallel": 1,
+                            "parallel": SAFE_PROFILE_PARALLEL,
                         }
                     )
                 try:
@@ -441,7 +463,7 @@ class LMStudioClient:
                     recoverable_vision_startup = (
                         large_model
                         and attempt < VISION_WARMUP_ATTEMPTS - 1
-                        and "processing the document image" in str(exc)
+                        and is_vision_startup_failure(str(exc))
                     )
                     if not recoverable_vision_startup:
                         raise
@@ -450,7 +472,8 @@ class LMStudioClient:
                     # The runtime has just failed on an image; give it a moment
                     # to release what it was holding before asking again.
                     await asyncio.sleep(VISION_WARMUP_SETTLE_SECONDS)
-                    load_ms += await self._reload_large_model_with_cli(model)
+                    if shutil.which("lms") is not None:
+                        load_ms += await self._reload_large_model_with_cli(model)
                     if phase_callback:
                         phase_callback("warming_up")
         return {

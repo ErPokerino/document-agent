@@ -506,7 +506,7 @@ async def test_large_model_recovers_one_vision_startup_failure(monkeypatch) -> N
         warmup_calls += 1
         if warmup_calls == 1:
             raise LMStudioError(
-                "LM Studio stopped while processing the document image."
+                "LM Studio failed to encode the page image. Its log reports the Vulkan device being lost inside the vision encoder."
             )
 
     monkeypatch.setattr(client, "_fetch_model_items", fake_items)

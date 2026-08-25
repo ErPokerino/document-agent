@@ -408,7 +408,7 @@ async def test_a_large_model_gets_more_than_one_second_chance_at_the_image(monke
     async def fails_twice(self, model, entities, **kwargs):
         attempts["count"] += 1
         if attempts["count"] < 3:
-            raise LMStudioError("LM Studio stopped while processing the document image.")
+            raise LMStudioError("LM Studio failed to encode the page image. Its log reports the Vulkan device being lost inside the vision encoder.")
 
     monkeypatch.setattr(LMStudioClient, "_warm_up_structured_output", fails_twice)
 
@@ -431,11 +431,11 @@ async def test_a_model_that_never_manages_it_still_fails(monkeypatch) -> None:
     monkeypatch.setattr("app.services.lm_studio.asyncio.sleep", lambda seconds: _noop())
 
     async def always_fails(self, model, entities, **kwargs):
-        raise LMStudioError("LM Studio stopped while processing the document image.")
+        raise LMStudioError("LM Studio failed to encode the page image. Its log reports the Vulkan device being lost inside the vision encoder.")
 
     monkeypatch.setattr(LMStudioClient, "_warm_up_structured_output", always_fails)
 
-    with pytest.raises(LMStudioError, match="document image"):
+    with pytest.raises(LMStudioError, match="page image"):
         await client.load_and_warm_model("big")
 
 

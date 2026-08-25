@@ -178,7 +178,9 @@ class ModelLoadResponse(BaseModel):
     warmup_ms: int
     total_ms: int
     unloaded_models: int
-    profile: Literal["default", "compatibility"]
+    # "compatibility_partial" is the CPU-safe profile minus the one part
+    # only the LM Studio CLI can set: holding the layers off the GPU.
+    profile: Literal["default", "compatibility", "compatibility_partial"]
     already_loaded: bool = False
     already_ready: bool = False
     warmup_mode: Literal["vision", "schema", "vision_and_schema"]

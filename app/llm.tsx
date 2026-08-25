@@ -37,6 +37,15 @@ import {
 } from "../lib/model-filter";
 import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelRuntimeState, RuntimeEngineInfo } from "../lib/types";
 
+// What was actually applied, which is not always what was wanted: the part
+// of the CPU-safe profile that holds a model's layers off the GPU is set
+// through the LM Studio CLI, and a machine without it gets the rest.
+const profileLabels: Record<ModelLoadResponse["profile"], string> = {
+  compatibility: "CPU-safe",
+  compatibility_partial: "CPU-safe without GPU offload (no lms CLI here)",
+  default: "LM Studio default",
+};
+
 export const modelBadgeLabels: Record<ModelRuntimeState, string> = {
   not_loaded: "Available",
   loaded: "In memory",
@@ -281,7 +290,7 @@ export function LanguageModels(props: Props) {
                   : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images."}</span>
               {engineNote && <small className="model-loader-engine">{engineNote}</small>}
               {modelLoadReport && modelLoadReport.model === selectedDraftModel.id && (
-                <small>{modelLoadReport.profile === "compatibility" ? "CPU-safe" : "LM Studio default"} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
+                <small>{profileLabels[modelLoadReport.profile]} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
               )}
             </div>
             <button className="model-load-button" disabled={!isConnected || selectedModelPreparing || selectedRuntimeState === "ready" || processState === "processing"} onClick={loadSelectedModel}>
