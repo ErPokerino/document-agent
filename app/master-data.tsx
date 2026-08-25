@@ -12,22 +12,27 @@ import {
   Library,
   LoaderCircle,
   Pencil,
+  Download,
   Plus,
+  UploadCloud,
   RefreshCw,
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "../lib/api";
+import { api, apiUrls } from "../lib/api";
 import { InfoHint } from "./info-hint";
-import type { MasterDataTable } from "../lib/types";
+import type { MasterDataImport, MasterDataTable } from "../lib/types";
 
 type Row = Record<string, string>;
 
 /** The reference tables a derived entity is looked up in. */
 export function MasterData() {
   const [tables, setTables] = useState<MasterDataTable[]>([]);
+  const [imported, setImported] = useState<{ table: string; report: MasterDataImport } | null>(null);
+  // One hidden input per table, since each imports into its own.
+  const importInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [tableKey, setTableKey] = useState<string>("");
   const [rows, setRows] = useState<Row[]>([]);
   const [query, setQuery] = useState("");
@@ -187,10 +192,58 @@ export function MasterData() {
                 {busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />} From datasets
               </button>
             )}
+            <a
+              className="secondary-button small"
+              href={apiUrls.masterDataCsv(table.key)}
+              download
+              title="Download every row as CSV"
+            >
+              <Download size={13} /> Export
+            </a>
+            <button
+              type="button"
+              className="secondary-button small"
+              disabled={busy}
+              title="Add rows from a CSV. One already in the table is skipped, not duplicated."
+              onClick={() => importInputs.current[table.key]?.click()}
+            >
+              <UploadCloud size={13} /> Import
+            </button>
+            <input
+              ref={(element) => { importInputs.current[table.key] = element; }}
+              type="file"
+              accept=".csv,text/csv"
+              hidden
+              onChange={(event) => {
+                const picked = event.target.files?.[0];
+                event.target.value = "";
+                if (!picked) return;
+                void guard(async () => {
+                  setImported({ table: table.key, report: await api.importMasterData(table.key, picked) });
+                  await refresh();
+                });
+              }}
+            />
           </div>
 
           {!isCollapsed(table.key) && (
           <>
+          {imported && imported.table === table.key && (
+            <div className="import-report">
+              <p className="field-help good-note">
+                {imported.report.added} row{imported.report.added === 1 ? "" : "s"} added
+                {imported.report.skipped > 0 && `, ${imported.report.skipped} skipped`}.
+              </p>
+              {imported.report.reasons.length > 0 && (
+                <ul>
+                  {imported.report.reasons.slice(0, 8).map((reason) => <li key={reason}>{reason}</li>)}
+                  {imported.report.reasons.length > 8 && (
+                    <li>and {imported.report.reasons.length - 8} more.</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
           {seeded !== null && (
             <p className="field-help good-note">
               <Check size={12} /> {seeded === 0 ? "Nothing to add: every labelled value is already here." : `${seeded} added.`}

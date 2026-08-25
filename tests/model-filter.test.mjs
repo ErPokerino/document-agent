@@ -52,3 +52,20 @@ test("filters combine", () => {
   assert.deepEqual(ids(filterModels(all, { runs: "local", vision: "vision" })), ["small-vision"]);
   assert.deepEqual(ids(filterModels(all, { runs: "local", vision: "vision", size: "large" })), []);
 });
+
+test("a model whose capabilities are unknown claims neither of them", () => {
+  // The OpenAI-compatible endpoint reports ids alone. Calling such a model
+  // text-only would hide it from every vision pipeline on the strength of an
+  // answer nobody gave.
+  const unknown = { id: "mystery", name: "Mystery", provider: "lm_studio", vision: false, capabilities_known: false, size_bytes: null };
+  assert.equal(filterModels([unknown], { vision: "any" }).length, 1);
+  assert.equal(filterModels([unknown], { vision: "vision" }).length, 0);
+  assert.equal(filterModels([unknown], { vision: "text" }).length, 0);
+});
+
+test("a model that did report its capabilities still filters both ways", () => {
+  const seeing = { id: "a", name: "A", provider: "lm_studio", vision: true, capabilities_known: true };
+  const reading = { id: "b", name: "B", provider: "lm_studio", vision: false, capabilities_known: true };
+  assert.deepEqual(filterModels([seeing, reading], { vision: "vision" }).map((m) => m.id), ["a"]);
+  assert.deepEqual(filterModels([seeing, reading], { vision: "text" }).map((m) => m.id), ["b"]);
+});

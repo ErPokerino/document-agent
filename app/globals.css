@@ -887,3 +887,8 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .field-bar-value { display: flex; align-items: baseline; gap: 6px; min-width: 74px; justify-content: flex-end; }
 .field-bar-value strong { font: 700 10px var(--font-manrope), sans-serif; font-variant-numeric: tabular-nums; }
 .field-bar-value small { color: var(--muted); font: 500 8px var(--font-mono), monospace; }
+
+/* What an import did, and the rows it could not take. */
+.import-report { margin: 0 0 10px; }
+.import-report ul { margin: 5px 0 0; padding-left: 16px; display: grid; gap: 3px; }
+.import-report li { color: var(--muted); font-size: 8px; line-height: 1.5; }

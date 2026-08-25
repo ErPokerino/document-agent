@@ -36,8 +36,12 @@ export function filterModels(models: ModelInfo[], filters: ModelFilters): ModelI
     const isLocal = model.provider !== "gemini";
     if (runs === "local" && !isLocal) return false;
     if (runs === "api" && isLocal) return false;
-    if (vision === "vision" && !model.vision) return false;
-    if (vision === "text" && model.vision) return false;
+    // An unknown capability answers neither filter. Reporting it as text-only
+    // would hide a model that may well see, on the strength of an answer the
+    // endpoint it came from never gave.
+    const capabilitiesKnown = model.capabilities_known !== false;
+    if (vision === "vision" && !(capabilitiesKnown && model.vision)) return false;
+    if (vision === "text" && !(capabilitiesKnown && !model.vision)) return false;
     return matchesSize(model, size);
   });
 }

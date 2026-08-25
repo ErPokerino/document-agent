@@ -41,6 +41,7 @@ from app.domain.models import (
     SavedPipeline,
     MasterDataColumn,
     MasterDataRowRequest,
+    MasterDataImport,
     MasterDataTable,
     StepCatalogueEntry,
 )
@@ -70,7 +71,8 @@ from app.services.master_data import (
     UnknownRow,
     UnknownTable,
 )
-from app.services.migrations import adopt_legacy_page_limit
+from app.services.master_data_csv import csv_to_rows, rows_to_csv
+from app.services.migrations import adopt_legacy_page_limit, clear_inherited_model_default
 from app.services.settings_store import SettingsStore
 
 
@@ -105,6 +107,7 @@ pipeline_store = PipelineStore(PIPELINES_PATH)
 # install's value into the pipeline that inherits the job, then write the
 # starting point out so it is an ordinary editable file.
 adopt_legacy_page_limit(SETTINGS_PATH, pipeline_store)
+clear_inherited_model_default(SETTINGS_PATH)
 pipeline_store.seed_default()
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
@@ -277,15 +280,18 @@ def _busy_message() -> str:
 @app.get("/api/health", response_model=HealthStatus)
 async def health() -> HealthStatus:
     settings = settings_store.read()
+    reason: str | None = None
     try:
         await LMStudioClient(settings.lm_studio_url).list_models()
         connected = True
-    except LMStudioError:
+    except LMStudioError as exc:
         connected = False
+        reason = str(exc)
     return HealthStatus(
         status="ok" if connected else "degraded",
         lm_studio=connected,
         active_model=settings.model,
+        lm_studio_error=reason,
     )
 
 
@@ -883,6 +889,48 @@ async def list_master_data_tables() -> list[MasterDataTable]:
         )
         for table in TABLES.values()
     ]
+
+
+@app.get("/api/master-data/tables/{table_key}/export.csv", response_class=Response)
+async def export_master_data(table_key: str) -> Response:
+    """The whole table as CSV, which is what a spreadsheet already speaks."""
+    try:
+        table = master_data_store.table(table_key)
+        content = rows_to_csv(master_data_store, table_key)
+    except UnknownTable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{table.key}.csv"'},
+    )
+
+
+@app.post("/api/master-data/tables/{table_key}/import", response_model=MasterDataImport)
+async def import_master_data(table_key: str, file: UploadFile = File(...)) -> MasterDataImport:
+    """Add every row the file holds that the table can take.
+
+    A row that cannot be stored is skipped and reported rather than failing the
+    file, so importing a register that partly overlaps an existing one adds the
+    part that is new.
+    """
+    content = await file.read(MAX_FILE_SIZE + 1)
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="The file exceeds the 20 MB limit")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=415,
+            detail="That file is not UTF-8 text, so its rows cannot be read.",
+        ) from exc
+    try:
+        report = csv_to_rows(master_data_store, table_key, text)
+    except UnknownTable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return MasterDataImport(added=report.added, skipped=report.skipped, reasons=report.reasons)
 
 
 @app.get("/api/master-data/tables/{table_key}/rows", response_model=list[dict[str, Any]])

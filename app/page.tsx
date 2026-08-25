@@ -766,6 +766,7 @@ export default function Home() {
             setModelLoadReport={setModelLoadReport}
             modelsRefreshing={modelsRefreshing}
             isConnected={isConnected}
+            connectionError={health?.lm_studio_error ?? null}
             processState={processState}
           />
         )}

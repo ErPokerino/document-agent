@@ -155,6 +155,10 @@ class ModelInfo(BaseModel):
     profile_matches: bool = True
     loaded: bool = False
     ready: bool = False
+    # False when the model was found through the OpenAI-compatible endpoint,
+    # which reports ids and nothing else. `vision` is then not a claim that
+    # the model cannot see, only that nothing here knows whether it can.
+    capabilities_known: bool = True
     runtime_state: Literal[
         "not_loaded", "loaded", "loading", "warming_up", "ready", "error", "profile_mismatch"
     ] = "not_loaded"
@@ -269,10 +273,22 @@ class GeminiKeyStatus(BaseModel):
     verified_models: list[str] = Field(default_factory=list)
 
 
+class MasterDataImport(BaseModel):
+    """What an import did, row by row where it did not."""
+
+    added: int
+    skipped: int
+    reasons: list[str] = Field(default_factory=list)
+
+
 class HealthStatus(BaseModel):
     status: str
     lm_studio: bool
     active_model: str
+    # Why the local models are missing, when they are. /api/models answers with
+    # the hosted ones alone rather than failing outright, which is right — and
+    # left nobody with a reason for the empty half of the list.
+    lm_studio_error: str | None = None
 
 
 class ProcessingInfo(BaseModel):

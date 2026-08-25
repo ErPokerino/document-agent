@@ -17,6 +17,7 @@ import type {
   PipelineDefinition,
   PromptConfiguration,
   PromptPreview,
+  MasterDataImport,
   MasterDataTable,
   SavedPipeline,
   StepCatalogueEntry,
@@ -57,11 +58,21 @@ export const apiUrls = {
   evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
   datasetArchive: (dataset: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/export.zip`,
+  masterDataCsv: (table: string) =>
+    `${API_BASE}/api/master-data/tables/${segment(table)}/export.csv`,
 };
 
 export const api = {
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
+  importMasterData: (table: string, file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return request<MasterDataImport>(
+      `/api/master-data/tables/${segment(table)}/import`,
+      { method: "POST", body },
+    );
+  },
   importDataset: (file: File, name?: string) => {
     const body = new FormData();
     body.append("file", file);

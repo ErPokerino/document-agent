@@ -232,6 +232,7 @@ export type HealthStatus = {
   status: string;
   lm_studio: boolean;
   active_model: string;
+  lm_studio_error: string | null;
 };
 
 export type LabelsRequest = {
@@ -245,6 +246,12 @@ export type MasterDataColumn = {
   kind: "identifier" | "text" | "timestamp";
   editable: boolean;
   generated: boolean;
+};
+
+export type MasterDataImport = {
+  added: number;
+  skipped: number;
+  reasons: string[];
 };
 
 export type MasterDataRowRequest = {
@@ -288,6 +295,7 @@ export type ModelInfo = {
   profile_matches: boolean;
   loaded: boolean;
   ready: boolean;
+  capabilities_known: boolean;
   runtime_state: "not_loaded" | "loaded" | "loading" | "warming_up" | "ready" | "error" | "profile_mismatch";
   vision: boolean;
 };

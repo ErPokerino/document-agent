@@ -11,6 +11,7 @@ import {
   Eye,
   FilterX,
   HardDrive,
+  HelpCircle,
   KeyRound,
   LoaderCircle,
   Power,
@@ -72,6 +73,7 @@ type Props = {
   setModelLoadReport: (report: ModelLoadResponse | null) => void;
   modelsRefreshing: boolean;
   isConnected: boolean;
+  connectionError: string | null;
   processState: string;
 };
 
@@ -103,6 +105,7 @@ export function LanguageModels(props: Props) {
     setModelLoadReport,
     modelsRefreshing,
     isConnected,
+    connectionError,
     processState,
   } = props;
 
@@ -214,7 +217,7 @@ export function LanguageModels(props: Props) {
 
         <div className="model-list">
           {models.length === 0 ? (
-            <div className="models-empty"><AlertCircle size={18} /><span>No model detected. Make sure LM Studio is running.</span></div>
+            <div className="models-empty"><AlertCircle size={18} /><span>{connectionError ?? "LM Studio answered, and has no models installed."}</span></div>
           ) : visibleModels.length === 0 ? (
             <div className="models-empty"><FilterX size={18} /><span>No model matches these filters.</span></div>
           ) : visibleModels.map((model) => {
@@ -228,7 +231,7 @@ export function LanguageModels(props: Props) {
                 <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
                 <span className={`provider-tag ${model.provider}`}>{model.provider === "gemini" ? "Google API" : "Local"}</span>
                 <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
-                  {model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
+                  {model.capabilities_known === false ? <><HelpCircle size={11} /> Capabilities unknown</> : model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
                 </span>
                 <span className="model-specs">{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
               </button>

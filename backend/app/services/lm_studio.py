@@ -198,13 +198,65 @@ class LMStudioClient:
         self.last_prediction_stats: dict[str, int | float] | None = None
 
     async def _fetch_model_items(self) -> list[dict[str, Any]]:
+        """Every model this LM Studio has, however it is willing to say so.
+
+        Two endpoints answer. `/api/v1/models` is LM Studio's own and carries
+        the size, quantization and capabilities the load profile is decided
+        from. `/v1/models` is the OpenAI-compatible one, present in every
+        build, and reports ids alone. Older installs have only the second, and
+        asking one endpoint meant a working machine full of models looked like
+        an empty one.
+        """
+        native, native_error = await self._get_json("/api/v1/models")
+        if native is not None:
+            return list(native.get("models") or [])
+
+        compatible, compatible_error = await self._get_json("/v1/models")
+        if compatible is not None:
+            return [
+                {
+                    "type": "llm",
+                    "key": item.get("id"),
+                    "display_name": item.get("id"),
+                    # Not "no capabilities": no answer about them. What the
+                    # caller must not do is turn that into a claim.
+                    "capabilities_known": False,
+                    "loaded_instances": [],
+                }
+                for item in (compatible.get("data") or [])
+                if item.get("id")
+            ]
+
+        raise LMStudioError(native_error or compatible_error or "LM Studio did not answer")
+
+    async def _get_json(self, path: str) -> tuple[dict[str, Any] | None, str | None]:
+        """The JSON at `path`, or a description of why there is none.
+
+        The description is the point. Every failure here used to read "LM
+        Studio is not reachable", which sends someone to restart a server that
+        is already running and answering.
+        """
+        url = f"{self.base_url}{path}"
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(f"{self.base_url}/api/v1/models")
-                response.raise_for_status()
+                response = await client.get(url)
+        except httpx.ConnectError:
+            return None, (
+                f"Nothing is listening at {self.base_url}. LM Studio's local server is "
+                f"started from its Developer tab, or with `lms server start`."
+            )
+        except httpx.TimeoutException:
+            return None, f"LM Studio did not answer {path} within 10 seconds."
         except httpx.HTTPError as exc:
-            raise LMStudioError("LM Studio is not reachable") from exc
-        return response.json().get("models", [])
+            return None, f"The request to {url} failed: {exc}"
+
+        if response.status_code >= 400:
+            return None, f"LM Studio answered {response.status_code} at {path}."
+        try:
+            payload = response.json()
+        except ValueError:
+            return None, f"LM Studio answered {path} with something that is not JSON."
+        return (payload if isinstance(payload, dict) else {}), None
 
     async def list_vision_models(
         self,
@@ -227,6 +279,7 @@ class LMStudioClient:
         models: list[ModelInfo] = []
         for item in await self._fetch_model_items():
             capabilities = item.get("capabilities") or {}
+            capabilities_known = item.get("capabilities_known", True)
             if item.get("type") != "llm" or item.get("key") in excluded:
                 continue
             loaded_instances = item.get("loaded_instances") or []
@@ -253,6 +306,7 @@ class LMStudioClient:
                     ),
                     loaded=bool(loaded_instances),
                     vision=bool(capabilities.get("vision", False)),
+                    capabilities_known=bool(capabilities_known),
                 )
             )
         models.sort(
