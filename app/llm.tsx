@@ -148,6 +148,13 @@ export function LanguageModels(props: Props) {
       })
     : null;
   const hostNote = describeHost(runtimeEngine);
+  // The load either failed just now, or LM Studio is holding the model in a
+  // state it could not finish preparing. Either way there is a reason, and
+  // the panel reporting the failure is where it belongs.
+  const failureReason =
+    (modelLoadState === "error" || selectedRuntimeState === "error") && settingsError
+      ? settingsError
+      : null;
   const selectedModelPreparing =
     selectedRuntimeState === "loading" || selectedRuntimeState === "warming_up" || modelLoadState === "loading";
 
@@ -168,6 +175,15 @@ export function LanguageModels(props: Props) {
         </div>
         <label className="input-label" htmlFor="endpoint">Local endpoint</label>
         <input id="endpoint" className="text-input" value={draftSettings.lm_studio_url} onChange={(event) => setDraftSettings({ ...draftSettings, lm_studio_url: event.target.value })} />
+        {/* Why nothing local is listed. The models list cannot carry this: with
+            a Gemini key configured it is not empty, so its empty state never
+            shows and the local half just quietly goes missing. */}
+        {!isConnected && connectionError && (
+          <p className="connection-problem">
+            <AlertCircle size={14} />
+            <span>{connectionError}</span>
+          </p>
+        )}
         {hostNote && (
           <p className="host-note">
             <Cpu size={13} />
@@ -253,7 +269,12 @@ export function LanguageModels(props: Props) {
             <span className="model-loader-icon"><Power size={17} /></span>
             <div className="model-loader-copy">
               <strong>{modelStateLabels[selectedRuntimeState]}</strong>
-              <span>{selectedRuntimeState === "profile_mismatch"
+              {/* A failure is explained where it is reported. The reason used to
+                  go to the banner at the top of the section, which is a long
+                  way above the panel someone is looking at when it happens. */}
+              <span>{failureReason
+                ? failureReason
+                : selectedRuntimeState === "profile_mismatch"
                 ? "Something loaded this model with LM Studio's defaults, which offload it to the GPU. Loading it here applies the profile that holds its layers on the processor."
                 : selectedDraftModel.vision
                   ? "Loading and warm-up are timed separately from document processing, and the vision path is prepared here rather than inside the first document's timer."

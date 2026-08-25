@@ -25,6 +25,39 @@ if ($lms) {
     }
 }
 
+function Test-BuildIsStale {
+    <#
+        Whether the frontend on disk was built from the source now on disk.
+
+        `npm run start` serves dist/ and never looks at the source again, so a
+        `git pull` that changes the app leaves the old bundle being served with
+        nothing to say so: the pages look right, they are just last week's. The
+        build output is compared against the newest source file rather than
+        rebuilt every time, because a rebuild costs half a minute.
+    #>
+    param([string]$Root)
+
+    $built = Join-Path $Root "dist\server\index.js"
+    if (-not (Test-Path -LiteralPath $built)) { return $true }
+    $builtAt = (Get-Item -LiteralPath $built).LastWriteTimeUtc
+
+    $sources = @()
+    foreach ($folder in @("app", "lib", "public")) {
+        $path = Join-Path $Root $folder
+        if (Test-Path -LiteralPath $path) {
+            $sources += Get-ChildItem -LiteralPath $path -Recurse -File -ErrorAction SilentlyContinue
+        }
+    }
+    foreach ($file in @("package.json", "package-lock.json", "next.config.ts", "vite.config.ts", "tsconfig.json")) {
+        $path = Join-Path $Root $file
+        if (Test-Path -LiteralPath $path) { $sources += Get-Item -LiteralPath $path }
+    }
+    if (-not $sources) { return $false }
+
+    $newest = ($sources | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc
+    return $newest -gt $builtAt
+}
+
 function Get-ListenerPid([int]$Port) {
     $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     return $listener.OwningProcess
@@ -86,10 +119,8 @@ if ($frontendPid) {
 }
 
 if (-not (Get-ListenerPid 3000)) {
-    # `npm run start` serves dist/ and never builds it, so a fresh clone would
-    # otherwise fail with an empty output directory.
-    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "dist\server\index.js"))) {
-        Write-Host "Building the frontend (first run)..."
+    if (Test-BuildIsStale -Root $projectRoot) {
+        Write-Host "The frontend build is older than the source. Rebuilding..."
         & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
     }
