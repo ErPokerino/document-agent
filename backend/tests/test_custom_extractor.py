@@ -261,3 +261,33 @@ def test_validation_does_not_lose_the_score_on_the_fields_it_leaves_alone() -> N
     result = validated_entities_from_response(document, ENTITIES)
     assert result["supplier_name"].confidence == "medium"
     assert result["supplier_name"].score == pytest.approx(0.72)
+
+
+# -- what the processor is told about each field ---------------------------------
+
+
+def test_every_property_carries_the_description_the_processor_reads() -> None:
+    """Measured, not assumed: with no description this processor answered `$`
+    for a currency, and with one naming ISO 4217 it answered `USD`."""
+    from app.services.custom_extractor import API_VERSION
+
+    properties = {
+        prop["name"]: prop["description"]
+        for prop in schema_override(ENTITIES)["entityTypes"][0]["properties"]
+    }
+    assert "ISO 4217" in properties["currency"]
+    assert "YYYY-MM-DD" in properties["date"]
+    assert properties["supplier_name"].startswith("The supplier_name.")
+    # A description needs the beta endpoint; v1 rejects the field.
+    assert API_VERSION == "v1beta3"
+
+
+def test_the_format_rider_is_the_same_one_every_other_reader_gets() -> None:
+    from app.services.field_wording import described_for_reader
+
+    properties = {
+        prop["name"]: prop["description"]
+        for prop in schema_override(ENTITIES)["entityTypes"][0]["properties"]
+    }
+    for definition in ENTITIES:
+        assert properties[definition.name] == described_for_reader(definition)

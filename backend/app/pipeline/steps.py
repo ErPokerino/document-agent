@@ -21,6 +21,7 @@ from app.services.supplier_rules import (
     rules_for,
 )
 from app.services.custom_extractor import (
+    API_VERSION as CUSTOM_EXTRACTOR_API_VERSION,
     validated_entities_from_response,
     locations_from_response,
     schema_override,
@@ -494,6 +495,7 @@ class ExtractWithCustomExtractor:
             self.processor_id,
             content,
             process_options={"schemaOverride": schema_override(self.entities)},
+            version=CUSTOM_EXTRACTOR_API_VERSION,
         )
         document = answer.get("document") or {}
 

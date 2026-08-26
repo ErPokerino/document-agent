@@ -26,6 +26,7 @@ from app.domain.models import (
     model_entities,
 )
 from app.services.field_validation import validate_result
+from app.services.field_wording import described_for_reader
 from app.services.lm_studio import DOCUMENT_TEXT_HEADER, page_note
 
 
@@ -87,11 +88,7 @@ class GeminiClient:
         }
         properties: dict[str, Any] = {}
         for entity in entities:
-            description = entity.description
-            if entity.format is EntityFormat.date:
-                description = f"{description} Format the value as YYYY-MM-DD."
-            elif entity.format is EntityFormat.currency:
-                description = f"{description} Use the three-letter ISO 4217 code in upper case."
+            description = described_for_reader(entity)
             properties[entity.name] = {
                 "type": types.get(entity.format, "STRING"),
                 "nullable": True,

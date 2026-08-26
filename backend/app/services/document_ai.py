@@ -159,9 +159,9 @@ class DocumentAiClient:
     def host(self) -> str:
         return f"https://{self.location}-documentai.googleapis.com"
 
-    def process_url(self, processor_id: str) -> str:
+    def process_url(self, processor_id: str, version: str = "v1") -> str:
         return (
-            f"{self.host}/v1/projects/{self.project_id}"
+            f"{self.host}/{version}/projects/{self.project_id}"
             f"/locations/{self.location}/processors/{processor_id}:process"
         )
 
@@ -222,6 +222,7 @@ class DocumentAiClient:
         processor_id: str,
         content: bytes,
         process_options: dict[str, Any] | None = None,
+        version: str = "v1",
     ) -> dict[str, Any]:
         """Run one processor over one document and return the raw answer.
 
@@ -244,7 +245,7 @@ class DocumentAiClient:
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
                 response = await client.post(
-                    self.process_url(processor_id),
+                    self.process_url(processor_id, version),
                     json=payload,
                     headers={"Authorization": f"Bearer {await self._access_token()}"},
                 )

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 
 from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, model_entities
 from app.services.field_validation import validate_result
+from app.services.field_wording import described_for_reader
 
 
 # Where the processor's confidence stops meaning "sure". Document AI reports a
@@ -42,6 +43,12 @@ MEDIUM_CONFIDENCE = 0.60
 # The document type the schema override describes. One type holding every
 # configured field, which is the shape a flat extraction wants.
 DOCUMENT_TYPE = "custom_extraction_document_type"
+
+# v1 refuses a description on a schema property; v1beta3 accepts it, and a
+# description is what makes a generative processor answer usefully. Only this
+# step uses it — OCR and the Layout Parser stay on v1, where they need
+# nothing beta.
+API_VERSION = "v1beta3"
 
 _VALUE_TYPES = {
     EntityFormat.text: "string",
@@ -72,18 +79,21 @@ def schema_override(entities: list[EntityDefinition]) -> dict:
     Nothing is required. A document that does not carry a field should come
     back without it, not with a guess.
 
-    A property carries a name, a type and an occurrence and nothing else — the
-    API rejects a description on one. So the field's *name* is what tells a
-    generative processor what to look for, and the description written in
-    Extraction, which is the prompt every other path uses, cannot travel here.
-    Names have to be descriptive for this step in a way they need not be for
-    the others.
+    Each property carries the description written in Extraction, with what its
+    format requires. That description is what the processor reads, and it is
+    the difference between a usable answer and a wrong one: asked for a
+    currency with no description this processor answered `$`, and told the code
+    was ISO 4217 it answered `USD`.
+
+    Descriptions need the v1beta3 endpoint — v1 rejects the field outright —
+    which is why `API_VERSION` is set here rather than inherited.
     """
     properties = [
         {
             "name": entity.name,
             "valueType": _VALUE_TYPES.get(entity.format, "string"),
             "occurrenceType": "OPTIONAL_ONCE",
+            "description": described_for_reader(entity),
         }
         for entity in model_entities(entities)
     ]

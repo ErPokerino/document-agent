@@ -118,12 +118,20 @@ shadow a local one, with two ways to fall out of step and a failed write leaving
 them disagreeing silently. This way Extraction stays the one place fields are
 defined, and the processor is configured once and left alone.
 
-One limit comes with that: a schema property carries a name, a type and an
-occurrence, and the API rejects a description on one. So the **field's name** is
-what tells the processor what to look for, and the description written in
-Extraction — which is the prompt every other path uses — cannot travel here.
-Names have to be descriptive for this step in a way they need not be for the
-others.
+Each field carries the description written in Extraction, which is what the
+processor reads and the difference between a usable answer and a wrong one:
+asked for a currency with no description this processor answered `$`, and told
+the code was ISO 4217 it answered `USD`. Descriptions need the `v1beta3`
+endpoint — `v1` rejects the field outright — so the Custom Extractor alone uses
+it, while OCR and the Layout Parser stay on `v1`.
+
+What a format requires is said in one place, shared by every reader that asks:
+Gemini's schema, the Custom Extractor's schema, and a local model's prompt. It
+is appended only when the description does not already say it, and that is not
+tidiness. A description reading "Normalize it to YYYY-MM-DD" followed by
+"Format the value as YYYY-MM-DD" made this processor return **no date at all**,
+three times out of three, while either sentence alone worked every time.
+Repeating an instruction to a generative reader is not free.
 
 **Confidence comes from the processor**, so nothing asks a model how sure it is.
 The number is kept as well as the band the rest of the app reads.

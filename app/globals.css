@@ -944,7 +944,10 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .highlight-zoom button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* The page is the ground the boxes are positioned against, so it establishes
    the coordinate space and the image fills it exactly. */
-.highlight-stage { position: relative; line-height: 0; border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 3px 14px #0006; max-width: 100%; }
+/* No max-width: the inline width is the zoom, and capping it here meant
+   anything above 100% silently did nothing. Wider than the scroller, it
+   overflows and scrolls; narrower, the auto margins centre it. */
+.highlight-stage { position: relative; line-height: 0; border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 3px 14px #0006; }
 .highlight-stage img { width: 100%; height: auto; display: block; }
 .highlight-box { position: absolute; margin: 0; padding: 0; border: 1.5px solid var(--accent); border-radius: 2px; background: var(--accent-soft); cursor: pointer; transition: background .12s, box-shadow .12s; }
 .highlight-box span { position: absolute; left: 0; bottom: 100%; margin-bottom: 2px; padding: 1px 4px; border-radius: 3px; background: var(--accent); color: #fff; font: 600 7px var(--font-mono), monospace; white-space: nowrap; opacity: 0; transition: opacity .12s; pointer-events: none; }
