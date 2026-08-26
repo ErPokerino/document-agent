@@ -20,6 +20,11 @@ from app.services.supplier_rules import (
     prompted_rules,
     rules_for,
 )
+from app.services.custom_extractor import (
+    validated_entities_from_response,
+    locations_from_response,
+    schema_override,
+)
 from app.services.text_boxes import tokens_from_ocr
 from app.services.lm_studio import LMStudioClient
 
@@ -454,3 +459,63 @@ class ApplySupplierRules:
             result[entity] = replacement
             changed.append(entity)
         return result, changed
+
+
+class ExtractWithCustomExtractor:
+    """Read the configured fields with a Google Custom Extractor.
+
+    Replaces the model call rather than feeding it: the processor returns the
+    values, its own confidence for each, and the box each one sits in. Nothing
+    here asks anything how sure it is.
+
+    The fields travel with the request as a schema override, so Extraction
+    stays the one place they are defined and the processor is never edited to
+    match it.
+    """
+
+    def __init__(self, processor_id: str, entities: list[EntityDefinition]) -> None:
+        self.processor_id = processor_id
+        self.entities = entities
+
+    async def run(self, context: PipelineContext) -> None:
+        if not self.processor_id.strip():
+            raise DocumentAiError(
+                "No Custom Extractor processor id is configured. Add it in Settings."
+            )
+        processed_pages: int = context.artifacts["processed_pages"]
+        # Billed per page like the other processors, so the pipeline's limit is
+        # applied before the document leaves this machine.
+        content = _first_pages(context.content, processed_pages)
+
+        client = DocumentAiClient(
+            context.gcp_credentials_path, context.gcp_project_id, context.gcp_location
+        )
+        answer = await client.process(
+            self.processor_id,
+            content,
+            process_options={"schemaOverride": schema_override(self.entities)},
+        )
+        document = answer.get("document") or {}
+
+        context.artifacts["extraction"] = validated_entities_from_response(document, self.entities)
+        # The processor placed every value it found, so nothing has to be
+        # searched for in the page text afterwards.
+        context.artifacts["field_locations"] = [
+            {
+                "entity": located.entity,
+                "page": located.page,
+                "left": located.left,
+                "top": located.top,
+                "right": located.right,
+                "bottom": located.bottom,
+            }
+            for located in locations_from_response(document, self.entities)
+        ]
+        # It reads the page as well as extracting from it, so the tokens are
+        # there for anything that wants to locate a value it did not return.
+        context.artifacts["ocr_tokens"] = tokens_from_ocr(document)
+        context.artifacts["text"] = text_from_ocr(document)
+
+        counted = dict(context.artifacts.get("document_ai_pages") or {})
+        counted["document_ai_extract"] = counted.get("document_ai_extract", 0) + processed_pages
+        context.artifacts["document_ai_pages"] = counted

@@ -1,5 +1,8 @@
 "use client";
 
+import { Minus, Plus, Maximize2 } from "lucide-react";
+import { useState } from "react";
+
 import { apiUrls } from "../lib/api";
 import type { FieldLocation } from "../lib/types";
 
@@ -29,11 +32,15 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
   // Following the reader: pointing at a field on another page turns to it.
   const shown = activeLocation ? activeLocation.page : pages[0] ?? 0;
   const onThisPage = locations.filter((location) => location.page === shown);
+  // The boxes are positioned in percentages of the page, so the page can be
+  // any width and they follow it. Zoom is that width.
+  const [zoom, setZoom] = useState(1);
+  const step = (by: number) => setZoom((current) => Math.min(4, Math.max(0.5, Math.round((current + by) * 10) / 10)));
 
   return (
     <div className="highlight-view">
       <div className="highlight-scroll">
-        <div className="highlight-stage">
+        <div className="highlight-stage" style={{ width: `${zoom * 100}%` }}>
           <img src={apiUrls.runPage(runId, shown)} alt={`Page ${shown + 1}`} />
           {onThisPage.map((location) => (
             <button
@@ -58,10 +65,19 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
           ))}
         </div>
       </div>
-      <p className="highlight-note">
-        {pages.length > 1 && `Page ${shown + 1} of ${pages.length} with values. `}
-        Hover a field to pick it out. A field with no box was never read off the page by OCR.
-      </p>
+      <div className="highlight-note">
+        <span>
+          {pages.length > 1 && `Page ${shown + 1} of ${pages.length} with values. `}
+          Hover a field to pick it out. A field with no box was never read off the page by OCR.
+        </span>
+        <span className="highlight-zoom">
+          <button type="button" onClick={() => step(-0.25)} disabled={zoom <= 0.5} aria-label="Zoom out"><Minus size={12} /></button>
+          <button type="button" onClick={() => setZoom(1)} aria-label="Fit the width" title="Fit the width">
+            {zoom === 1 ? <Maximize2 size={11} /> : `${Math.round(zoom * 100)}%`}
+          </button>
+          <button type="button" onClick={() => step(0.25)} disabled={zoom >= 4} aria-label="Zoom in"><Plus size={12} /></button>
+        </span>
+      </div>
     </div>
   );
 }

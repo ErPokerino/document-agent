@@ -933,8 +933,15 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .highlight-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 /* The panel is the viewer's own dark chrome; the page sits on it like a
    sheet, the way the PDF viewer presents one. */
-.highlight-scroll { flex: 1; min-height: 0; overflow: auto; background: #3a403e; padding: 12px; display: flex; justify-content: center; align-items: flex-start; }
-.highlight-note { margin: 0; padding: 8px 13px; border-top: 1px solid #303a36; background: #242a28; color: #9aa8a3; font-size: 8px; line-height: 1.5; }
+.highlight-scroll { flex: 1; min-height: 0; overflow: auto; background: #3a403e; padding: 12px; }
+/* Centred until it is zoomed past the panel, then it scrolls from the left. */
+.highlight-scroll > .highlight-stage { margin: 0 auto; }
+.highlight-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 7px 13px; border-top: 1px solid #303a36; background: #242a28; color: #9aa8a3; font-size: 8px; line-height: 1.5; }
+.highlight-zoom { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.highlight-zoom button { min-width: 26px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #3a453f; background: #2d3532; color: #cfdad6; border-radius: 5px; cursor: pointer; font: 700 8px var(--font-mono), monospace; }
+.highlight-zoom button:hover:not(:disabled) { background: #384240; }
+.highlight-zoom button:disabled { opacity: .4; cursor: default; }
+.highlight-zoom button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* The page is the ground the boxes are positioned against, so it establishes
    the coordinate space and the image fills it exactly. */
 .highlight-stage { position: relative; line-height: 0; border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 3px 14px #0006; max-width: 100%; }

@@ -526,6 +526,23 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                     );
                   })()}
 
+                  {step.kind === "document_ai_extract" && (
+                    <div className="flow-step-body">
+                      <p className="field-help">
+                        Reads the fields configured in <strong>Extraction</strong> itself, so it
+                        replaces the model call rather than feeding it — a pipeline built on this
+                        needs no LLM extraction step. The fields are sent with every request, so
+                        nothing has to be set up on Google&apos;s side to match them.
+                      </p>
+                      <p className="field-help">
+                        Confidence comes from the processor rather than from a model being asked how
+                        sure it is, and every value arrives with the box it sits in, so highlighting
+                        works without a separate OCR step. Uses the processor configured in Settings
+                        and is billed by Google per page.
+                      </p>
+                    </div>
+                  )}
+
                   {step.kind === "document_ai_layout" && (
                     <div className="flow-step-body">
                       <p className="field-help">

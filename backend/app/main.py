@@ -599,6 +599,12 @@ def _field_locations(artifacts: dict[str, Any]) -> list[FieldLocation]:
     leaves no tokens and therefore no locations, which is the honest answer
     rather than an empty rectangle.
     """
+    # A Custom Extractor says where each value was; nothing else does, so
+    # everything else has to search the tokens for it.
+    reported = artifacts.get("field_locations") or []
+    if reported:
+        return [FieldLocation(**location) for location in reported]
+
     tokens = artifacts.get("ocr_tokens") or []
     extraction = artifacts.get("extraction") or {}
     if not tokens:

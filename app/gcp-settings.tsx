@@ -116,6 +116,15 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
             onChange={(event) => setGcp({ layout_processor_id: event.target.value.trim() })}
           />
         </label>
+        <label>
+          <span>Custom Extractor processor id<InfoHint text="The id of a Custom Extractor. Unlike the other two it does not feed a model — it reads the fields configured in Extraction itself, and answers with its own confidence and the position of each value. The fields are sent with every request, so nothing has to be configured on Google's side to match them." /></span>
+          <input
+            className="text-input"
+            value={draftSettings.gcp.custom_extractor_processor_id}
+            placeholder="3ebb8a177d412f8e"
+            onChange={(event) => setGcp({ custom_extractor_processor_id: event.target.value.trim() })}
+          />
+        </label>
       </div>
 
       <div className="key-row">

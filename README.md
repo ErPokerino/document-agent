@@ -27,6 +27,8 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 - JSON export;
 - highlighting of where each extracted value sits on the page, whenever a
   pipeline step read it with OCR;
+- extraction by a Google Custom Extractor as an alternative to a language
+  model, with the processor's own confidence and the position of each value;
 - per-supplier corrections applied after the register identifies the supplier:
   a fixed value, a pattern over what the page said, or one more model call
   about named fields alone;
@@ -102,6 +104,36 @@ Two limits are deliberate. A string that occurs several times in a document is
 ambiguous, and the first occurrence is taken. A value the OCR never saw cannot
 be highlighted at all, which includes anything the model inferred rather than
 read, and anything derived from a register.
+
+## Extraction without a model
+
+A Custom Extractor reads the configured fields itself, so a pipeline built on
+it needs no LLM extraction step at all. Three things follow.
+
+**The schema travels with the request.** A generative Custom Extractor accepts a
+`schemaOverride` per call, so DocuFlow sends the fields it wants every time
+rather than editing the processor's stored schema. Writing Extraction's fields
+into the processor whenever someone edited them would make a remote resource
+shadow a local one, with two ways to fall out of step and a failed write leaving
+them disagreeing silently. This way Extraction stays the one place fields are
+defined, and the processor is configured once and left alone.
+
+One limit comes with that: a schema property carries a name, a type and an
+occurrence, and the API rejects a description on one. So the **field's name** is
+what tells the processor what to look for, and the description written in
+Extraction — which is the prompt every other path uses — cannot travel here.
+Names have to be descriptive for this step in a way they need not be for the
+others.
+
+**Confidence comes from the processor**, so nothing asks a model how sure it is.
+The number is kept as well as the band the rest of the app reads.
+
+**Boxes come with the entities**, so highlighting needs no separate OCR step and
+nothing is searched for in the page text.
+
+What does not change is validation: a currency is a three-letter code whoever
+read the page, so a processor answering `$` is corrected exactly as a model
+would be.
 
 ## Rules for one supplier
 

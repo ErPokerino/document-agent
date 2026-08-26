@@ -232,6 +232,9 @@ class GcpSettings(BaseModel):
     location: str = "eu"
     ocr_processor_id: str = ""
     layout_processor_id: str = ""
+    # A Custom Extractor reads the fields itself, so it replaces the model
+    # call rather than feeding it.
+    custom_extractor_processor_id: str = ""
     # USD per 1000 pages, editable for the same reason the Gemini rates are.
     ocr_per_thousand_pages: float | None = 1.5
     layout_per_thousand_pages: float | None = 10.0

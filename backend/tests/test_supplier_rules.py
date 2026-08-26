@@ -259,3 +259,93 @@ def test_changing_a_rule_that_is_not_there_is_a_404(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(main, "supplier_rule_store", SupplierRuleStore(tmp_path / "rules.db"))
     with TestClient(main.app) as client:
         assert client.patch("/api/supplier-rules/999", json={"value": "x"}).status_code == 404
+
+
+# -- the second call, when there is one -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_several_prompted_rules_cost_one_call_between_them(monkeypatch) -> None:
+    """Not one call per field. Three rules is three instructions in one request."""
+    from app.domain.models import PromptConfiguration, EntityDefinition, EntityFormat
+    from app.pipeline import steps as steps_module
+    from app.pipeline.engine import PipelineContext
+
+    calls: list[dict] = []
+
+    class OneShotClient:
+        async def extract_entities(self, model, images, prompts, page_range, **rest):
+            calls.append({"entities": [e.name for e in prompts.entities], "prompt": prompts.user_prompt})
+            return {
+                name: FieldExtraction(value=f"{name}-fixed", confidence="high")
+                for name in [e.name for e in prompts.entities]
+            }
+
+    monkeypatch.setattr(steps_module, "build_extraction_client", lambda context: OneShotClient())
+
+    entities = [
+        EntityDefinition(name=name, description=name, format=EntityFormat.text)
+        for name in ("supplier_name", "document_number", "date", "currency")
+    ]
+    step = steps_module.ApplySupplierRules(
+        rules=[
+            SupplierRule(id_subject="S1", entity="supplier_name", kind="prompt", prompt="From the stamp."),
+            SupplierRule(id_subject="S1", entity="document_number", kind="prompt", prompt="Beside Ns. Rif."),
+            SupplierRule(id_subject="S1", entity="date", kind="prompt", prompt="Day first."),
+            SupplierRule(id_subject="S1", entity="currency", kind="fixed", value="EUR"),
+        ],
+        prompts=PromptConfiguration(entities=entities),
+    )
+
+    context = PipelineContext(filename="a.pdf", content=b"", model="m", lm_studio_url="http://x")
+    context.artifacts.update({
+        "extraction": {
+            "supplier_name": FieldExtraction(value="a", confidence="low"),
+            "document_number": FieldExtraction(value="b", confidence="low"),
+            "date": FieldExtraction(value="c", confidence="low"),
+            "currency": FieldExtraction(value="usd", confidence="low"),
+            "id_subject": FieldExtraction(value="S1", confidence="high"),
+        },
+        "processed_pages": 1,
+        "page_count": 1,
+        "text": "",
+    })
+
+    await step.run(context)
+
+    assert len(calls) == 1, "three prompted fields must share one request"
+    assert sorted(calls[0]["entities"]) == ["date", "document_number", "supplier_name"]
+    # Every instruction travels in that one prompt.
+    for fragment in ("From the stamp.", "Beside Ns. Rif.", "Day first."):
+        assert fragment in calls[0]["prompt"]
+    # The fixed rule needed no call at all and still applied.
+    assert context.artifacts["extraction"]["currency"].value == "EUR"
+
+
+@pytest.mark.asyncio
+async def test_no_prompted_rule_makes_no_call_at_all(monkeypatch) -> None:
+    from app.domain.models import PromptConfiguration, EntityDefinition, EntityFormat
+    from app.pipeline import steps as steps_module
+    from app.pipeline.engine import PipelineContext
+
+    def refuse(context):
+        raise AssertionError("a deterministic rule must not reach the model")
+
+    monkeypatch.setattr(steps_module, "build_extraction_client", refuse)
+
+    step = steps_module.ApplySupplierRules(
+        rules=[SupplierRule(id_subject="S1", entity="currency", kind="fixed", value="EUR")],
+        prompts=PromptConfiguration(
+            entities=[EntityDefinition(name="currency", description="c", format=EntityFormat.text)]
+        ),
+    )
+    context = PipelineContext(filename="a.pdf", content=b"", model="m", lm_studio_url="http://x")
+    context.artifacts.update({
+        "extraction": {
+            "currency": FieldExtraction(value="usd", confidence="low"),
+            "id_subject": FieldExtraction(value="S1", confidence="high"),
+        },
+        "processed_pages": 1, "page_count": 1, "text": "",
+    })
+    await step.run(context)
+    assert context.artifacts["extraction"]["currency"].value == "EUR"

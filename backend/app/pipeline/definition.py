@@ -38,6 +38,7 @@ class StepKind(str, Enum):
     render_pages = "render_pages"
     document_ai_ocr = "document_ai_ocr"
     document_ai_layout = "document_ai_layout"
+    document_ai_extract = "document_ai_extract"
     llm_extract = "llm_extract"
     regex_refine = "regex_refine"
     master_data_lookup = "master_data_lookup"
@@ -97,6 +98,17 @@ CONTRACTS: dict[StepKind, StepContract] = {
         description="Fill a field the document never carried, by matching a name to the register.",
         requires_all=(Artifact.entities,),
         produces=(Artifact.entities,),
+    ),
+    StepKind.document_ai_extract: StepContract(
+        kind=StepKind.document_ai_extract,
+        label="Document AI Custom Extractor",
+        description=(
+            "Read the configured fields with a Custom Extractor. It answers with "
+            "values, its own confidence and the box each value sits in, so it "
+            "replaces the model call rather than feeding it."
+        ),
+        requires_all=(),
+        produces=(Artifact.entities, Artifact.text),
     ),
     StepKind.supplier_rules: StepContract(
         kind=StepKind.supplier_rules,

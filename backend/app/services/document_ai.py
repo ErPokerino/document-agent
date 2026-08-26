@@ -217,19 +217,30 @@ class DocumentAiClient:
         self._token, self._token_expires_at = await self._exchange_assertion()
         return self._token
 
-    async def process(self, processor_id: str, content: bytes) -> dict[str, Any]:
-        """Run one processor over one document and return the raw answer."""
+    async def process(
+        self,
+        processor_id: str,
+        content: bytes,
+        process_options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run one processor over one document and return the raw answer.
+
+        `process_options` is how a generative Custom Extractor is told which
+        fields to look for, per request, instead of by editing its schema.
+        """
         if not processor_id.strip():
             raise DocumentAiError("No processor id is configured for this step.")
         if not self.project_id.strip():
             raise DocumentAiError("No Google Cloud project is configured in Settings.")
 
-        payload = {
+        payload: dict[str, Any] = {
             "rawDocument": {
                 "content": base64.b64encode(content).decode("ascii"),
                 "mimeType": "application/pdf",
             }
         }
+        if process_options:
+            payload["processOptions"] = process_options
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
                 response = await client.post(

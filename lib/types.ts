@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
 
-export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
+export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
 
 export type Confidence = FieldExtraction["confidence"];
 
@@ -220,6 +220,7 @@ export type GcpSettings = {
   location: string;
   ocr_processor_id: string;
   layout_processor_id: string;
+  custom_extractor_processor_id: string;
   ocr_per_thousand_pages: number | null;
   layout_per_thousand_pages: number | null;
   pricing_checked_on: string;

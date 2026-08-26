@@ -21,6 +21,7 @@ from app.pipeline.definition import (
 from app.pipeline.regex_refine import RegexRule
 from app.pipeline.steps import (
     ApplySupplierRules,
+    ExtractWithCustomExtractor,
     ExtractEntities,
     InspectPdf,
     LookUpInMasterData,
@@ -104,6 +105,11 @@ def _build_one(
         return ExtractEntities(prompts)
     if step.kind is StepKind.regex_refine:
         return RefineWithRegex(entities, _rules(config))
+    if step.kind is StepKind.document_ai_extract:
+        return ExtractWithCustomExtractor(
+            str(config.get("processor_id") or gcp.custom_extractor_processor_id),
+            entities,
+        )
     if step.kind is StepKind.supplier_rules:
         if supplier_rules is None:
             raise PipelineError("No supplier rules are available to apply")
