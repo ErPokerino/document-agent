@@ -27,46 +27,73 @@ const DIRECTION_LABELS: Record<FieldChange["direction"], string> = {
  * screen: comparing two runs is a question someone asks about a specific
  * change they made, and the pair has to be theirs to pick.
  */
+/** One answered comparison, remembered with the pair it answers for. */
+type Comparison = {
+  before: number;
+  after: number;
+  pair: [EvaluationDetail, EvaluationDetail] | null;
+  diff: RunDiff | null;
+  error: string | null;
+};
+
 export function RunDiffPanel({ evaluations }: Props) {
   const [beforeId, setBeforeId] = useState<number | "">("");
   const [afterId, setAfterId] = useState<number | "">("");
-  const [diff, setDiff] = useState<RunDiff | null>(null);
-  const [pair, setPair] = useState<[EvaluationDetail, EvaluationDetail] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // One piece of state, written only when an answer arrives. Everything the
+  // panel shows is then read off the selection: what was loaded for another
+  // pair is simply not this pair's answer, so nothing has to be cleared when
+  // the selects change — and clearing state to mirror state is what made this
+  // component cascade renders.
+  const [answered, setAnswered] = useState<Comparison | null>(null);
 
   const scorable = evaluations.filter((evaluation) => evaluation.status !== "running");
+  const pairChosen = beforeId !== "" && afterId !== "" && beforeId !== afterId;
 
   useEffect(() => {
-    if (beforeId === "" || afterId === "" || beforeId === afterId) {
-      setDiff(null);
-      setPair(null);
-      return;
-    }
+    if (!pairChosen) return;
     let cancelled = false;
-    setBusy(true);
-    setError(null);
-    Promise.all([api.evaluation(Number(beforeId)), api.evaluation(Number(afterId))])
-      .then(([before, after]) => {
+    const before = Number(beforeId);
+    const after = Number(afterId);
+    Promise.all([api.evaluation(before), api.evaluation(after)])
+      .then(([first, second]) => {
         if (cancelled) return;
-        setPair([before, after]);
-        setDiff(diffRuns(before, after));
+        setAnswered({
+          before,
+          after,
+          pair: [first, second],
+          diff: diffRuns(first, second),
+          error: null,
+        });
       })
       .catch((requestError: unknown) => {
         if (cancelled) return;
-        setError(requestError instanceof Error ? requestError.message : "Those runs could not be read.");
-        setDiff(null);
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
+        setAnswered({
+          before,
+          after,
+          pair: null,
+          diff: null,
+          error: requestError instanceof Error ? requestError.message : "Those runs could not be read.",
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [beforeId, afterId]);
+  }, [beforeId, afterId, pairChosen]);
+
+  const current =
+    pairChosen && answered !== null && answered.before === Number(beforeId) && answered.after === Number(afterId)
+      ? answered
+      : null;
+  // A pair is chosen and its answer is not in yet.
+  const busy = pairChosen && current === null;
+  const shownDiff = current?.diff ?? null;
+  const shownPair = current?.pair ?? null;
+  const error = current?.error ?? null;
 
   const mismatch =
-    pair !== null && pair[0].dataset !== pair[1].dataset ? `${pair[0].dataset} against ${pair[1].dataset}` : null;
+    shownPair !== null && shownPair[0].dataset !== shownPair[1].dataset
+      ? `${shownPair[0].dataset} against ${shownPair[1].dataset}`
+      : null;
 
   return (
     <div className="settings-card">
@@ -116,27 +143,27 @@ export function RunDiffPanel({ evaluations }: Props) {
         </p>
       )}
 
-      {diff && (
+      {shownDiff && (
         <>
           <div className="diff-totals">
-            <span className="diff-total fixed"><b>{diff.summary.fixed}</b> fixed</span>
-            <span className="diff-total broken"><b>{diff.summary.broken}</b> regressed</span>
-            <span className="diff-total changed"><b>{diff.summary.changed}</b> still wrong, differently</span>
-            <span className="diff-total"><b>{diff.summary.unchanged}</b> unchanged</span>
-            <span className={`diff-net ${diff.summary.net > 0 ? "good" : diff.summary.net < 0 ? "poor" : ""}`}>
-              {diff.summary.net > 0 ? `+${diff.summary.net}` : diff.summary.net} net
+            <span className="diff-total fixed"><b>{shownDiff.summary.fixed}</b> fixed</span>
+            <span className="diff-total broken"><b>{shownDiff.summary.broken}</b> regressed</span>
+            <span className="diff-total changed"><b>{shownDiff.summary.changed}</b> still wrong, differently</span>
+            <span className="diff-total"><b>{shownDiff.summary.unchanged}</b> unchanged</span>
+            <span className={`diff-net ${shownDiff.summary.net > 0 ? "good" : shownDiff.summary.net < 0 ? "poor" : ""}`}>
+              {shownDiff.summary.net > 0 ? `+${shownDiff.summary.net}` : shownDiff.summary.net} net
             </span>
           </div>
 
-          {(diff.onlyInBefore.length > 0 || diff.onlyInAfter.length > 0 || diff.failedAfter.length > 0) && (
+          {(shownDiff.onlyInBefore.length > 0 || shownDiff.onlyInAfter.length > 0 || shownDiff.failedAfter.length > 0) && (
             <p className="field-help">
-              {diff.onlyInBefore.length > 0 && `${diff.onlyInBefore.length} document${diff.onlyInBefore.length === 1 ? "" : "s"} only in the first run. `}
-              {diff.onlyInAfter.length > 0 && `${diff.onlyInAfter.length} only in the second. `}
-              {diff.failedAfter.length > 0 && `${diff.failedAfter.length} failed in the second run and could not be compared.`}
+              {shownDiff.onlyInBefore.length > 0 && `${shownDiff.onlyInBefore.length} document${shownDiff.onlyInBefore.length === 1 ? "" : "s"} only in the first run. `}
+              {shownDiff.onlyInAfter.length > 0 && `${shownDiff.onlyInAfter.length} only in the second. `}
+              {shownDiff.failedAfter.length > 0 && `${shownDiff.failedAfter.length} failed in the second run and could not be compared.`}
             </p>
           )}
 
-          {diff.byDocument.length === 0 ? (
+          {shownDiff.byDocument.length === 0 ? (
             <div className="models-empty">
               <GitCompare size={18} />
               <span>Every field both runs scored came out the same.</span>
@@ -155,7 +182,7 @@ export function RunDiffPanel({ evaluations }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {diff.byDocument.flatMap((entry) =>
+                  {shownDiff.byDocument.flatMap((entry) =>
                     entry.changes.map((change, index) => (
                       <tr key={`${entry.document}-${change.entity}`}>
                         <td>{index === 0 ? entry.document : ""}</td>

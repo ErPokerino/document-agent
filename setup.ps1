@@ -94,7 +94,8 @@ $credentials = Join-Path $projectRoot "backend\data\gcp-service-account.json"
 if (Test-Path -LiteralPath $credentials) {
     Write-Host "  [ok]   Document AI service-account key is in place."
 } else {
-    Write-Host "  [todo] For the OCR and Layout pipelines, save a Google service-account key as"
+    Write-Host "  [todo] For the Document AI pipelines - OCR, Layout Parser and the Custom"
+    Write-Host "         Extractor - save a Google service-account key as"
     Write-Host "         backend\data\gcp-service-account.json, then fill in the project and"
     Write-Host "         processor ids under Settings."
 }

@@ -316,7 +316,9 @@ async def test_a_derived_entity_nobody_fills_comes_out_explicitly_empty(monkeypa
     missing = result.artifacts["extraction"]["id_subject"]
     assert missing.value is None
     assert missing.confidence == "low"
-    assert "does not fill" in missing.warning
+    # Says what happened and stops: which step to add is the reader's decision,
+    # and this warning is not the place it gets made for them.
+    assert missing.warning == "No step in this pipeline fills 'id_subject'."
 
 
 @pytest.mark.asyncio

@@ -106,6 +106,12 @@ To keep in mind throughout rather than to build in one go: it collides with the
 local dependency, since LM Studio is installed per machine and cannot be shipped
 with the app.
 
+One step already taken, in that spirit: the Cloudflare Worker entry point and
+its D1 and R2 bindings, inherited from the template this was scaffolded from and
+never bound to anything, are gone — along with 145 MB of toolchain that every
+machine was installing to deploy an app that is served from disk beside a local
+backend.
+
 ### Pipeline graph in the UI
 
 A drawn graph of the selected pipeline. Low value while pipelines are linear and

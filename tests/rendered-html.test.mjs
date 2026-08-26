@@ -5,16 +5,17 @@ import test from "node:test";
 // resolution lives in review.test.mjs, validation.test.mjs and
 // bootstrap.test.mjs. This file only covers what needs a real server render.
 
+// The built server entry is the request handler itself. It used to be wrapped
+// in a Cloudflare Worker object, which this test had to fake an environment
+// for; the app is served from disk beside a local backend and was never
+// deployed to a worker, so the wrapper and its 145 MB of toolchain are gone.
 async function render(path = "/") {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  const entry = new URL("../dist/server/index.js", import.meta.url);
+  // A fresh module each time: the entry holds render state between calls.
+  entry.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  const { default: handler } = await import(entry.href);
 
-  return worker.fetch(
-    new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
+  return handler(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }));
 }
 
 test("the workspace is server-rendered as HTML", async () => {

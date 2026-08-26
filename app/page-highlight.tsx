@@ -41,6 +41,11 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
     <div className="highlight-view">
       <div className="highlight-scroll">
         <div className="highlight-stage" style={{ width: `${zoom * 100}%` }}>
+          {/* Deliberately a plain img. The boxes are positioned in percentages
+              of this element, so it has to be the element the browser lays out;
+              an optimizer that re-encodes or re-frames the page would move every
+              box off the value it points at. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={apiUrls.runPage(runId, shown)} alt={`Page ${shown + 1}`} />
           {onThisPage.map((location) => (
             <button

@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Trash2, Wand2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import type { EntityDefinition, SupplierRuleModel } from "../lib/types";
@@ -44,6 +44,13 @@ const KINDS = [
 export function SupplierRules({ idSubject, supplierName, entities, onError, onCountChange }: Props) {
   const [rules, setRules] = useState<SupplierRuleModel[] | null>(null);
   const [busy, setBusy] = useState(false);
+  // The parent passes a fresh closure every render, and the rules are to be
+  // read when the supplier changes and at no other time. A ref keeps the
+  // callback current without making it a reason to fetch again.
+  const report = useRef(onCountChange);
+  useEffect(() => {
+    report.current = onCountChange;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +59,7 @@ export function SupplierRules({ idSubject, supplierName, entities, onError, onCo
       .then((found) => {
         if (cancelled) return;
         setRules(found);
-        onCountChange(found.length);
+        report.current(found.length);
       })
       .catch(() => {
         if (!cancelled) setRules([]);

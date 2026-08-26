@@ -25,8 +25,8 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 - initial schema with `date`, `document_number`, `supplier_name`, `currency` and `total_amount`;
 - JSON constrained by JSON Schema and validated with Pydantic;
 - JSON export;
-- highlighting of where each extracted value sits on the page, whenever a
-  pipeline step read it with OCR;
+- highlighting of where each extracted value sits on the page, from OCR
+  tokens or straight from the Custom Extractor, with zoom;
 - extraction by a Google Custom Extractor as an alternative to a language
   model, with the processor's own confidence and the position of each value;
 - per-supplier corrections applied after the register identifies the supplier:
@@ -34,10 +34,11 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
   about named fields alone;
 - comparison of two runs field by field, to see what one change actually
   moved;
-- a data-flow note on every run stating where the pages actually go: a
-  pipeline built only from local steps keeps them on the machine, one with a
-  Document AI step uploads them to Google, and a hosted model sends them to
-  its API.
+- a data-flow note on every run stating where the pages actually go, read from
+  the pipeline's steps rather than from which model is selected: a pipeline
+  built only from local steps keeps them on the machine, any Document AI step
+  uploads them to Google, and a hosted model is named only when the pipeline
+  actually calls one.
 
 ## Start
 
@@ -162,14 +163,11 @@ What does not change is validation: a currency is a three-letter code whoever
 read the page, so a processor answering `$` is corrected exactly as a model
 would be.
 
-Two things about this processor are worth knowing before writing a description
-for it, both measured rather than assumed. It **points at spans on the page**,
-so it cannot be told to produce a form the page does not carry: asked for a
-currency "as an ISO 4217 code" on an invoice printing only `S$`, it returns
-nothing at all — and a field it cannot satisfy takes others down with it, so
-the date went missing from the same response. Describe what to find and let
-validation convert. And it is **generative**, so it varies: the same document
-and the same request returned a date on one call and not the next.
+One thing about this processor is worth knowing before writing a description
+for it, and it was measured rather than assumed: it is **generative**, so it
+varies. The same document and the same request returned a date on one call and
+not the next. What it may be asked for is settled by the method above, not by
+how the description is worded.
 
 A field the processor did not answer says so, because silence and an invoice
 that genuinely lacks the value look identical otherwise.
@@ -200,14 +198,19 @@ field by field.
 
 ## Working on it
 
+Conventions, the commands that check a change, and the traps that have already
+cost time are in [AGENTS.md](AGENTS.md) — written for whoever picks this up on
+another machine, human or agent.
+
 ```powershell
 .\stop.ps1      # stop the frontend and backend
 .\restart.ps1   # rebuild the frontend and restart both
 ```
 
-`npm test` is the type check, the frontend tests and the backend tests. It does
-not build, so it is safe to run against a live app. `npm run verify` adds the
-build, and a build landing under a running server leaves it stale.
+`npm test` is the type check, the linter, the frontend tests and the backend
+tests. It does not build, so it is safe to run against a live app. `npm run
+verify` adds the build, and a build landing under a running server leaves it
+stale.
 
 That staleness is worth recognising, because it does not look like a fault:
 `vinext start` reads its manifest once and serves client chunks by content hash,
@@ -223,19 +226,27 @@ React frontend
     ↓
 FastAPI
     ↓
-DocumentPipeline
-    ├── InspectPdf
-    │       └── apply the configured page maximum
-    └── ExtractConfiguredEntities
-            ├── render those pages as images
-            └── send every image in one vision call
-                    ↓
-                LM Studio
+DocumentPipeline — the steps the chosen pipeline names, in order
+    │
+    ├── render pages ............ the first pages allowed, as images
+    ├── Document AI OCR ......... text and token boxes, from Google
+    ├── Document AI Layout ...... structured text, from Google
+    ├── Document AI Custom
+    │     Extractor ............. the fields themselves, from Google
+    ├── LLM extraction .......... the fields themselves, from a model
+    ├── regex refinement ........ per-field patterns over the result
+    ├── master data lookup ...... an internal id from the register
+    └── supplier rules .......... the corrections written for one supplier
                     ↓
              JSON Schema + Pydantic
 ```
 
-`DocumentPipeline` runs independent steps, each declaring what it needs and what it leaves behind, so a pipeline can be checked while it is being written. Today's steps: render pages, Document AI OCR, Document AI Layout Parser, the model call, master-data lookup and regex refinement. Future steps — document classification, splitting compound PDFs, validation with a second model — are a contract and a compiler case, not a UI change.
+`DocumentPipeline` runs independent steps, each declaring what it needs and what
+it leaves behind, so a pipeline can be checked while it is being written. Not
+every step is present in every pipeline, and two of them are alternatives: a
+pipeline extracts with a model **or** with the Custom Extractor. Future steps —
+document classification, splitting compound PDFs, validation with a second model
+— are a contract and a compiler case, not a UI change.
 
 ## Model lifecycle and timing
 
@@ -261,7 +272,7 @@ The LLM section reports the accelerator found and the budget derived from it, wh
 
 Note that `--gpu off` governs the model's own layers. A vision projector follows the selected runtime, so on a GPU build page images are encoded on the GPU whatever the load flags said.
 
-The UI reports load, warm-up and document-processing times separately. Extraction is rejected until the active model is loaded, so LM Studio cannot silently auto-load it inside the document timer.
+The UI reports load, warm-up and document-processing times separately. Extraction is rejected until the active model is loaded, so LM Studio cannot silently auto-load it inside the document timer — for a pipeline that calls a model at all. One that does not is never held back by a model it will not use, and says so where the model is named.
 
 ## Multi-page documents
 

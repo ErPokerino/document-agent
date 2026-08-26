@@ -163,16 +163,23 @@ export function groupCatalogue(
 
     Used where a recorded run is shown: a run from months ago names step kinds
     that must stay readable even if the catalogue changes around them.
+
+    Typed by StepKind so that adding a step to the backend does not compile
+    until it has a name here. It went two steps without one, and a run built on
+    either of them was described in Lab as `document_ai_extract → supplier_rules`.
  */
-export const STEP_LABELS: Record<string, string> = {
+const STEP_LABELS: Record<StepKind, string> = {
   render_pages: "Render pages",
   document_ai_ocr: "Document AI OCR",
   document_ai_layout: "Document AI Layout Parser",
+  document_ai_extract: "Document AI Custom Extractor",
   llm_extract: "LLM extraction",
   regex_refine: "Regex refinement",
   master_data_lookup: "Master data lookup",
+  supplier_rules: "Supplier rules",
 };
 
+/** Takes any string, because a recorded run may name a step that is now gone. */
 export function stepLabel(kind: string): string {
-  return STEP_LABELS[kind] ?? kind;
+  return STEP_LABELS[kind as StepKind] ?? kind;
 }

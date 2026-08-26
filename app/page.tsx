@@ -484,15 +484,24 @@ export default function Home() {
   const isModelReady = activeModel?.ready === true;
   // Not every pipeline asks a model anything. One that extracts with the Custom
   // Extractor never does, so nothing here should hold its run back over a model
-  // it will not use.
-  const callsModel = usesModel(pipelineKinds);
+  // it will not use — and nothing should describe it as having answered.
+  //
+  // Until the pipeline has been read the answer is assumed to be yes: on the
+  // first paint that shows a gate which may not apply, where the other way
+  // round would let a run start that then fails.
+  const callsModel = pipelineKinds.length === 0 || usesModel(pipelineKinds);
   const needsLmStudio = callsModel && !usingHostedModel;
   const modelBlocks = callsModel && !isModelReady;
   const lmStudioBlocks = needsLmStudio && !isConnected;
   // The strip is numbered as it is walked, so dropping a step that never runs
   // does not leave a gap in the numbering.
   const firstStepNumber = callsModel ? 2 : 1;
-  const activeModelStatus = modelStatusLabel(settings?.model ?? "", activeModel);
+  // The chip names the model this machine is set to. On a pipeline that never
+  // calls it, "Model ready" is true and beside the point, and reading it as a
+  // prerequisite is the mistake the rest of this block exists to prevent.
+  const activeModelStatus = callsModel
+    ? modelStatusLabel(settings?.model ?? "", activeModel)
+    : "Not used by this pipeline";
   const unresolvedWarningCount = result
     ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name)).length
     : 0;
@@ -572,7 +581,9 @@ export default function Home() {
       </div>
 
       <div className="confidence-legend">
-        <span>Model-estimated confidence</span>
+        {/* Who judged it depends on the pipeline: a model rates its own
+            answers, while the Custom Extractor returns a number it computed. */}
+        <span>{callsModel ? "Model-estimated confidence" : "Processor-reported confidence"}</span>
         <div><i className="high" /> High <i className="medium" /> Medium <i className="low" /> Low</div>
       </div>
 

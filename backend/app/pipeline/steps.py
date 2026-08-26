@@ -358,10 +358,7 @@ class MarkUnfilledDerivedEntities:
             extraction[name] = FieldExtraction(
                 value=None,
                 confidence="low",
-                warning=(
-                    f"This pipeline does not fill '{name}'. Add the step that produces it, "
-                    "or use a pipeline that has one."
-                ),
+                warning=f"No step in this pipeline fills '{name}'.",
             )
         context.artifacts["extraction"] = extraction
 

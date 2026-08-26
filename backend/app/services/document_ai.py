@@ -54,26 +54,25 @@ class ServiceAccount:
             raw = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise DocumentAiError(
-                f"No service account key at {path}. Download the JSON key for the "
-                f"service account and save it as gcp-service-account.json in backend/data."
+                f"No service account key at {path}, which is where DocuFlow reads one."
             ) from exc
         try:
             info = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise DocumentAiError(
-                f"The key file at {path} is not readable JSON. Download it again."
+                f"The key file at {path} is not readable JSON."
             ) from exc
         if not isinstance(info, dict) or info.get("type") != "service_account":
             raise DocumentAiError(
-                "That file is not a service account key. In the Google Cloud console it is "
-                "the JSON downloaded from the service account's Keys tab."
+                "That file is JSON, but not a service account key: its type is not "
+                "'service_account'."
             )
         missing = [
             field for field in ("client_email", "private_key", "token_uri") if not info.get(field)
         ]
         if missing:
             raise DocumentAiError(
-                f"The key file is missing {', '.join(missing)}. Download it again."
+                f"The key file is a service account key with no {', '.join(missing)}."
             )
         return ServiceAccount(
             client_email=info["client_email"],

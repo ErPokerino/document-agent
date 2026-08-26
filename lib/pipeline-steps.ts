@@ -7,11 +7,22 @@
  * while it uploaded every page to Google.
  */
 
+import type { StepKind } from "./types";
+
+// Written as sets of StepKind so that renaming a step in the backend fails the
+// type check here rather than quietly making one of these questions answer
+// "no" forever. The functions still take plain strings, because what a running
+// backend reports is not this file's to assume.
+
 /** Steps that send the pages to Google. */
-const CLOUD_READERS = new Set(["document_ai_ocr", "document_ai_layout", "document_ai_extract"]);
+const CLOUD_READERS: ReadonlySet<string> = new Set<StepKind>([
+  "document_ai_ocr",
+  "document_ai_layout",
+  "document_ai_extract",
+]);
 
 /** Steps that can call the selected language model. */
-const MODEL_CALLERS = new Set(["llm_extract", "supplier_rules"]);
+const MODEL_CALLERS: ReadonlySet<string> = new Set<StepKind>(["llm_extract", "supplier_rules"]);
 
 export function readsInTheCloud(kinds: string[]): boolean {
   return kinds.some((kind) => CLOUD_READERS.has(kind));

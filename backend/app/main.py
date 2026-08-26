@@ -1713,6 +1713,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
         except asyncio.CancelledError:
             evaluation_store.finish(evaluation_id, "cancelled")
         except Exception:
+            # run_evaluation has already recorded the failure on the evaluation.
             pass
         finally:
             release_model_operation()

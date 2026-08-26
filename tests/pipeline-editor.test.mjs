@@ -11,6 +11,7 @@ import {
   rulesOf,
   pageLimitProblem,
   setStepConfig,
+  stepLabel,
   stepLabels,
   summarizeStep,
 } from "../lib/pipeline-editor.ts";
@@ -157,4 +158,28 @@ test("a new lookup step starts with the defaults the backend would use", () => {
     algorithm: "combined",
     minimum_similarity: 0.75,
   });
+});
+
+test("every step the backend can run has a readable name", () => {
+  // The map went two kinds without one, and a run built on either was
+  // described in Lab as `document_ai_extract → supplier_rules`. The type keeps
+  // it exhaustive now; this keeps the fallback honest about what it is for.
+  const kinds = [
+    "render_pages",
+    "document_ai_ocr",
+    "document_ai_layout",
+    "document_ai_extract",
+    "llm_extract",
+    "regex_refine",
+    "master_data_lookup",
+    "supplier_rules",
+  ];
+  for (const kind of kinds) {
+    assert.notEqual(stepLabel(kind), kind, kind);
+  }
+});
+
+test("a step kind that no longer exists is shown as itself", () => {
+  // A run recorded months ago must stay readable.
+  assert.equal(stepLabel("some_retired_step"), "some_retired_step");
 });
