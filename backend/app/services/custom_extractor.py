@@ -93,7 +93,9 @@ def schema_override(entities: list[EntityDefinition]) -> dict:
             "name": entity.name,
             "valueType": _VALUE_TYPES.get(entity.format, "string"),
             "occurrenceType": "OPTIONAL_ONCE",
-            "description": described_for_reader(entity),
+            # This reader points at the page; it cannot be forbidden what the
+            # page shows, and a field it cannot satisfy costs the others too.
+            "description": described_for_reader(entity, reads_from_page=True),
         }
         for entity in model_entities(entities)
     ]
@@ -276,6 +278,10 @@ def validated_entities_from_response(
     of a value and has nothing to say about how sure its reader was.
     """
     extracted = entities_from_response(document, entities)
+    answered = {
+        found.get("type")
+        for found in document.get("entities") or []
+    }
     validated = validate_result(
         {
             name: {"value": field.value, "confidence": field.confidence}
@@ -283,9 +289,22 @@ def validated_entities_from_response(
         },
         model_entities(entities),
     )
-    return {
-        name: field.model_copy(update={"score": extracted[name].score})
-        if name in extracted
-        else field
-        for name, field in validated.items()
-    }
+    result: dict[str, FieldExtraction] = {}
+    for name, field in validated.items():
+        if name not in extracted:
+            result[name] = field
+            continue
+        update: dict[str, object] = {"score": extracted[name].score}
+        if name not in answered:
+            # Silence, not absence. The processor returns nothing for a field
+            # whose description asks for something the page cannot show — told
+            # a currency must be an ISO 4217 code, it answered nothing at all
+            # for a page printing only `S$`. Unremarked, that reads exactly
+            # like an invoice with no currency on it.
+            update["warning"] = (
+                "The Custom Extractor did not return this field. It answers nothing for a "
+                "field it cannot satisfy, which includes a description asking for a form "
+                "the page does not show."
+            )
+        result[name] = field.model_copy(update=update)
+    return result

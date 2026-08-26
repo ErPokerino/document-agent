@@ -83,3 +83,37 @@ def test_a_number_that_already_rules_out_separators_is_not_told_again() -> None:
 def test_a_description_that_says_nothing_about_the_format_still_gets_it() -> None:
     said = described_for_reader(entity("date", EntityFormat.date, "Invoice issue date."))
     assert "YYYY-MM-DD" in said
+
+
+# -- a reader that points at the page is told something different -----------------
+
+
+def test_a_page_reader_is_not_forbidden_what_the_page_shows() -> None:
+    """Measured, and it cost two fields to learn.
+
+    Told "never a currency symbol", the Custom Extractor returned nothing at
+    all for a page printing only `S$` — and an unsatisfiable field took the
+    date down with it. Given a hint instead, it answered `S$`, which the app's
+    own validation reads as SGD.
+    """
+    said = described_for_reader(entity("currency", EntityFormat.currency), reads_from_page=True)
+    assert "ISO 4217" in said
+    assert "never" not in said.lower()
+    assert "symbol" not in said.lower() or "when the document" in said.lower()
+
+
+def test_a_page_reader_is_not_told_to_strip_punctuation_it_can_see() -> None:
+    said = described_for_reader(entity("total", EntityFormat.decimal), reads_from_page=True)
+    assert "without" not in said.lower()
+    assert "no thousands separator" not in said.lower()
+
+
+def test_a_generating_reader_still_gets_the_strict_instruction() -> None:
+    """A model writes the value, so it can be told exactly how to write it."""
+    said = described_for_reader(entity("currency", EntityFormat.currency))
+    assert "never a currency symbol" in said.lower()
+
+
+def test_a_page_reader_still_skips_what_the_description_already_says() -> None:
+    already = entity("currency", EntityFormat.currency, "The currency, as an ISO 4217 code.")
+    assert described_for_reader(already, reads_from_page=True) == "The currency, as an ISO 4217 code."

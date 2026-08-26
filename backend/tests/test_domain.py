@@ -225,15 +225,29 @@ def test_partial_validation_preserves_valid_fields() -> None:
     assert result["total_amount"].value == 125.31
 
 
-def test_currency_symbol_is_not_inferred() -> None:
+def test_an_ambiguous_currency_symbol_is_not_inferred() -> None:
+    """The rule used to refuse every symbol, which was right while only models
+    read the page: a model writing `$` had chosen not to give the code. A
+    reader that points at the page can only answer with what is printed, and
+    documents print symbols. So the line moved to where it belongs — a symbol
+    naming one currency is read, a symbol naming a dozen is still refused."""
+    entity = EntityDefinition(name="currency", format=EntityFormat.currency, description="Currency")
+    result = validate_result(
+        {"currency": {"value": "$", "confidence": "high"}},
+        [entity],
+    )
+    assert result["currency"].value is None
+    assert result["currency"].confidence == "low"
+    assert "$" in (result["currency"].warning or "")
+
+
+def test_a_currency_symbol_naming_one_currency_is_read() -> None:
     entity = EntityDefinition(name="currency", format=EntityFormat.currency, description="Currency")
     result = validate_result(
         {"currency": {"value": "S$", "confidence": "high"}},
         [entity],
     )
-    assert result["currency"].value is None
-    assert result["currency"].confidence == "low"
-    assert "S$" in (result["currency"].warning or "")
+    assert result["currency"].value == "SGD"
 
 
 def test_lowercase_iso_currency_is_canonicalized() -> None:

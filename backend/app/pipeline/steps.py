@@ -484,17 +484,24 @@ class ExtractWithCustomExtractor:
                 "No Custom Extractor processor id is configured. Add it in Settings."
             )
         processed_pages: int = context.artifacts["processed_pages"]
-        # Billed per page like the other processors, so the pipeline's limit is
-        # applied before the document leaves this machine.
-        content = _first_pages(context.content, processed_pages)
 
         client = DocumentAiClient(
             context.gcp_credentials_path, context.gcp_project_id, context.gcp_location
         )
         answer = await client.process(
             self.processor_id,
-            content,
-            process_options={"schemaOverride": schema_override(self.entities)},
+            context.content,
+            process_options={
+                "schemaOverride": schema_override(self.entities),
+                # The pipeline's page limit, asked of the API rather than
+                # applied by rewriting the PDF here. Both bill the same pages,
+                # and the processor read a rewritten page slightly worse — it
+                # truncated a supplier name that it read in full from the
+                # original.
+                "individualPageSelector": {
+                    "pages": list(range(1, processed_pages + 1))
+                },
+            },
             version=CUSTOM_EXTRACTOR_API_VERSION,
         )
         document = answer.get("document") or {}

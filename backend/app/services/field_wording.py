@@ -44,10 +44,29 @@ ALREADY_SAID = {
 }
 
 
-def described_for_reader(entity: EntityDefinition) -> str:
-    """The field's description, with what its format requires if it is missing."""
+# What to say to a reader that points at a span on the page rather than writing
+# a value of its own. It cannot obey "never a symbol" when the page shows only a
+# symbol — and an instruction a field cannot satisfy is not merely ignored: the
+# Custom Extractor returned nothing for that field *and* dropped the date from
+# the same response. So a page reader is hinted at, never forbidden, and the
+# app's own validation does the converting afterwards.
+PAGE_READER_RIDERS = {
+    EntityFormat.date: "Format the value as YYYY-MM-DD.",
+    EntityFormat.currency: "Give the ISO 4217 code when the document states one.",
+    EntityFormat.decimal: "",
+    EntityFormat.integer: "",
+}
+
+
+def described_for_reader(entity: EntityDefinition, reads_from_page: bool = False) -> str:
+    """The field's description, with what its format requires if it is missing.
+
+    `reads_from_page` is for a reader that can only point at what is printed —
+    Google's Custom Extractor — as against one that writes the value itself.
+    """
     written = (entity.description or "").strip()
-    rider = FORMAT_RIDERS.get(entity.format, "")
+    riders = PAGE_READER_RIDERS if reads_from_page else FORMAT_RIDERS
+    rider = riders.get(entity.format, "")
     if not rider:
         return written
 

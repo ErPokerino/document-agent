@@ -282,7 +282,10 @@ def test_every_property_carries_the_description_the_processor_reads() -> None:
     assert API_VERSION == "v1beta3"
 
 
-def test_the_format_rider_is_the_same_one_every_other_reader_gets() -> None:
+def test_the_wording_is_the_one_written_for_a_reader_that_points_at_the_page() -> None:
+    """Not the strict wording a model gets. This reader cannot be told "never a
+    symbol" about a page that shows only a symbol — it answers nothing at all,
+    and takes another field down with it."""
     from app.services.field_wording import described_for_reader
 
     properties = {
@@ -290,4 +293,40 @@ def test_the_format_rider_is_the_same_one_every_other_reader_gets() -> None:
         for prop in schema_override(ENTITIES)["entityTypes"][0]["properties"]
     }
     for definition in ENTITIES:
-        assert properties[definition.name] == described_for_reader(definition)
+        assert properties[definition.name] == described_for_reader(definition, reads_from_page=True)
+    assert "never" not in properties["currency"].lower()
+
+
+# -- a field the processor never answered ----------------------------------------
+
+
+def test_a_field_the_processor_left_out_says_so() -> None:
+    """Not the same as a page that does not carry the value, and the difference
+    is what someone needs to know. This processor returns nothing for a field
+    whose description asks for something the page cannot show — told the code
+    must be ISO 4217, it answered nothing at all for a page printing only `S$`.
+    Without a word, that looks identical to an invoice with no currency on it.
+    """
+    from app.services.custom_extractor import validated_entities_from_response
+
+    result = validated_entities_from_response({"entities": []}, ENTITIES)
+    warning = result["currency"].warning or ""
+    assert "did not return" in warning.lower() or "returned nothing" in warning.lower()
+    assert result["currency"].value is None
+
+
+def test_a_field_the_processor_did_answer_carries_no_such_warning() -> None:
+    from app.services.custom_extractor import validated_entities_from_response
+
+    document = {"entities": [found("supplier_name", "ACME LTD", 0.9)]}
+    result = validated_entities_from_response(document, ENTITIES)
+    assert result["supplier_name"].warning is None
+
+
+def test_a_value_the_app_rejected_keeps_the_rejection_not_the_absence() -> None:
+    """`$` is refused by validation; that is a different story from silence."""
+    from app.services.custom_extractor import validated_entities_from_response
+
+    document = {"entities": [found("currency", "$", 1.0)]}
+    warning = validated_entities_from_response(document, ENTITIES)["currency"].warning or ""
+    assert "did not return" not in warning.lower()

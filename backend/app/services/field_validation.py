@@ -30,6 +30,31 @@ def parse_named_value(value: Any, entity: EntityDefinition) -> Any:
         return normalized
     return normalized
 
+# Symbols that name exactly one currency. A bare "$" is deliberately absent:
+# it is the dollar of a dozen countries, and a wrong currency on an invoice is
+# worse than an empty one.
+UNAMBIGUOUS_SYMBOLS = {
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+    "₹": "INR",
+    "₽": "RUB",
+    "₩": "KRW",
+    "₺": "TRY",
+    "₪": "ILS",
+    "S$": "SGD",
+    "A$": "AUD",
+    "C$": "CAD",
+    "HK$": "HKD",
+    "NZ$": "NZD",
+    "NT$": "TWD",
+    "R$": "BRL",
+    "US$": "USD",
+    "CHF": "CHF",
+    "R₱": "PHP",
+}
+
+
 def validate_result(
     payload: Any,
     entities: list[EntityDefinition],
@@ -81,6 +106,11 @@ def normalize_field(payload: Any, entity: EntityDefinition) -> FieldExtraction:
         if not isinstance(value, str):
             raise ValueError("expected an ISO 4217 currency code")
         normalized_currency = value.strip().upper()
+        # Documents print symbols, not codes, and a reader that points at the
+        # page can only answer with what is there. A symbol belonging to one
+        # currency is that currency; a bare $ belongs to a dozen, and choosing
+        # between them would be a guess dressed as a reading.
+        normalized_currency = UNAMBIGUOUS_SYMBOLS.get(normalized_currency, normalized_currency)
         if not re.fullmatch(r"[A-Z]{3}", normalized_currency):
             raise ValueError("expected an ISO 4217 currency code")
         return FieldExtraction(value=normalized_currency, confidence=field.confidence)

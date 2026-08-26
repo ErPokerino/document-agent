@@ -143,6 +143,18 @@ What does not change is validation: a currency is a three-letter code whoever
 read the page, so a processor answering `$` is corrected exactly as a model
 would be.
 
+Two things about this processor are worth knowing before writing a description
+for it, both measured rather than assumed. It **points at spans on the page**,
+so it cannot be told to produce a form the page does not carry: asked for a
+currency "as an ISO 4217 code" on an invoice printing only `S$`, it returns
+nothing at all — and a field it cannot satisfy takes others down with it, so
+the date went missing from the same response. Describe what to find and let
+validation convert. And it is **generative**, so it varies: the same document
+and the same request returned a date on one call and not the next.
+
+A field the processor did not answer says so, because silence and an invoice
+that genuinely lacks the value look identical otherwise.
+
 ## Rules for one supplier
 
 Layouts repeat per supplier, and so do the exceptions: this one prefixes the
@@ -258,7 +270,7 @@ If the model runs out of output tokens before closing the JSON object, the reque
 fails with an explicit output-limit message rather than a generic parse error: a
 retry would only add prompt tokens and could never recover.
 
-If a model returns a value in the wrong format, only that field is cleared and marked for review. Other valid entities remain available. Currency symbols are deliberately not inferred: only three-letter ISO 4217 codes are accepted, with whitespace removed and lowercase letters canonicalized to uppercase.
+If a model returns a value in the wrong format, only that field is cleared and marked for review. Other valid entities remain available. A currency is stored as a three-letter ISO 4217 code, with whitespace removed and lowercase canonicalized. A symbol naming exactly one currency is read as that currency — `S$` is Singapore's and nobody else's — while a bare `$` belongs to a dozen countries and is refused, because a wrong currency on an invoice is worse than an empty one. That line used to sit at every symbol, which was right while only models read the page: a model writing `$` had chosen not to give the code. A processor that points at a span can only answer with what is printed, and documents print symbols.
 
 ## Why Outlines is not required
 
