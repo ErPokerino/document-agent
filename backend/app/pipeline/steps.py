@@ -14,6 +14,12 @@ from app.services.document_ai import (
 from app.services.gemini import GeminiClient
 from app.services.master_data import MasterDataStore
 from app.services.similarity import DEFAULT_ALGORITHM, similarity
+from app.services.supplier_rules import (
+    SupplierRule,
+    apply_deterministic_rules,
+    prompted_rules,
+    rules_for,
+)
 from app.services.text_boxes import tokens_from_ocr
 from app.services.lm_studio import LMStudioClient
 
@@ -352,3 +358,99 @@ class MarkUnfilledDerivedEntities:
                 ),
             )
         context.artifacts["extraction"] = extraction
+
+
+class ApplySupplierRules:
+    """Corrections written for the supplier this document turned out to be from.
+
+    Runs after the register lookup, because it keys on `id_subject`: several
+    spellings of one supplier resolve to the same internal id, and the id is
+    what is either right or wrong.
+
+    Deterministic rules run first and cost nothing. A prompted rule is a second
+    model call, so one is made only when there is a prompted rule to make it
+    for, and it asks about those fields alone rather than re-extracting the
+    document.
+    """
+
+    def __init__(
+        self,
+        rules: list[SupplierRule],
+        prompts: PromptConfiguration,
+        source_entity: str = "id_subject",
+    ) -> None:
+        self.rules = rules
+        self.prompts = prompts
+        self.source_entity = source_entity
+
+    async def run(self, context: PipelineContext) -> None:
+        extraction: dict[str, FieldExtraction] = context.artifacts.get("extraction") or {}
+        identity = extraction.get(self.source_entity)
+        applicable = rules_for(self.rules, getattr(identity, "value", None))
+        if not applicable:
+            return
+
+        document_text: str = context.artifacts.get("text") or ""
+        updated, changed = apply_deterministic_rules(extraction, applicable, document_text)
+
+        asked = prompted_rules(applicable)
+        wanted = [rule.entity for rule in asked if rule.entity in updated]
+        if wanted:
+            updated, reasked = await self._ask_again(context, updated, asked, wanted)
+            changed = changed + [entity for entity in reasked if entity not in changed]
+
+        context.artifacts["extraction"] = updated
+        context.artifacts["supplier_rules_applied"] = changed
+
+    async def _ask_again(
+        self,
+        context: PipelineContext,
+        extraction: dict[str, FieldExtraction],
+        asked: list[SupplierRule],
+        wanted: list[str],
+    ) -> tuple[dict[str, FieldExtraction], list[str]]:
+        """One more call, about the named fields only.
+
+        Re-extracting the whole document would risk the fields that were
+        already right; the point of a supplier rule is that it knows something
+        extra about a few of them.
+        """
+        subset = [entity for entity in self.prompts.entities if entity.name in wanted]
+        if not subset:
+            return extraction, []
+
+        instructions = "\n".join(
+            f"- {rule.entity}: {rule.prompt.strip()}" for rule in asked if rule.prompt.strip()
+        )
+        focused = self.prompts.model_copy(
+            update={
+                "entities": subset,
+                "user_prompt": (
+                    f"{self.prompts.user_prompt.strip()}\n\n"
+                    f"This document is from a supplier with known conventions. "
+                    f"Apply these instructions, which override anything above:\n{instructions}"
+                ),
+            }
+        )
+
+        client = build_extraction_client(context)
+        processed_pages: int = context.artifacts["processed_pages"]
+        answer = await client.extract_entities(
+            context.model,
+            context.artifacts.get("images") or [],
+            focused,
+            "1" if processed_pages == 1 else f"1-{processed_pages}",
+            total_pages=context.artifacts["page_count"],
+            processed_pages=processed_pages,
+            document_text=context.artifacts.get("text") or "",
+        )
+
+        result = dict(extraction)
+        changed: list[str] = []
+        for entity in wanted:
+            replacement = answer.get(entity)
+            if replacement is None or replacement.value == result[entity].value:
+                continue
+            result[entity] = replacement
+            changed.append(entity)
+        return result, changed

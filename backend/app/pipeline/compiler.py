@@ -20,6 +20,7 @@ from app.pipeline.definition import (
 )
 from app.pipeline.regex_refine import RegexRule
 from app.pipeline.steps import (
+    ApplySupplierRules,
     ExtractEntities,
     InspectPdf,
     LookUpInMasterData,
@@ -29,6 +30,7 @@ from app.pipeline.steps import (
     RenderPages,
 )
 from app.services.master_data import TABLES, MasterDataStore
+from app.services.supplier_rules import SupplierRuleStore
 from app.services.similarity import ALGORITHMS, DEFAULT_ALGORITHM
 
 
@@ -78,6 +80,7 @@ def _build_one(
     entities: list[EntityDefinition],
     gcp: GcpSettings,
     master_data: MasterDataStore | None,
+    supplier_rules: SupplierRuleStore | None,
 ) -> Any:
     config = step.config
     if step.kind is StepKind.render_pages:
@@ -101,6 +104,14 @@ def _build_one(
         return ExtractEntities(prompts)
     if step.kind is StepKind.regex_refine:
         return RefineWithRegex(entities, _rules(config))
+    if step.kind is StepKind.supplier_rules:
+        if supplier_rules is None:
+            raise PipelineError("No supplier rules are available to apply")
+        return ApplySupplierRules(
+            supplier_rules.all(),
+            prompts,
+            str(config.get("source_entity") or "id_subject"),
+        )
     if step.kind is StepKind.master_data_lookup:
         if master_data is None:
             raise PipelineError("No master data is available to look anything up in")
@@ -123,6 +134,7 @@ def build_steps(
     entities: list[EntityDefinition],
     gcp: GcpSettings | None = None,
     master_data: MasterDataStore | None = None,
+    supplier_rules: SupplierRuleStore | None = None,
     max_pages: int | None = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
@@ -142,6 +154,7 @@ def build_steps(
                     entities=entities,
                     gcp=gcp or GcpSettings(),
                     master_data=master_data,
+                    supplier_rules=supplier_rules,
                 )
             )
         except (ValidationError, ValueError) as exc:

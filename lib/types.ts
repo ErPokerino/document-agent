@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
 
-export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "llm_extract" | "regex_refine" | "master_data_lookup";
+export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
 
 export type Confidence = FieldExtraction["confidence"];
 
@@ -412,4 +412,34 @@ export type StepCatalogueEntry = {
   requires_all: string[];
   requires_any: string[];
   produces: string[];
+};
+
+export type SupplierRuleModel = {
+  id: number | null;
+  id_subject: string;
+  entity: string;
+  kind: "fixed" | "regex" | "prompt";
+  value: string;
+  pattern: string;
+  prompt: string;
+  note: string;
+};
+
+export type SupplierRuleRequest = {
+  id_subject: string;
+  entity: string;
+  kind: "fixed" | "regex" | "prompt";
+  value: string;
+  pattern: string;
+  prompt: string;
+  note: string;
+};
+
+export type SupplierRuleUpdate = {
+  entity: string | null;
+  kind: "fixed" | "regex" | "prompt" | null;
+  value: string | null;
+  pattern: string | null;
+  prompt: string | null;
+  note: string | null;
 };

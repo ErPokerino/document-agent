@@ -15,21 +15,26 @@ import {
   Download,
   Plus,
   UploadCloud,
+  Wand2,
   RefreshCw,
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
 import { InfoHint } from "./info-hint";
-import type { MasterDataImport, MasterDataTable } from "../lib/types";
+import type { EntityDefinition, MasterDataImport, MasterDataTable } from "../lib/types";
+import { SupplierRules } from "./supplier-rules";
 
 type Row = Record<string, string>;
 
 /** The reference tables a derived entity is looked up in. */
-export function MasterData() {
+export function MasterData({ entities }: { entities: EntityDefinition[] }) {
   const [tables, setTables] = useState<MasterDataTable[]>([]);
+  // Which supplier's rules are open. One at a time: they are a detail of a
+  // row, not a second table beside it.
+  const [openRules, setOpenRules] = useState<string | null>(null);
   const [imported, setImported] = useState<{ table: string; report: MasterDataImport } | null>(null);
   // One hidden input per table, since each imports into its own.
   const importInputs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -373,7 +378,8 @@ export function MasterData() {
                   }
                   const isEditing = editing === identifier;
                   return (
-                    <tr className="data-row" key={identifier}>
+                    <Fragment key={identifier}>
+                    <tr className="data-row">
                       {table.columns.map((column) => (
                         <td key={column.key} className={column.kind}>
                           {isEditing && column.editable ? (
@@ -409,6 +415,18 @@ export function MasterData() {
                           </>
                         ) : (
                           <>
+                            {table.key === "suppliers" && (
+                              <button
+                                type="button"
+                                className={`icon-button ${openRules === identifier ? "neutral" : ""}`}
+                                aria-label={`Rules for ${identifier}`}
+                                aria-expanded={openRules === identifier}
+                                title="Rules for this supplier's documents"
+                                onClick={() => setOpenRules(openRules === identifier ? null : identifier)}
+                              >
+                                <Wand2 size={14} />
+                              </button>
+                            )}
                             <button
                               className="icon-button neutral"
                               aria-label={`Edit ${identifier}`}
@@ -436,6 +454,19 @@ export function MasterData() {
                         )}
                       </td>
                     </tr>
+                    {openRules === identifier && table.key === "suppliers" && (
+                      <tr className="data-row rules-row">
+                        <td colSpan={table.columns.length + 1}>
+                          <SupplierRules
+                            idSubject={identifier}
+                            supplierName={String(row[table.match_column || "name"] ?? identifier)}
+                            entities={entities}
+                            onError={setError}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

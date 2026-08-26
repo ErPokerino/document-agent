@@ -776,7 +776,7 @@ export default function Home() {
             settingsError={settingsError}
           />
         ) : view === "master-data" ? (
-          <MasterData />
+          <MasterData entities={configuredEntities} />
         ) : view === "pipelines" ? (
           <Pipelines
             draftSettings={draftSettings}

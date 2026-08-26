@@ -43,6 +43,9 @@ from app.domain.models import (
     MasterDataColumn,
     MasterDataRowRequest,
     MasterDataImport,
+    SupplierRuleModel,
+    SupplierRuleRequest,
+    SupplierRuleUpdate,
     MasterDataTable,
     StepCatalogueEntry,
 )
@@ -75,6 +78,7 @@ from app.services.master_data import (
 from app.services.master_data_csv import csv_to_rows, rows_to_csv
 from app.services.migrations import adopt_legacy_page_limit, clear_inherited_model_default
 from app.services.settings_store import SettingsStore
+from app.services.supplier_rules import RULE_KINDS, SupplierRule, SupplierRuleStore
 from app.services.text_boxes import locate_value
 
 
@@ -104,6 +108,8 @@ run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
 dataset_store = DatasetStore(DATASETS_PATH)
 master_data_store = MasterDataStore(DATABASE_PATH)
+# Beside the register the rules key on, in the same database.
+supplier_rule_store = SupplierRuleStore(DATABASE_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
 # The page limit used to be one number for the whole app; carry an existing
 # install's value into the pipeline that inherits the job, then write the
@@ -632,6 +638,7 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
                 entities=settings.prompts.entities,
                 gcp=settings.gcp,
                 master_data=master_data_store,
+                supplier_rules=supplier_rule_store,
             )
         )
     except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
@@ -802,6 +809,7 @@ def _refuse_unusable(definition: PipelineDefinition) -> None:
             entities=settings.prompts.entities,
             gcp=settings.gcp,
             master_data=master_data_store,
+            supplier_rules=supplier_rule_store,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -984,6 +992,49 @@ async def list_master_data_tables() -> list[MasterDataTable]:
         )
         for table in TABLES.values()
     ]
+
+
+def _rule_model(rule: SupplierRule) -> SupplierRuleModel:
+    return SupplierRuleModel(**asdict(rule))
+
+
+@app.get("/api/supplier-rules", response_model=list[SupplierRuleModel])
+async def list_supplier_rules(id_subject: str = "") -> list[SupplierRuleModel]:
+    """Every rule, or the ones written for one supplier."""
+    rules = (
+        supplier_rule_store.for_supplier(id_subject.strip())
+        if id_subject.strip()
+        else supplier_rule_store.all()
+    )
+    return [_rule_model(rule) for rule in rules]
+
+
+@app.post("/api/supplier-rules", response_model=SupplierRuleModel, status_code=201)
+async def add_supplier_rule(request: SupplierRuleRequest) -> SupplierRuleModel:
+    try:
+        created = supplier_rule_store.add(SupplierRule(**request.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _rule_model(created)
+
+
+@app.patch("/api/supplier-rules/{rule_id}", response_model=SupplierRuleModel)
+async def update_supplier_rule(rule_id: int, request: SupplierRuleUpdate) -> SupplierRuleModel:
+    try:
+        updated = supplier_rule_store.update(
+            rule_id, request.model_dump(exclude_none=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"No rule with id {rule_id}")
+    return _rule_model(updated)
+
+
+@app.delete("/api/supplier-rules/{rule_id}", status_code=204, response_class=Response)
+async def delete_supplier_rule(rule_id: int) -> Response:
+    supplier_rule_store.delete(rule_id)
+    return Response(status_code=204)
 
 
 @app.get("/api/master-data/tables/{table_key}/export.csv", response_class=Response)
@@ -1581,6 +1632,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
             entities=detail.prompts.entities,
             gcp=settings.gcp,
             master_data=master_data_store,
+            supplier_rules=supplier_rule_store,
         )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(

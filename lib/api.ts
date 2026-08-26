@@ -20,6 +20,8 @@ import type {
   MasterDataImport,
   MasterDataTable,
   SavedPipeline,
+  SupplierRuleModel,
+  SupplierRuleRequest,
   StepCatalogueEntry,
 } from "./types";
 
@@ -66,6 +68,16 @@ export const apiUrls = {
 export const api = {
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
+  supplierRules: (idSubject?: string) =>
+    request<SupplierRuleModel[]>(
+      `/api/supplier-rules${idSubject ? `?id_subject=${segment(idSubject)}` : ""}`,
+    ),
+  addSupplierRule: (rule: SupplierRuleRequest) =>
+    request<SupplierRuleModel>("/api/supplier-rules", json("POST", rule)),
+  updateSupplierRule: (id: number, changes: Partial<SupplierRuleRequest>) =>
+    request<SupplierRuleModel>(`/api/supplier-rules/${id}`, json("PATCH", changes)),
+  deleteSupplierRule: (id: number) =>
+    request<void>(`/api/supplier-rules/${id}`, { method: "DELETE" }),
   importMasterData: (table: string, file: File) => {
     const body = new FormData();
     body.append("file", file);

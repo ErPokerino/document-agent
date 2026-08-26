@@ -8,25 +8,7 @@ Anything already built is in the README, not here.
 
 ## Next
 
-### Supplier-specific rules layer
-
-After `id_subject` resolves, a per-supplier rule set corrects or re-extracts
-named fields.
-
-`id_subject` is what the layer keys on, **not** `supplier_name`: several
-spellings of a supplier legitimately resolve to the same internal id, and the
-id is the thing that is either right or wrong. Accuracy of the underlying
-extraction is the user's judgement, not a gate on exposing the feature — the
-figures on the bench come from small local models, and a capable one rarely
-misses.
-
-Rules should be able to be deterministic as well as prompted. The most valuable
-supplier rules are often regexes or fixed values (*this one prefixes the number
-with `Ns. Rif.`, this one writes dates day-first, this one is always EUR*), and
-a second model call should be paid for only when a rule genuinely needs one.
-
-The Lab has to be able to run with and without the layer, or there is no way to
-tell whether it earned its cost.
+Nothing outstanding. The items below are decided and deliberately waiting.
 
 ## Later
 

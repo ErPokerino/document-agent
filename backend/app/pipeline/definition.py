@@ -41,6 +41,7 @@ class StepKind(str, Enum):
     llm_extract = "llm_extract"
     regex_refine = "regex_refine"
     master_data_lookup = "master_data_lookup"
+    supplier_rules = "supplier_rules"
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,16 @@ CONTRACTS: dict[StepKind, StepContract] = {
         kind=StepKind.master_data_lookup,
         label="Master data lookup",
         description="Fill a field the document never carried, by matching a name to the register.",
+        requires_all=(Artifact.entities,),
+        produces=(Artifact.entities,),
+    ),
+    StepKind.supplier_rules: StepContract(
+        kind=StepKind.supplier_rules,
+        label="Supplier rules",
+        description=(
+            "Apply the corrections written for whichever supplier this document "
+            "turned out to be from. Needs the supplier to have been identified first."
+        ),
         requires_all=(Artifact.entities,),
         produces=(Artifact.entities,),
     ),

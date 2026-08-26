@@ -275,6 +275,46 @@ class GeminiKeyStatus(BaseModel):
     verified_models: list[str] = Field(default_factory=list)
 
 
+class SupplierRuleModel(BaseModel):
+    """A correction written for one supplier's documents.
+
+    Keyed on the register id, never the name: several spellings of one supplier
+    resolve to the same id, and the id is what is either right or wrong.
+    """
+
+    id: int | None = None
+    id_subject: str
+    entity: str
+    kind: Literal["fixed", "regex", "prompt"]
+    value: str = ""
+    pattern: str = ""
+    prompt: str = ""
+    note: str = ""
+
+
+class SupplierRuleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_subject: str
+    entity: str
+    kind: Literal["fixed", "regex", "prompt"]
+    value: str = ""
+    pattern: str = ""
+    prompt: str = ""
+    note: str = ""
+
+
+class SupplierRuleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entity: str | None = None
+    kind: Literal["fixed", "regex", "prompt"] | None = None
+    value: str | None = None
+    pattern: str | None = None
+    prompt: str | None = None
+    note: str | None = None
+
+
 class MasterDataImport(BaseModel):
     """What an import did, row by row where it did not."""
 

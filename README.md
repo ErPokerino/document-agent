@@ -27,6 +27,9 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 - JSON export;
 - highlighting of where each extracted value sits on the page, whenever a
   pipeline step read it with OCR;
+- per-supplier corrections applied after the register identifies the supplier:
+  a fixed value, a pattern over what the page said, or one more model call
+  about named fields alone;
 - comparison of two runs field by field, to see what one change actually
   moved;
 - a data-flow note on every run stating where the pages actually go: a
@@ -99,6 +102,30 @@ Two limits are deliberate. A string that occurs several times in a document is
 ambiguous, and the first occurrence is taken. A value the OCR never saw cannot
 be highlighted at all, which includes anything the model inferred rather than
 read, and anything derived from a register.
+
+## Rules for one supplier
+
+Layouts repeat per supplier, and so do the exceptions: this one prefixes the
+number with `Ns. Rif.`, this one always bills in euro, this one writes the date
+the other way round. A general prompt cannot absorb all of that without getting
+worse at everything else, so the corrections live beside the supplier in Master
+Data and run in a `Supplier rules` step placed after the register lookup.
+
+They key on `id_subject`, never the supplier's name: several spellings of one
+supplier legitimately resolve to the same internal id, and the id is the thing
+that is either right or wrong. A document whose supplier was not identified gets
+no rules at all — inheriting somebody else's corrections is worse than applying
+none.
+
+Two kinds, deliberately separated. A fixed value or a pattern costs nothing,
+cannot hallucinate, and is what most supplier exceptions actually are. A
+prompted rule is one more model call, and separating them is what makes that
+call happen only when there is something to ask — and then about the named
+fields alone, so the rest of the extraction is left as it was.
+
+Whether the layer earns its cost is measurable the same way everything else is:
+a pipeline with the step and one without are two runs, and Lab compares them
+field by field.
 
 ## Working on it
 
