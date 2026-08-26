@@ -898,3 +898,28 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .connection-problem { display: flex; gap: 7px; align-items: flex-start; margin: 9px 0 0; padding: 8px 10px; border-radius: 8px; background: #fdecea; color: #9c3b2e; font-size: 9px; line-height: 1.5; }
 .connection-problem svg { flex: none; margin-top: 1px; }
 :root[data-theme="dark"] .connection-problem { background: #3a201c; color: #f0a89a; }
+
+/* --- comparing two runs --- */
+.diff-pick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 12px; }
+.diff-pick label { display: grid; gap: 4px; min-width: 210px; flex: 1 1 210px; }
+.diff-pick label > span { font-size: 8px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; }
+.diff-pick select { font-size: 9px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.diff-arrow { color: var(--muted); margin-bottom: 9px; flex: none; }
+
+.diff-totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin: 4px 0 12px; font-size: 9px; color: var(--muted); }
+.diff-total b { font-size: 12px; color: var(--ink); margin-right: 3px; font-variant-numeric: tabular-nums; }
+.diff-total.fixed b { color: #1d7a56; }
+.diff-total.broken b { color: #9c3b2e; }
+.diff-total.changed b { color: #9a5b1c; }
+.diff-net { margin-left: auto; font: 700 11px var(--font-mono), monospace; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); }
+.diff-net.good { color: #1d7a56; }
+.diff-net.poor { color: #9c3b2e; }
+
+.compare-expected { color: var(--muted); }
+.diff-tag { font: 600 8px var(--font-mono), monospace; text-transform: uppercase; letter-spacing: .05em; padding: 2px 6px; border-radius: 5px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.diff-tag.fixed { background: #e4f4ec; color: #1d7a56; }
+.diff-tag.broken { background: #fbe9e6; color: #9c3b2e; }
+.diff-tag.changed { background: #fbf1e2; color: #9a5b1c; }
+:root[data-theme="dark"] .diff-tag.fixed { background: #16362a; color: #6fd3a8; }
+:root[data-theme="dark"] .diff-tag.broken { background: #3a201c; color: #f0a89a; }
+:root[data-theme="dark"] .diff-tag.changed { background: #382c18; color: #e2b877; }

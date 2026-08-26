@@ -15,6 +15,7 @@ import {
 import { accuracyClass, percent } from "../lib/format";
 import type { Evaluation } from "../lib/types";
 import { InfoHint } from "./info-hint";
+import { RunDiffPanel } from "./run-diff-panel";
 
 type Props = {
   evaluations: Evaluation[];
@@ -61,6 +62,7 @@ export function Analytics({ evaluations, costOf }: Props) {
       <ParetoChart points={points} axis={axis} meta={meta} onAxis={setAxis} />
       <ApproachTable points={points} axis={axis} meta={meta} sort={sort} onSort={setSort} />
       <FieldChart fields={fields} approaches={points.length} />
+      <RunDiffPanel evaluations={evaluations} />
     </>
   );
 }
