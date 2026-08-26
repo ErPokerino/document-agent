@@ -112,6 +112,18 @@ never bound to anything, are gone — along with 145 MB of toolchain that every
 machine was installing to deploy an app that is served from disk beside a local
 backend.
 
+### Splitting main.py into routers
+
+Fifty-eight endpoints in one 1,750-line module. They are grouped by subject and
+the groups are now marked, so the file is navigable, but changing one endpoint
+still means loading all of it — which costs an agent its context and makes two
+people working in different areas collide in the same file.
+
+`APIRouter` per section, along the boundaries the markers already draw. Deferred
+rather than dismissed: it touches every endpoint at once, and this repository
+has more than one agent working in it, so it wants a moment when nothing else is
+in flight.
+
 ### Pipeline graph in the UI
 
 A drawn graph of the selected pipeline. Low value while pipelines are linear and

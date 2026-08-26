@@ -139,7 +139,7 @@ app/          React components; page.tsx is the shell and every section's host
 lib/          Frontend logic worth testing on its own, and generated types
 tests/        Node test runner, one file per lib module
 backend/app/
-  main.py         FastAPI endpoints
+  main.py         every FastAPI endpoint, in sections marked `# -- …`
   domain/         Pydantic models — the contract the frontend types come from
   pipeline/       Step definitions, the compiler, and the steps themselves
   services/       LM Studio, Gemini, Document AI, master data, supplier rules

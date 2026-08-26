@@ -320,6 +320,8 @@ def _busy_message() -> str:
     return "A model is currently loading or warming up. Wait until it is ready."
 
 
+# -- this machine, and the models on it -------------------------------------
+
 @app.get("/api/health", response_model=HealthStatus)
 async def health() -> HealthStatus:
     settings = settings_store.read()
@@ -445,6 +447,8 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
             model_runtime_states[request.model] = "error"
             raise
 
+
+# -- configuration: entities, prompts, the chosen model and pipeline --------
 
 @app.get("/api/settings", response_model=AppSettings)
 async def get_settings() -> AppSettings:
@@ -663,6 +667,8 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# -- extracting one document ------------------------------------------------
+
 @app.post("/api/documents/extract", response_model=ExtractionResponse)
 async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
     global active_document_task
@@ -846,6 +852,8 @@ def _gcp_status(settings: AppSettings) -> GcpKeyStatus:
     )
 
 
+# -- Google Cloud credentials, which live in a file rather than in settings -
+
 @app.get("/api/settings/gcp", response_model=GcpKeyStatus)
 async def gcp_key_status() -> GcpKeyStatus:
     """What the backend can say about the key file, and never its contents."""
@@ -897,6 +905,8 @@ def _blank_page_pdf() -> bytes:
     finally:
         document.close()
 
+
+# -- pipelines --------------------------------------------------------------
 
 @app.get("/api/pipelines/steps", response_model=list[StepCatalogueEntry])
 async def list_pipeline_steps() -> list[StepCatalogueEntry]:
@@ -984,6 +994,8 @@ async def delete_pipeline(name: str) -> Response:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)
 
+
+# -- the register, and the supplier rules that key on it --------------------
 
 @app.get("/api/master-data/tables", response_model=list[MasterDataTable])
 async def list_master_data_tables() -> list[MasterDataTable]:
@@ -1190,6 +1202,8 @@ async def delete_master_data_row(table_key: str, identifier: str) -> Response:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)
 
+
+# -- datasets and their ground truth ----------------------------------------
 
 @app.get("/api/datasets", response_model=list[Dataset])
 async def list_datasets() -> list[Dataset]:
@@ -1441,6 +1455,8 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
         )
 
 
+# -- recorded runs ----------------------------------------------------------
+
 @app.get("/api/runs", response_model=list[ExtractionRun])
 async def list_runs(limit: int = 50, validated_only: bool = False) -> list[ExtractionRun]:
     return [
@@ -1497,6 +1513,8 @@ async def record_corrections(run_id: int, request: CorrectionsRequest) -> Respon
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)
 
+
+# -- Lab: evaluations over a dataset ----------------------------------------
 
 @app.get("/api/evaluations", response_model=list[Evaluation])
 async def list_evaluations() -> list[Evaluation]:
