@@ -47,17 +47,50 @@ class LMStudioError(RuntimeError):
 INFERENCE_TIMEOUT_SECONDS = 600
 VISION_PREPARATION_TIMEOUT_SECONDS = 600
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-# What the CPU-safe profile looks like once applied. LM Studio's own default is
-# four parallel slots, so `parallel` tells our instance apart from one it loaded
-# on demand.
-SAFE_PROFILE_PARALLEL = 1
-SAFE_PROFILE_CONTEXT_LENGTH = 8192
+# Settings that affect the request shape and runtime are owned by DocuFlow, not
+# inherited from whichever values happen to be selected in LM Studio on one
+# workstation. The accelerator choice can still adapt to the host, but the
+# same model always gets the same context, batching and concurrency envelope.
+MODEL_PROFILE_PARALLEL = 1
+MODEL_PROFILE_CONTEXT_LENGTH = 8192
+MODEL_PROFILE_EVAL_BATCH_SIZE = 512
+MODEL_PROFILE_FLASH_ATTENTION = True
+MODEL_PROFILE_OFFLOAD_KV_CACHE = False
+MODEL_PROFILE_SEED = 0
+# The longest a single extracted value may be. A schema sent to LM Studio
+# becomes a grammar, and a grammar permitting an unbounded string permits one
+# forever: a model too small for the document cannot answer with invalid JSON,
+# so it stays inside an open value and repeats until the token budget or the
+# request timeout ends it — ten minutes a document, on this bench. Bounded, the
+# same model fails one field instantly and the run carries on. Set well above
+# any real invoice field, so it never truncates an answer that was going well.
+VALUE_CHARACTER_CEILING = 200
 # A large model on CPU often fails the first image and succeeds on the next:
 # qwen3.6-35b-a3b takes 95 seconds over a blank warm-up page and needed two
 # goes. Each attempt reloads the model, so they are not cheap — but reporting a
 # usable model as broken costs more.
 VISION_WARMUP_ATTEMPTS = 3
 VISION_WARMUP_SETTLE_SECONDS = 5
+
+
+def loaded_profile_matches(config: dict[str, Any], *, cpu_safe: bool) -> bool:
+    """Whether a loaded instance has the profile DocuFlow can apply to it.
+
+    The CLI used for CPU-safe placement exposes only context and parallelism.
+    Standard REST loads expose the complete set and are checked completely, so
+    a small model loaded from the LM Studio UI cannot be mistaken for ours.
+    """
+    common = (
+        config.get("parallel") == MODEL_PROFILE_PARALLEL
+        and config.get("context_length") == MODEL_PROFILE_CONTEXT_LENGTH
+    )
+    if not common or cpu_safe:
+        return common
+    return (
+        config.get("eval_batch_size") == MODEL_PROFILE_EVAL_BATCH_SIZE
+        and config.get("flash_attention") is MODEL_PROFILE_FLASH_ATTENTION
+        and config.get("offload_kv_cache_to_gpu") is MODEL_PROFILE_OFFLOAD_KV_CACHE
+    )
 
 
 def page_note(*, total_pages: int, processed_pages: int) -> str:
@@ -175,11 +208,16 @@ def requires_cpu_safe_profile(
     from its file and its parameter count. When the second exceeds the first,
     offloading is what loses the device mid-run.
 
-    An unreadable host, and a runtime with no accelerator at all, both answer
-    yes: offloading blind is the failure that costs a run, and holding a model
-    on the processor only costs speed.
+    An unreadable host answers yes: offloading blind is the failure that costs
+    a run. A host that was read and has no accelerator answers no, because its
+    standard REST load is already processor-only and, unlike the CLI path, can
+    apply the complete reproducible profile.
     """
-    budget = host.offload_budget_bytes if host else 0
+    if host is None:
+        return True
+    if not host.accelerators:
+        return False
+    budget = host.offload_budget_bytes
     if budget <= 0:
         return True
     # IQ codebook lookups are what first raised vk::Queue::submit:
@@ -303,6 +341,9 @@ class LMStudioClient:
                 quantization, item.get("size_bytes"), item.get("params_string"), host
             )
             parallel = loaded_config.get("parallel")
+            profile_matches = not loaded_instances or loaded_profile_matches(
+                loaded_config, cpu_safe=needs_safe
+            )
             models.append(
                 ModelInfo(
                     id=item["key"],
@@ -313,11 +354,7 @@ class LMStudioClient:
                     context_length=loaded_config.get("context_length"),
                     parallel=parallel,
                     requires_safe_profile=needs_safe,
-                    profile_matches=(
-                        not loaded_instances
-                        or not needs_safe
-                        or parallel == SAFE_PROFILE_PARALLEL
-                    ),
+                    profile_matches=profile_matches,
                     loaded=bool(loaded_instances),
                     vision=bool(capabilities.get("vision", False)),
                     capabilities_known=bool(capabilities_known),
@@ -356,7 +393,7 @@ class LMStudioClient:
             quantization, size_bytes, selected_item.get("params_string"),
             await self.host_capabilities(),
         )
-        profile = "compatibility" if large_model else "default"
+        profile = "compatibility" if large_model else "standard"
         # A model without vision has no projector to initialize, so the only
         # thing worth warming is the structured-output path.
         has_vision = has_vision and warm_vision
@@ -371,6 +408,10 @@ class LMStudioClient:
             warmup_mode = "vision_and_schema"
         selected_instances = selected_item.get("loaded_instances") or []
         already_loaded = bool(selected_instances)
+        loaded_config = (selected_instances[0].get("config") or {}) if selected_instances else {}
+        selected_profile_matches = bool(
+            selected_instances and loaded_profile_matches(loaded_config, cpu_safe=large_model)
+        )
 
         started = time.perf_counter()
         unloaded_models = 0
@@ -389,7 +430,7 @@ class LMStudioClient:
         # integrated GPU/shared RAM for 27B models. If the backend has not
         # already prepared the model, reload it with GPU layers disabled so
         # the Load action establishes a deterministic, safe runtime profile.
-        if large_model and already_loaded and not skip_warmup:
+        if already_loaded and not skip_warmup and not selected_profile_matches:
             for instance in selected_instances:
                 await self._post_json(
                     "/api/v1/models/unload",
@@ -413,20 +454,18 @@ class LMStudioClient:
                     # without the CLI the host cannot be surveyed either, so
                     # every model took this path and none could be loaded.
                     profile = "compatibility_partial"
+                # Do not delegate these values to LM Studio. Its UI defaults
+                # are local preferences, so doing so made the same 0.8B GGUF
+                # run with a different context and parallelism on another PC.
                 load_payload: dict[str, Any] = {
                     "model": model,
                     "echo_load_config": True,
+                    "context_length": MODEL_PROFILE_CONTEXT_LENGTH,
+                    "eval_batch_size": MODEL_PROFILE_EVAL_BATCH_SIZE,
+                    "flash_attention": MODEL_PROFILE_FLASH_ATTENTION,
+                    "offload_kv_cache_to_gpu": MODEL_PROFILE_OFFLOAD_KV_CACHE,
+                    "parallel": MODEL_PROFILE_PARALLEL,
                 }
-                if profile.startswith("compatibility"):
-                    load_payload.update(
-                        {
-                            "context_length": SAFE_PROFILE_CONTEXT_LENGTH,
-                            "eval_batch_size": 512,
-                            "flash_attention": True,
-                            "offload_kv_cache_to_gpu": False,
-                            "parallel": SAFE_PROFILE_PARALLEL,
-                        }
-                    )
                 try:
                     load_response = await self._post_json(
                         "/api/v1/models/load",
@@ -529,9 +568,9 @@ class LMStudioClient:
             "--gpu",
             "off",
             "--context-length",
-            str(SAFE_PROFILE_CONTEXT_LENGTH),
+            str(MODEL_PROFILE_CONTEXT_LENGTH),
             "--parallel",
-            str(SAFE_PROFILE_PARALLEL),
+            str(MODEL_PROFILE_PARALLEL),
             "--identifier",
             model,
             "-y",
@@ -735,6 +774,10 @@ class LMStudioClient:
                 },
             ],
             "temperature": 0,
+            # Temperature zero removes sampling in normal cases; a fixed seed
+            # also makes tie-breaking explicit instead of inheriting a runtime
+            # or machine-specific default.
+            "seed": MODEL_PROFILE_SEED,
             "max_tokens": 1,
             "stream": False,
         }
@@ -773,6 +816,7 @@ class LMStudioClient:
                 },
             },
             "temperature": 0,
+            "seed": MODEL_PROFILE_SEED,
             "max_tokens": self._output_token_budget(entities),
             "stream": False,
         }
@@ -850,6 +894,7 @@ class LMStudioClient:
                 },
             },
             "temperature": 0,
+            "seed": MODEL_PROFILE_SEED,
             # Keep a hard ceiling: grammar-constrained models can otherwise
             # remain inside an unfinished JSON structure for many minutes.
             "max_tokens": self._output_token_budget(entities),
@@ -873,9 +918,9 @@ class LMStudioClient:
                     # from an exhausted output budget. Fail with the real cause.
                     raise LMStudioError(
                         "The model reached its output token limit before finishing the JSON "
-                        "object, so the answer was cut off mid-value. The limit is on the "
-                        "answer, not the document: it is reached by the number and length of "
-                        "the entity names being written out."
+                        "object, so the answer was cut off mid-value. A model that cannot read "
+                        "a field does not answer wrongly and stop: the schema's grammar forbids "
+                        "invalid JSON, so it stays inside one value and keeps writing."
                     )
                 raw_content = choice["message"]["content"]
                 if not isinstance(raw_content, str) or not raw_content.strip():
@@ -995,7 +1040,9 @@ Return only JSON that conforms to the supplied schema.
             elif entity.format is EntityFormat.currency:
                 value_schema = {"type": "string", "pattern": "^[A-Z]{3}$"}
             else:
-                value_schema = {"type": "string"}
+                # Dates and currency codes are bounded by their own pattern
+                # above; free text is the only value that could run on.
+                value_schema = {"type": "string", "maxLength": VALUE_CHARACTER_CEILING}
             properties[entity.name] = {
                 "description": entity.description,
                 "anyOf": [value_schema, {"type": "null"}],

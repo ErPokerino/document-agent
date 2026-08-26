@@ -43,10 +43,10 @@ function json(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
-function upload(file: File): RequestInit {
+function upload(file: File, signal?: AbortSignal): RequestInit {
   const form = new FormData();
   form.append("file", file);
-  return { method: "POST", body: form };
+  return { method: "POST", body: form, signal };
 }
 
 const segment = encodeURIComponent;
@@ -83,7 +83,8 @@ export const api = {
   loadModel: (model: string) => request<ModelLoadResponse>("/api/models/load", json("POST", { model })),
   settings: () => request<AppSettings>("/api/settings"),
   saveSettings: (settings: AppSettings) => request<AppSettings>("/api/settings", json("PUT", settings)),
-  extract: (file: File) => request<ExtractionResponse>("/api/documents/extract", upload(file)),
+  extract: (file: File, signal?: AbortSignal) => request<ExtractionResponse>("/api/documents/extract", upload(file, signal)),
+  cancelExtraction: () => request<{ status: "cancelling" }>("/api/documents/extract/cancel", { method: "POST" }),
 
   previewPrompt: (prompts: PromptConfiguration, provider: AppSettings["provider"]) =>
     request<PromptPreview>("/api/prompts/preview", json("POST", { prompts, provider })),

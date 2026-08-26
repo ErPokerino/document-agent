@@ -62,6 +62,46 @@ def test_a_text_only_model_is_offered_in_the_list(api) -> None:
     }
 
 
+def test_a_unique_publisher_prefix_migrates_the_selected_model(tmp_path, monkeypatch) -> None:
+    settings = SettingsStore(tmp_path / "settings.json")
+    settings.write(AppSettings(model="qwen3.5-0.8b"))
+    monkeypatch.setattr(main, "settings_store", settings)
+
+    prefixed = ModelInfo(
+        id="lmstudio-community/qwen3.5-0.8b",
+        name="Qwen3.5 0.8B",
+    )
+
+    class PrefixedLMStudio(FakeLMStudio):
+        async def list_models(self, excluded_model_ids=None):
+            return [prefixed]
+
+    monkeypatch.setattr(main, "LMStudioClient", PrefixedLMStudio)
+    with TestClient(main.app) as client:
+        assert client.get("/api/models").status_code == 200
+
+    assert settings.read().model == "lmstudio-community/qwen3.5-0.8b"
+
+
+def test_an_ambiguous_basename_is_not_silently_migrated(tmp_path, monkeypatch) -> None:
+    settings = SettingsStore(tmp_path / "settings.json")
+    settings.write(AppSettings(model="shared"))
+    monkeypatch.setattr(main, "settings_store", settings)
+
+    class AmbiguousLMStudio(FakeLMStudio):
+        async def list_models(self, excluded_model_ids=None):
+            return [
+                ModelInfo(id="one/shared", name="One"),
+                ModelInfo(id="two/shared", name="Two"),
+            ]
+
+    monkeypatch.setattr(main, "LMStudioClient", AmbiguousLMStudio)
+    with TestClient(main.app) as client:
+        assert client.get("/api/models").status_code == 200
+
+    assert settings.read().model == "shared"
+
+
 def test_a_pipeline_that_sends_images_refuses_a_model_that_cannot_see(api) -> None:
     client, _ = api
     settings = client.get("/api/settings").json()

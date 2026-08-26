@@ -43,7 +43,7 @@ import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelR
 const profileLabels: Record<ModelLoadResponse["profile"], string> = {
   compatibility: "CPU-safe",
   compatibility_partial: "CPU-safe without GPU offload (no lms CLI here)",
-  default: "LM Studio default",
+  standard: "DocuFlow standard",
 };
 
 export const modelBadgeLabels: Record<ModelRuntimeState, string> = {
@@ -258,7 +258,7 @@ export function LanguageModels(props: Props) {
                 <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
                   {model.capabilities_known === false ? <><HelpCircle size={11} /> Capabilities unknown</> : model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
                 </span>
-                <span className="model-specs">{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
+                <span className="model-specs">{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.context_length && <em>{model.context_length.toLocaleString()} context</em>}{model.parallel && <em>{model.parallel} parallel</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
               </button>
             );
           })}
@@ -284,7 +284,9 @@ export function LanguageModels(props: Props) {
               <span>{failureReason
                 ? failureReason
                 : selectedRuntimeState === "profile_mismatch"
-                ? "Something loaded this model with LM Studio's defaults, which offload it to the GPU. Loading it here applies the profile that holds its layers on the processor."
+                ? selectedDraftModel.requires_safe_profile
+                  ? "This model is loaded with a different context or concurrency profile. Reloading applies DocuFlow's reproducible settings and keeps its layers on the processor for this host."
+                  : "This model is loaded with different context or concurrency settings. Reloading applies the same DocuFlow profile used on other PCs."
                 : selectedDraftModel.vision
                   ? "Loading and warm-up are timed separately from document processing, and the vision path is prepared here rather than inside the first document's timer."
                   : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images."}</span>
@@ -293,7 +295,7 @@ export function LanguageModels(props: Props) {
                 <small>{profileLabels[modelLoadReport.profile]} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
               )}
             </div>
-            <button className="model-load-button" disabled={!isConnected || selectedModelPreparing || selectedRuntimeState === "ready" || processState === "processing"} onClick={loadSelectedModel}>
+            <button className="model-load-button" disabled={!isConnected || selectedModelPreparing || selectedRuntimeState === "ready" || processState === "processing" || processState === "cancelling"} onClick={loadSelectedModel}>
               {selectedModelPreparing ? <><LoaderCircle className="spin" size={14} /> {selectedRuntimeState === "warming_up" ? "Warming up…" : "Loading…"}</> : selectedRuntimeState === "ready" ? <><Check size={14} /> Ready</> : <><Power size={14} /> {selectedRuntimeState === "profile_mismatch" ? "Reload safely" : selectedRuntimeState === "loaded" || selectedRuntimeState === "error" ? "Warm up" : "Load & warm up"}</>}
             </button>
           </div>

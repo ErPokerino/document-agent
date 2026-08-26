@@ -76,6 +76,9 @@ async def run_evaluation(
                 # The steps hold no per-document state, so one compiled
                 # pipeline serves the whole run.
                 result = await DocumentPipeline(steps).run(make_context(name, content))
+                if cancelled is not None and cancelled.is_set():
+                    evaluations.finish(evaluation_id, "cancelled")
+                    return
             except asyncio.CancelledError:
                 evaluations.finish(evaluation_id, "cancelled")
                 raise
@@ -135,7 +138,10 @@ async def run_evaluation(
                     steps=pipeline_steps or [],
                 )
 
-        evaluations.complete(evaluation_id)
+        if cancelled is not None and cancelled.is_set():
+            evaluations.finish(evaluation_id, "cancelled")
+        else:
+            evaluations.complete(evaluation_id)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - the run must never die silently

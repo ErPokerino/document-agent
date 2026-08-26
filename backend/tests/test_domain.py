@@ -331,7 +331,16 @@ async def test_already_loaded_target_is_not_reloaded(monkeypatch) -> None:
                 "key": "target",
                 "quantization": {"name": "Q4_K_M"},
                 "capabilities": {"vision": True},
-                "loaded_instances": [{"id": "target-instance"}],
+                "loaded_instances": [{
+                    "id": "target-instance",
+                    "config": {
+                        "parallel": 1,
+                        "context_length": 8192,
+                        "eval_batch_size": 512,
+                        "flash_attention": True,
+                        "offload_kv_cache_to_gpu": False,
+                    },
+                }],
             },
         ]
 
@@ -357,7 +366,7 @@ async def test_already_loaded_target_is_not_reloaded(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_standard_model_load_keeps_lm_studio_defaults(monkeypatch) -> None:
+async def test_standard_model_load_applies_docuflow_defaults(monkeypatch) -> None:
     client = LMStudioClient("http://localhost:1234")
     load_payload: dict = {}
 
@@ -387,8 +396,16 @@ async def test_standard_model_load_keeps_lm_studio_defaults(monkeypatch) -> None
 
     result = await client.load_and_warm_model("target")
 
-    assert load_payload == {"model": "target", "echo_load_config": True}
-    assert result["profile"] == "default"
+    assert load_payload == {
+        "model": "target",
+        "echo_load_config": True,
+        "context_length": 8192,
+        "eval_batch_size": 512,
+        "flash_attention": True,
+        "offload_kv_cache_to_gpu": False,
+        "parallel": 1,
+    }
+    assert result["profile"] == "standard"
     assert result["warmup_mode"] == "vision_and_schema"
 
 
@@ -587,6 +604,7 @@ class _TruncatedResponse:
 class _FakeAsyncClient:
     calls = 0
     payload: dict = {}
+    last_request: dict = {}
 
     def __init__(self, *args, **kwargs) -> None:
         pass
@@ -599,6 +617,7 @@ class _FakeAsyncClient:
 
     async def post(self, url, json=None):
         _FakeAsyncClient.calls += 1
+        _FakeAsyncClient.last_request = json or {}
         return _TruncatedResponse(_FakeAsyncClient.payload)
 
 
@@ -618,6 +637,7 @@ async def test_truncated_output_is_reported_as_an_output_limit(monkeypatch) -> N
 
     with pytest.raises(LMStudioError, match="output token limit"):
         await client._request_entities("model", [], default_entities())
+    assert _FakeAsyncClient.last_request["seed"] == 0
 
 
 @pytest.mark.asyncio

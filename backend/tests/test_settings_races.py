@@ -24,7 +24,7 @@ READY = {
     "warmup_ms": 1,
     "total_ms": 2,
     "unloaded_models": 0,
-    "profile": "default",
+    "profile": "standard",
     "already_loaded": False,
     "already_ready": False,
     "warmup_mode": "vision_and_schema",
@@ -83,3 +83,16 @@ def test_a_pipeline_chosen_during_a_load_survives_the_load(api) -> None:
     after = settings.read()
     assert after.pipeline == "OCR then model", "the load reverted a choice made while it ran"
     assert after.model == "second", "and it still recorded the model it loaded"
+
+
+def test_switching_from_ocr_to_images_requires_a_vision_warmup(api) -> None:
+    client, settings = api
+    settings.write(settings.read().model_copy(update={"pipeline": "OCR then model"}))
+    main.model_runtime_states["first"] = "ready"
+    main.model_warmup_modes["first"] = "schema"
+    payload = client.get("/api/settings").json()
+    payload["pipeline"] = "Vision extraction"
+
+    assert client.put("/api/settings", json=payload).status_code == 200
+
+    assert main.model_runtime_states["first"] == "loaded"

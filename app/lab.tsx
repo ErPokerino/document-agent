@@ -34,13 +34,10 @@ import { RunFiltersBar } from "./run-filters-bar";
 import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
+import { labRunTarget } from "../lib/lab-target";
 import {
-  distinctDatasets,
-  distinctModels,
-  distinctPipelines,
   emptyFilters,
   filterEvaluations,
-  hasActiveFilters,
   type EvaluationFilters,
 } from "../lib/run-filters";
 import { runsToCsv } from "../lib/runs-csv";
@@ -59,14 +56,14 @@ import type {
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
 
 type Props = {
-  draftSettings: AppSettings;
+  settings: AppSettings;
   isModelReady: boolean;
   activeModel: ModelInfo | undefined;
   pipelineKinds: string[];
 };
 
 /** Run the configured extraction over a dataset and score what comes back. */
-export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }: Props) {
+export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
@@ -89,7 +86,8 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
   // Reads this machine's own history rather than assuming a cost, so it
   // still tells the truth on a machine this one knows nothing about.
-  const runNote = runWarning(activeModel, pipelineKinds, evaluations, draftSettings.pipeline);
+  const runTarget = labRunTarget(settings, activeModel);
+  const runNote = runWarning(activeModel, pipelineKinds, evaluations, runTarget.pipeline);
   const visibleEvaluations = sortEvaluations(
     filterEvaluations(evaluations, filters),
     sort.key,
@@ -105,14 +103,14 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
         ocrPages: evaluation.ocr_pages,
         layoutPages: evaluation.layout_pages,
       },
-      draftSettings.gemini.pricing[evaluation.model],
-      draftSettings.gcp,
+      settings.gemini.pricing[evaluation.model],
+      settings.gcp,
     );
   }
 
   /** What you exported is what you were looking at: same rows, same order. */
   function downloadRunsCsv() {
-    const csv = runsToCsv(visibleEvaluations, draftSettings, excluded);
+    const csv = runsToCsv(visibleEvaluations, settings, excluded);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
@@ -224,8 +222,8 @@ export function Lab({ draftSettings, isModelReady, activeModel, pipelineKinds }:
         </div>
 
         <div className="run-target">
-          <span><Workflow size={13} /> Pipeline <strong>{draftSettings.pipeline}</strong></span>
-          <span><Cpu size={13} /> Model <strong>{draftSettings.model}</strong></span>
+          <span><Workflow size={13} /> Pipeline <strong>{runTarget.pipeline}</strong></span>
+          <span><Cpu size={13} /> Model <strong>{runTarget.modelName}</strong></span>
           <InfoHint text="A run always uses the pipeline and model selected right now, and records both, so two runs can be compared afterwards." />
         </div>
 

@@ -112,6 +112,7 @@ pipeline_store.seed_default()
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
 active_model_operation: str | None = None
+active_document_task: asyncio.Task[Any] | None = None
 evaluation_task: asyncio.Task | None = None
 evaluation_cancelled: asyncio.Event | None = None
 
@@ -155,9 +156,10 @@ def _models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
         if tracked in {"loading", "warming_up", "error"}:
             runtime_state = tracked
         elif model.loaded and not model.profile_matches:
-            # Something loaded this model with LM Studio's defaults, which put it
-            # on the integrated GPU. Requests to it lose the Vulkan device, so it
-            # must be reloaded before it can be called ready.
+            # Something loaded this model with another context/concurrency
+            # profile. Large models may also need the host-specific CPU-safe
+            # path, but even a small model is reloaded so two PCs do not silently
+            # run different settings.
             runtime_state = "profile_mismatch"
         elif tracked == "ready" and model.loaded:
             runtime_state = "ready"
@@ -192,6 +194,22 @@ def _hosted_models(settings: AppSettings) -> list[ModelInfo]:
     ]
 
 
+def _unique_model_alias(model_id: str, available: list[ModelInfo]) -> ModelInfo | None:
+    """Resolve the same installed model across LM Studio key formats.
+
+    Some releases report `qwen3.5-0.8b`, others prefix the publisher and report
+    `lmstudio-community/qwen3.5-0.8b`. Exact ids always win. A suffix is adopted
+    only when it is unique, so two publishers shipping a model with the same
+    basename are never silently conflated.
+    """
+    exact = next((model for model in available if model.id == model_id), None)
+    if exact is not None:
+        return exact
+    leaf = model_id.rsplit("/", 1)[-1].casefold()
+    matches = [model for model in available if model.id.rsplit("/", 1)[-1].casefold() == leaf]
+    return matches[0] if len(matches) == 1 else None
+
+
 async def _ensure_model_ready(settings: AppSettings) -> None:
     """Raise unless the configured model can answer right now.
 
@@ -220,12 +238,17 @@ async def _ensure_model_ready(settings: AppSettings) -> None:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     selected = next((model for model in available if model.id == settings.model), None)
     if selected is not None and selected.loaded and not selected.profile_matches:
+        profile_detail = (
+            "The CPU-safe profile also holds this model's layers on the processor. "
+            if selected.requires_safe_profile
+            else ""
+        )
         raise HTTPException(
             status_code=409,
             detail=(
-                f"{settings.model} is loaded with LM Studio's default profile, which offloads "
-                "it to the GPU. The CPU-safe profile, which holds its layers on the processor, "
-                "is applied by Load & warm up in LLM."
+                f"{settings.model} is loaded with context or concurrency settings that do not "
+                "match DocuFlow's reproducible profile. "
+                f"{profile_detail}Use Load & warm up in LLM to reload it consistently."
             ),
         )
     if selected is None or not selected.loaded or model_runtime_states.get(settings.model) != "ready":
@@ -309,6 +332,14 @@ async def models() -> list[ModelInfo]:
         if not hosted:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return hosted
+    resolved = _unique_model_alias(settings.model, discovered)
+    if settings.provider == "lm_studio" and resolved is not None and resolved.id != settings.model:
+        # Discovery awaited the network. Re-read before writing so a prompt or
+        # pipeline saved in the meantime is never replaced by this migration's
+        # stale snapshot.
+        latest = settings_store.read()
+        if latest.provider == "lm_studio" and latest.model == settings.model:
+            settings_store.write(latest.model_copy(update={"model": resolved.id}))
     return [*_models_with_runtime_state(discovered), *hosted]
 
 
@@ -532,6 +563,15 @@ async def update_settings(settings: AppSettings) -> AppSettings:
         and model_warmup_modes.get(saved.model) == "vision_and_schema"
     ):
         model_runtime_states[saved.model] = "loaded"
+    if (
+        requires_vision(chosen_pipeline)
+        and model_runtime_states.get(saved.model) == "ready"
+        and model_warmup_modes.get(saved.model) == "schema"
+    ):
+        # A model prepared behind OCR has never seen an image. Switching to a
+        # vision pipeline must expose Warm up instead of charging projector
+        # startup (or its failure) to the first document.
+        model_runtime_states[saved.model] = "loaded"
     return _masked(saved)
 
 
@@ -566,6 +606,8 @@ def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
 
 @app.post("/api/documents/extract", response_model=ExtractionResponse)
 async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
+    global active_document_task
+
     if file.content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(status_code=415, detail="A PDF document is required")
 
@@ -579,51 +621,69 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
 
     settings = settings_store.read()
     async with exclusive_model_operation("processing"):
-        await _ensure_model_ready(settings)
-        context = _pipeline_context(settings, file.filename or "invoice.pdf", content)
-        pipeline = _document_pipeline(settings)
-        started = time.perf_counter()
+        active_document_task = asyncio.current_task()
         try:
-            result = await pipeline.run(context)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except (LMStudioError, GeminiError) as exc:
-            if "terminated" in str(exc).lower() or "device was lost" in str(exc).lower():
-                model_runtime_states[settings.model] = "error"
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            await _ensure_model_ready(settings)
+            context = _pipeline_context(settings, file.filename or "invoice.pdf", content)
+            pipeline = _document_pipeline(settings)
+            started = time.perf_counter()
+            try:
+                result = await pipeline.run(context)
+            except asyncio.CancelledError:
+                # Cancelling the task closes an in-flight httpx request. LM
+                # Studio sees the disconnect and stops generation; no later
+                # pipeline step is allowed to run.
+                raise HTTPException(status_code=499, detail="Document processing was cancelled")
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except (LMStudioError, GeminiError) as exc:
+                if "terminated" in str(exc).lower() or "device was lost" in str(exc).lower():
+                    model_runtime_states[settings.model] = "error"
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        run_id = run_store.record_run(
-            filename=context.filename,
-            content=content,
-            model=context.model,
-            prompts=settings.prompts,
-            extraction=result.artifacts["extraction"],
-            page_count=result.artifacts["page_count"],
-            processed_pages=result.artifacts["processed_pages"],
-            elapsed_ms=round((time.perf_counter() - started) * 1000),
-            source="workspace",
-            provider=settings.provider,
-            pipeline=settings.pipeline,
-            steps=[step.kind.value for step in _selected_pipeline(settings).steps],
-        )
-
-        return ExtractionResponse(
-            run_id=run_id,
-            filename=context.filename,
-            model=context.model,
-            elapsed_ms=round((time.perf_counter() - started) * 1000),
-            data=result.artifacts["extraction"],
-            processing=ProcessingInfo(
+            run_id = run_store.record_run(
+                filename=context.filename,
+                content=content,
+                model=context.model,
+                prompts=settings.prompts,
+                extraction=result.artifacts["extraction"],
                 page_count=result.artifacts["page_count"],
                 processed_pages=result.artifacts["processed_pages"],
-                first_processed_page=result.artifacts["first_processed_page"],
-                last_processed_page=result.artifacts["last_processed_page"],
-                cut_applied=result.artifacts["cut_applied"],
-                single_call_page_limit=result.artifacts["page_limit"],
-                configured_page_limit=result.artifacts["configured_page_limit"],
-                **result.artifacts.get("inference_stats", {}),
-            ),
-        )
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+                source="workspace",
+                provider=settings.provider,
+                pipeline=settings.pipeline,
+                steps=[step.kind.value for step in _selected_pipeline(settings).steps],
+            )
+
+            return ExtractionResponse(
+                run_id=run_id,
+                filename=context.filename,
+                model=context.model,
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+                data=result.artifacts["extraction"],
+                processing=ProcessingInfo(
+                    page_count=result.artifacts["page_count"],
+                    processed_pages=result.artifacts["processed_pages"],
+                    first_processed_page=result.artifacts["first_processed_page"],
+                    last_processed_page=result.artifacts["last_processed_page"],
+                    cut_applied=result.artifacts["cut_applied"],
+                    single_call_page_limit=result.artifacts["page_limit"],
+                    configured_page_limit=result.artifacts["configured_page_limit"],
+                    **result.artifacts.get("inference_stats", {}),
+                ),
+            )
+        finally:
+            active_document_task = None
+
+
+@app.post("/api/documents/extract/cancel", status_code=202)
+async def cancel_document_extraction() -> dict[str, str]:
+    task = active_document_task
+    if active_model_operation != "processing" or task is None or task.done():
+        raise HTTPException(status_code=409, detail="No document is currently being processed.")
+    task.cancel()
+    return {"status": "cancelling"}
 
 
 # --- datasets, master data and evaluation runs -------------------------------------------------------------
@@ -1527,7 +1587,11 @@ async def cancel_evaluation(evaluation_id: int) -> Evaluation:
     if detail.status != "running":
         raise HTTPException(status_code=409, detail="That evaluation is not running.")
     if evaluation_cancelled is not None:
-        # Stops after the document in flight: killing a request mid-inference
-        # leaves LM Studio busy with work nobody is waiting for.
         evaluation_cancelled.set()
+    # The event is inspected at document boundaries. Cancelling the task as
+    # well propagates into the provider request, so a slow document does not
+    # keep running for minutes after the user pressed Cancel.
+    evaluation_store.finish(evaluation_id, "cancelled")
+    if evaluation_task is not None and not evaluation_task.done():
+        evaluation_task.cancel()
     return _evaluation_model(evaluation_store.get_evaluation(evaluation_id))

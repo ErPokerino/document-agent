@@ -45,7 +45,7 @@ class FakeClient:
             "warmup_ms": 1,
             "total_ms": 2,
             "unloaded_models": 0,
-            "profile": "default",
+            "profile": "standard",
             "already_loaded": False,
             "already_ready": False,
             "warmup_mode": "vision_and_schema",

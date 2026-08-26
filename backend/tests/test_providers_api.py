@@ -292,7 +292,8 @@ def test_a_model_loaded_with_the_wrong_profile_is_refused_and_told_why(api, monk
     # Names the control that governs the profile, since the 409 blocks the run
     # until it is used. It does not predict what the GPU would have done.
     assert "Load & warm up" in detail
-    assert "offloads" in detail
+    assert "context or concurrency" in detail
+    assert "processor" in detail
 
 
 def test_a_mismatched_model_is_never_reported_as_ready(api, monkeypatch) -> None:

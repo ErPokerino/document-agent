@@ -147,9 +147,9 @@ def test_a_workstation_offloads_what_its_card_can_hold() -> None:
     assert decisions["qwen3.5-0.8b"] is False
 
 
-def test_a_runtime_with_no_accelerator_keeps_everything_on_the_processor() -> None:
+def test_a_runtime_with_no_accelerator_needs_no_cpu_safe_override() -> None:
     for name, size, params, quant, _ in CATALOGUE:
-        assert requires_cpu_safe_profile(quant, size, params, CPU_ONLY) is True, name
+        assert requires_cpu_safe_profile(quant, size, params, CPU_ONLY) is False, name
 
 
 def test_an_iq_quant_is_only_held_back_where_it_was_seen_to_fail() -> None:

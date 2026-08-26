@@ -28,10 +28,28 @@ export function resolveBootstrap(
     PromiseSettledResult<ModelInfo[]>,
   ],
 ): BootstrapResult {
+  const loadedSettings = valueOrNull(settings);
+  const loadedModels = valueOrNull(models) ?? [];
+  let reconciledSettings = loadedSettings;
+  if (loadedSettings?.model && loadedSettings.provider !== "gemini") {
+    const exact = loadedModels.find((model) => model.id === loadedSettings.model);
+    const leaf = loadedSettings.model.split("/").at(-1)?.toLocaleLowerCase();
+    const aliases = exact
+      ? []
+      : loadedModels.filter(
+          (model) => model.provider !== "gemini" && model.id.split("/").at(-1)?.toLocaleLowerCase() === leaf,
+        );
+    const resolved = exact ?? (aliases.length === 1 ? aliases[0] : null);
+    if (resolved && resolved.id !== loadedSettings.model) {
+      // The models request also persists this migration on the backend. This
+      // copy prevents the first paint from waiting for the next 10 s refresh.
+      reconciledSettings = { ...loadedSettings, model: resolved.id };
+    }
+  }
   return {
     health: valueOrNull(health),
-    settings: valueOrNull(settings),
-    models: valueOrNull(models) ?? [],
+    settings: reconciledSettings,
+    models: loadedModels,
     error:
       settings.status === "rejected"
         ? `Settings could not be loaded: ${reasonMessage(settings.reason)}`

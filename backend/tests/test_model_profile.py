@@ -111,11 +111,34 @@ async def test_a_model_loaded_by_us_matches_the_profile(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_model_that_needs_no_special_profile_always_matches(monkeypatch) -> None:
+async def test_a_small_model_loaded_with_other_defaults_is_still_a_mismatch(monkeypatch) -> None:
     client = LMStudioClient("http://localhost:1234")
 
     async def fake_items():
         return [item("qwen3.5-0.8b", "Q8_0", 0.95, loaded(parallel=4))]
+
+    monkeypatch.setattr(client, "_fetch_model_items", fake_items)
+
+    model = (await client.list_vision_models())[0]
+
+    assert model.requires_safe_profile is False
+    assert model.profile_matches is False
+
+
+@pytest.mark.asyncio
+async def test_a_small_model_matches_only_the_complete_docuflow_profile(monkeypatch) -> None:
+    client = LMStudioClient("http://localhost:1234")
+
+    async def fake_items():
+        configured = loaded(parallel=1)[0]
+        configured["config"].update(
+            {
+                "eval_batch_size": 512,
+                "flash_attention": True,
+                "offload_kv_cache_to_gpu": False,
+            }
+        )
+        return [item("qwen3.5-0.8b", "Q8_0", 0.95, [configured])]
 
     monkeypatch.setattr(client, "_fetch_model_items", fake_items)
 

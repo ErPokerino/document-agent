@@ -11,6 +11,11 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 - persistent model and pipeline selection;
 - automatic discovery and periodic refresh of installed models, vision or text-only;
 - explicit single-model `Load & warm up` phase with separate load and warm-up timing;
+- a reproducible local-model profile (8,192 context, one parallel request,
+  fixed evaluation settings and seed) rather than LM Studio UI defaults that
+  vary from one PC to another;
+- immediate cancellation of a Workspace extraction or Lab run, including the
+  document currently waiting on the model;
 - composable pipelines: page rendering, Document AI OCR and Layout Parser, the model call, per-field regex rules and master-data lookup, with a per-pipeline page limit;
 - editable system, extraction and confidence prompts;
 - configurable entities with name, format and description, each either read from the document or derived by a pipeline step;
@@ -110,9 +115,23 @@ DocumentPipeline
 
 ## Model lifecycle and timing
 
-The LLM section's flow is `select → Load & warm up → process`. DocuFlow unloads other models before loading the selected one, uses an 8,192-token context and runs a minimal warm-up — with an image only when the selected pipeline actually sends images, since some models answer text and kill the runtime on any image.
+The LLM section's flow is `select → Load & warm up → process`. DocuFlow unloads other models before loading the selected one and applies its own standard profile: an 8,192-token context, one parallel request, batch size 512, Flash Attention enabled, KV cache in system memory and a fixed inference seed. Those values are sent explicitly even for small models; otherwise LM Studio inherits preferences from its UI and the same GGUF can behave differently on two PCs. The warm-up is minimal, with an image only when the selected pipeline actually sends images, since some models answer text and kill the runtime on any image.
 
-Whether a model is offloaded to the accelerator is decided from the machine, not from a threshold in the code. `lms runtime survey` reports the accelerator available to the runtime LM Studio currently has selected; an integrated adapter is budgeted well below the figure it advertises, because that figure is a slice of system RAM a single allocation cannot rely on. What a model needs is the larger of its file and what its parameter count implies — `bonsai-27b` is 27B in a 4.4 GB Q1_0 file, and the runtime allocates for the parameters, not the file. When the second exceeds the first, the model is loaded through the LM Studio CLI with offload disabled, an 8,192-token context and one parallel request.
+Every free-text value in the schema carries a length ceiling. The schema becomes a grammar, and a grammar that permits an unbounded string permits one forever: a model too small for the document cannot answer with invalid JSON, so it stays inside an open value and repeats until the token budget or the request timeout ends it. Bounded, the same model fails one field in seconds and the run carries on — which is what makes the app's behaviour a property of the app rather than of whichever model the host happens to have.
+
+Whether a model's layers are offloaded to the accelerator is still decided from the machine: forcing the same GPU placement on unlike hardware would make the profile consistently fail rather than consistently behave. `lms runtime survey` reports the accelerator available to the runtime LM Studio currently has selected; an integrated adapter is budgeted well below the figure it advertises, because that figure is a slice of system RAM a single allocation cannot rely on. What a model needs is the larger of its file and what its parameter count implies — `bonsai-27b` is 27B in a 4.4 GB Q1_0 file, and the runtime allocates for the parameters, not the file. When the second exceeds the first, the model is loaded through the LM Studio CLI with offload disabled while retaining the common context and concurrency envelope. A runtime that explicitly reports no accelerator uses the standard REST profile: it is already processor-only, while the REST endpoint can apply settings the CLI does not expose. An unreadable host remains the conservative case.
+
+LM Studio model keys are not stable across all releases: the same installation
+may be reported as `qwen3.5-0.8b` or
+`lmstudio-community/qwen3.5-0.8b`. DocuFlow migrates such a key only when its
+basename identifies exactly one installed model. Ambiguous matches are left for
+the user to choose.
+
+Cancel is cooperative at the pipeline boundary and immediate at awaited provider
+calls. The backend cancels the task in flight, which closes the HTTP request to
+LM Studio, Gemini or Document AI, and does not execute later steps. A short
+synchronous operation already running inside a local step may finish before the
+task reaches its next cancellation point; its result is discarded.
 
 The LLM section reports the accelerator found and the budget derived from it, which is how you check what the app concluded about a machine it has never run on. A machine it cannot read loads conservatively: offloading blind is what ends a run mid-way.
 

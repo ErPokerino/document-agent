@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Square,
   Trash2,
   UploadCloud,
   Workflow,
@@ -76,7 +77,7 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   settings: { eyebrow: "Preferences", title: "Settings" },
 };
 
-type ProcessState = "idle" | "ready" | "processing" | "complete" | "error";
+type ProcessState = "idle" | "ready" | "processing" | "cancelling" | "complete" | "error";
 
 const formatLabels: Record<EntityFormat, string> = {
   text: "Text",
@@ -125,6 +126,8 @@ export default function Home() {
   const [verifying, setVerifying] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const extractionControllerRef = useRef<AbortController | null>(null);
+  const extractionCancelledRef = useRef(false);
 
   useEffect(() => {
     async function bootstrap() {
@@ -262,8 +265,12 @@ export default function Home() {
     setResult(null);
     setEditableValues({});
     setEditedFields(new Set());
+    extractionCancelledRef.current = false;
+    const controller = new AbortController();
+    extractionControllerRef.current = controller;
     try {
-      const extraction = await api.extract(file);
+      const extraction = await api.extract(file, controller.signal);
+      if (extractionCancelledRef.current) return;
       setResult(extraction);
       setEditableValues(
         Object.fromEntries(
@@ -275,8 +282,33 @@ export default function Home() {
       );
       setProcessState("complete");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Processing failed");
-      setProcessState("error");
+      if (extractionCancelledRef.current || controller.signal.aborted) {
+        setProcessState("ready");
+      } else {
+        setError(requestError instanceof Error ? requestError.message : "Processing failed");
+        setProcessState("error");
+      }
+    } finally {
+      if (extractionControllerRef.current === controller) extractionControllerRef.current = null;
+    }
+  }
+
+  async function cancelDocumentProcessing() {
+    extractionCancelledRef.current = true;
+    setProcessState("cancelling");
+    setError(null);
+    try {
+      await api.cancelExtraction();
+    } catch (requestError) {
+      // A request may finish in the instant between the click and the cancel
+      // endpoint. In that case the extraction promise remains authoritative.
+      if (!(requestError instanceof Error && requestError.message.includes("No document"))) {
+        setError(requestError instanceof Error ? requestError.message : "Cancellation failed");
+      }
+    } finally {
+      extractionControllerRef.current?.abort();
+      extractionControllerRef.current = null;
+      setProcessState("ready");
     }
   }
 
@@ -447,14 +479,14 @@ export default function Home() {
     : 0;
 
   const extractionPanel = (
-    <section className={`schema-panel review-schema ${processState === "processing" ? "processing" : ""}`}>
+    <section className={`schema-panel review-schema ${processState === "processing" || processState === "cancelling" ? "processing" : ""}`}>
       <div className="panel-heading">
         <div><h2>Extracted data</h2></div>
         <span className={`result-badge ${unresolvedWarningCount ? "warning" : processState}`}>
-          {processState === "processing" && <LoaderCircle className="spin" size={10} />}
+          {(processState === "processing" || processState === "cancelling") && <LoaderCircle className="spin" size={10} />}
           {processState === "complete" && unresolvedWarningCount === 0 && <Check size={10} />}
           {unresolvedWarningCount > 0 && <AlertCircle size={10} />}
-          {unresolvedWarningCount > 0 ? "Review needed" : processState === "complete" ? "Complete" : processState === "processing" ? "Processing" : "Waiting"}
+          {unresolvedWarningCount > 0 ? "Review needed" : processState === "complete" ? "Complete" : processState === "cancelling" ? "Stopping" : processState === "processing" ? "Processing" : "Waiting"}
         </span>
       </div>
 
@@ -647,14 +679,18 @@ export default function Home() {
                   </div>
                   <div className={`session-privacy ${usingHostedModel ? "hosted" : ""}`}>{usingHostedModel ? <Cloud size={15} /> : <ShieldCheck size={15} />}<span>{usingHostedModel ? "Sent to Google" : "Processed locally"}</span></div>
                   <div className="session-actions">
-                    {processState === "complete" ? (
+                    {processState === "processing" || processState === "cancelling" ? (
+                      <button className="secondary-button session-process danger" disabled={processState === "cancelling"} onClick={cancelDocumentProcessing}>
+                        {processState === "cancelling" ? <><LoaderCircle className="spin" size={15} /> Stopping…</> : <><Square size={14} /> Cancel</>}
+                      </button>
+                    ) : processState === "complete" ? (
                       <button className="secondary-button session-process" disabled={!isModelReady} onClick={processDocument}><RotateCcw size={15} /> Process again</button>
                     ) : (
-                      <button className="primary-button session-process" disabled={processState === "processing" || !isConnected || !isModelReady} onClick={processDocument}>
-                        {processState === "processing" ? <><LoaderCircle className="spin" size={16} /> Processing…</> : <><Sparkles size={16} /> Analyze invoice</>}
+                      <button className="primary-button session-process" disabled={!isConnected || !isModelReady} onClick={processDocument}>
+                        <><Sparkles size={16} /> Analyze invoice</>
                       </button>
                     )}
-                    <button className="icon-button" onClick={resetDocument} aria-label="Remove document"><Trash2 size={16} /></button>
+                    <button className="icon-button" disabled={processState === "processing" || processState === "cancelling"} onClick={resetDocument} aria-label="Remove document"><Trash2 size={16} /></button>
                   </div>
                   {!isConnected && <small className="session-warning">Start LM Studio to process this document</small>}
                   {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("llm")}>Prepare the active model in LLM before processing</button>}
@@ -694,7 +730,7 @@ export default function Home() {
               <div className={`pipeline-step ${result ? "done" : ""}`}><b>{result ? <Check size={10} /> : pipelineShape.length + 3}</b> JSON validation</div>
             </footer>
           </>
-        ) : !draftSettings ? (
+        ) : !settings || !draftSettings ? (
           <section className="settings-layout wide">
             <div className="settings-intro">
               <SlidersHorizontal size={19} />
@@ -738,7 +774,7 @@ export default function Home() {
           <Datasets savedEntities={configuredEntities} isModelReady={isModelReady} />
         ) : view === "lab" ? (
           <Lab
-            draftSettings={draftSettings}
+            settings={settings}
             isModelReady={isModelReady}
             activeModel={activeModel}
             pipelineKinds={pipelineKinds}

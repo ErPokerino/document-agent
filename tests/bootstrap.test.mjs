@@ -25,6 +25,27 @@ test("a successful bootstrap exposes every value and no error", () => {
   assert.equal(result.error, null);
 });
 
+test("a unique publisher prefix is reflected on the first paint", () => {
+  const legacy = { ...settings, provider: "lm_studio", model: "qwen3.5-0.8b" };
+  const discovered = [{ id: "lmstudio-community/qwen3.5-0.8b", name: "Qwen3.5 0.8B" }];
+
+  const result = resolveBootstrap([fulfilled(health), fulfilled(legacy), fulfilled(discovered)]);
+
+  assert.equal(result.settings.model, "lmstudio-community/qwen3.5-0.8b");
+});
+
+test("an ambiguous model basename is left for a person to choose", () => {
+  const legacy = { ...settings, provider: "lm_studio", model: "shared" };
+  const discovered = [
+    { id: "one/shared", name: "One" },
+    { id: "two/shared", name: "Two" },
+  ];
+
+  const result = resolveBootstrap([fulfilled(health), fulfilled(legacy), fulfilled(discovered)]);
+
+  assert.equal(result.settings.model, "shared");
+});
+
 test("a failed settings load is surfaced instead of being swallowed", () => {
   const result = resolveBootstrap([
     fulfilled(health),
