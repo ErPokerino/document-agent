@@ -12,22 +12,59 @@ Nothing outstanding. The items below are decided and deliberately waiting.
 
 ## Later
 
-### Auto-validation by nearest neighbour
+### Several methods per field, and a strategy that picks
 
-Deciding which documents can pass without a person. The approach in use on a
-real project the author works on, and the one to adopt here:
+The largest architectural idea on this list, and the one that reshapes
+everything else.
+
+Today a field gets its value from exactly one place: the model, or a regex, or
+a register lookup, whichever step in the pipeline wrote it last. On the real
+project this is modelled on, an entity can be recognised by **several methods at
+once** — a Document AI parser, a nearest-neighbour prediction, a model, a rule —
+each producing a candidate with its own confidence. A **strategy** then chooses
+the final value: by priority between methods, or by comparing the confidences,
+or both.
+
+That is a different shape from the current pipeline, and a better one. A step
+today overwrites; a method would *propose*. What it buys:
+
+- a field can be recognised by whatever actually works for it, without one
+  method having to win everywhere;
+- the strategy becomes the place where "which source do we trust for this
+  field" is stated once, rather than being implicit in step order;
+- every method's candidate is recorded, so it can be measured — which method
+  was right, how often, per field. That is the same question Lab already asks
+  about whole approaches, asked one level down.
+
+The pipeline vocabulary would need candidates alongside values: a step writes
+into a field's candidate list rather than over its value, and one final step
+resolves them. Existing steps become single-candidate methods, so nothing has
+to change at once.
+
+### Nearest neighbour as one of those methods
+
+Not only for deciding what can pass without a person. On the real project it
+predicts **categorical fields** generally — `id_subject`, `currency`, and others
+this POC does not have yet.
+
+The mechanism:
 
 1. embed the document text as a TF-IDF vector;
 2. find the nearest already-processed document by cosine similarity;
-3. if that neighbour could have been auto-validated — it was extracted
-   correctly — auto-validate the new one; otherwise send it to human review.
+3. take that neighbour's categorical fields as the prediction for the new one.
 
-A KNN over TF-IDF embeddings, and it works well in practice. Preferred over a
-threshold on model-stated confidence, which is not calibrated: whether *high*
-means high depends on the model.
+A KNN over TF-IDF embeddings, and it works well in practice. The same neighbour
+also answers the auto-validation question — if it was extracted correctly, the
+new document can pass without a person; if not, it goes to review — but that is
+one use of the prediction rather than the point of it.
+
+Preferred over a threshold on model-stated confidence, which is not calibrated:
+whether *high* means high depends on the model.
 
 Postponed until there is enough processed history for a neighbour search to
-mean anything.
+mean anything, and best built after the multi-method shape above, since it is a
+method rather than a step.
+
 
 ### Document types and flows
 

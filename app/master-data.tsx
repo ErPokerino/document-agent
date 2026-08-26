@@ -35,6 +35,9 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
   // Which supplier's rules are open. One at a time: they are a detail of a
   // row, not a second table beside it.
   const [openRules, setOpenRules] = useState<string | null>(null);
+  // A rule is invisible until someone opens the row it belongs to, so the
+  // count is shown on the row itself.
+  const [ruleCounts, setRuleCounts] = useState<Record<string, number>>({});
   const [imported, setImported] = useState<{ table: string; report: MasterDataImport } | null>(null);
   // One hidden input per table, since each imports into its own.
   const importInputs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -65,6 +68,19 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
         setTableKey((current) => current || found[0]?.key || "");
       })
       .catch((cause) => setError(String(cause)));
+  }, []);
+
+  useEffect(() => {
+    void api
+      .supplierRules()
+      .then((rules) => {
+        const counted: Record<string, number> = {};
+        for (const rule of rules) {
+          counted[rule.id_subject] = (counted[rule.id_subject] ?? 0) + 1;
+        }
+        setRuleCounts(counted);
+      })
+      .catch(() => undefined);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -418,13 +434,14 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
                             {table.key === "suppliers" && (
                               <button
                                 type="button"
-                                className={`icon-button ${openRules === identifier ? "neutral" : ""}`}
+                                className={`secondary-button small ${openRules === identifier ? "" : "ghost"}`}
                                 aria-label={`Rules for ${identifier}`}
                                 aria-expanded={openRules === identifier}
-                                title="Rules for this supplier's documents"
+                                title="Corrections applied to this supplier's documents"
                                 onClick={() => setOpenRules(openRules === identifier ? null : identifier)}
                               >
-                                <Wand2 size={14} />
+                                <Wand2 size={13} /> Rules
+                                {ruleCounts[identifier] > 0 && <em className="rule-count">{ruleCounts[identifier]}</em>}
                               </button>
                             )}
                             <button
@@ -462,6 +479,9 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
                             supplierName={String(row[table.match_column || "name"] ?? identifier)}
                             entities={entities}
                             onError={setError}
+                            onCountChange={(count) =>
+                              setRuleCounts((current) => ({ ...current, [identifier]: count }))
+                            }
                           />
                         </td>
                       </tr>

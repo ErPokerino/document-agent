@@ -12,6 +12,8 @@ type Props = {
   supplierName: string;
   entities: EntityDefinition[];
   onError: (message: string) => void;
+  /** So the row above can say how many rules it carries without opening. */
+  onCountChange: (count: number) => void;
 };
 
 const KINDS = [
@@ -39,7 +41,7 @@ const KINDS = [
  * the name. Several spellings of a supplier resolve to the same id, and the id
  * is the thing that is either right or wrong.
  */
-export function SupplierRules({ idSubject, supplierName, entities, onError }: Props) {
+export function SupplierRules({ idSubject, supplierName, entities, onError, onCountChange }: Props) {
   const [rules, setRules] = useState<SupplierRuleModel[] | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -48,7 +50,9 @@ export function SupplierRules({ idSubject, supplierName, entities, onError }: Pr
     api
       .supplierRules(idSubject)
       .then((found) => {
-        if (!cancelled) setRules(found);
+        if (cancelled) return;
+        setRules(found);
+        onCountChange(found.length);
       })
       .catch(() => {
         if (!cancelled) setRules([]);
@@ -69,7 +73,11 @@ export function SupplierRules({ idSubject, supplierName, entities, onError }: Pr
     }
   }
 
-  const refresh = async () => setRules(await api.supplierRules(idSubject));
+  const refresh = async () => {
+    const found = await api.supplierRules(idSubject);
+    setRules(found);
+    onCountChange(found.length);
+  };
 
   if (rules === null) return <p className="field-help">Reading the rules…</p>;
 

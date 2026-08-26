@@ -11,6 +11,7 @@ import {
   Download,
   ExternalLink,
   Eye,
+  ScanSearch,
   FlaskConical,
   FileJson,
   FileText,
@@ -103,6 +104,9 @@ export default function Home() {
   // Which field the reader is pointing at, so the list and the page image
   // can highlight the same one from either side.
   const [locatedField, setLocatedField] = useState<string | null>(null);
+  // The preview shows the document or the values found on it, in the same
+  // place. Two copies of one PDF down the page was the first attempt.
+  const [previewMode, setPreviewMode] = useState<"document" | "highlights">("highlights");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -482,15 +486,7 @@ export default function Home() {
     ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name)).length
     : 0;
 
-  const highlightPanel =
-    result?.run_id && result.locations.length > 0 ? (
-      <PageHighlight
-        runId={result.run_id}
-        locations={result.locations}
-        active={locatedField}
-        onActive={setLocatedField}
-      />
-    ) : null;
+  const canHighlight = Boolean(result?.run_id) && (result?.locations.length ?? 0) > 0;
 
   const extractionPanel = (
     <section className={`schema-panel review-schema ${processState === "processing" || processState === "cancelling" ? "processing" : ""}`}>
@@ -688,7 +684,6 @@ export default function Home() {
                   <div className={`privacy-note ${dataFlow.leavesTheMachine ? "hosted" : ""}`}>{dataFlow.leavesTheMachine ? <Cloud size={16} /> : <ShieldCheck size={16} />}<p><strong>{dataFlow.heading}</strong> {dataFlow.detail}</p></div>
                 </section>
                 {extractionPanel}
-                {highlightPanel}
               </div>
             ) : (
               <div className="review-session">
@@ -721,15 +716,41 @@ export default function Home() {
                       <div className="preview-toolbar">
                         <div><Eye size={15} /><span>Document preview</span></div>
                         <div className="preview-actions">
+                          {canHighlight && (
+                            <div className="preview-modes" role="group" aria-label="What to show">
+                              <button
+                                type="button"
+                                className={previewMode === "document" ? "active" : ""}
+                                onClick={() => setPreviewMode("document")}
+                              >
+                                Document
+                              </button>
+                              <button
+                                type="button"
+                                className={previewMode === "highlights" ? "active" : ""}
+                                onClick={() => setPreviewMode("highlights")}
+                              >
+                                <ScanSearch size={12} /> {result!.locations.length} located
+                              </button>
+                            </div>
+                          )}
                           {result && <span className="processed-badge">Model pages {result.processing.first_processed_page}–{result.processing.last_processed_page}</span>}
                           <a href={previewUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open</a>
                         </div>
                       </div>
-                      <iframe src={previewUrl} title={`Preview of ${file.name}`} />
+                      {canHighlight && previewMode === "highlights" ? (
+                        <PageHighlight
+                          runId={result!.run_id!}
+                          locations={result!.locations}
+                          active={locatedField}
+                          onActive={setLocatedField}
+                        />
+                      ) : (
+                        <iframe src={previewUrl} title={`Preview of ${file.name}`} />
+                      )}
                     </section>
                   )}
                   {extractionPanel}
-                {highlightPanel}
                 </div>
               </div>
             )}

@@ -535,6 +535,17 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                     </div>
                   )}
 
+                  {step.kind === "supplier_rules" && (
+                    <div className="flow-step-body">
+                      <p className="field-help">
+                        Applies the corrections written for whichever supplier this document turned
+                        out to be from. They are set in <strong>Master Data</strong>, on the supplier
+                        itself — the Rules button beside each row. Place this step after the master
+                        data lookup, since it keys on the id that lookup fills in.
+                      </p>
+                    </div>
+                  )}
+
                   {step.kind === "master_data_lookup" && (() => {
                     const config = step.config as {
                       table?: string;

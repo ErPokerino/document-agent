@@ -1,8 +1,5 @@
 "use client";
 
-import { ScanSearch } from "lucide-react";
-import { useState } from "react";
-
 import { apiUrls } from "../lib/api";
 import type { FieldLocation } from "../lib/types";
 
@@ -15,60 +12,34 @@ type Props = {
 };
 
 /**
- * The page, with a box drawn round each value that was found on it.
+ * The page with a box round each value that was found on it.
  *
- * Rendered as an image rather than shown in the PDF viewer: nothing outside
- * that viewer can know where it put the page, so nothing can be laid over it
- * accurately. Coordinates are normalized, so they hold at any size.
+ * One of the two things the preview panel can show, not a panel of its own:
+ * two copies of the same document stacked down the page was the first attempt
+ * and it read as a mistake.
  *
- * A field with no box is a field the OCR never showed — inferred, normalized
- * beyond recognition, or simply not on the page. It is left unmarked rather
- * than pointed somewhere plausible.
+ * An image rather than the PDF viewer, because nothing outside that viewer can
+ * know where it put the page, so nothing can be laid over it accurately.
+ * Coordinates are normalized, so they hold at any size — which is what lets the
+ * image simply fill the panel the iframe was filling.
  */
 export function PageHighlight({ runId, locations, active, onActive }: Props) {
   const pages = [...new Set(locations.map((location) => location.page))].sort((a, b) => a - b);
   const activeLocation = locations.find((location) => location.entity === active) ?? null;
-  const [page, setPage] = useState(pages[0] ?? 0);
-  const shown = activeLocation ? activeLocation.page : page;
-
-  if (locations.length === 0) return null;
-
+  // Following the reader: pointing at a field on another page turns to it.
+  const shown = activeLocation ? activeLocation.page : pages[0] ?? 0;
   const onThisPage = locations.filter((location) => location.page === shown);
 
   return (
-    <section className="highlight-panel">
-      <div className="panel-heading">
-        <div><h2>Where it was found</h2></div>
-        <span className="result-badge complete"><ScanSearch size={10} /> {locations.length} located</span>
-      </div>
-      <p className="panel-copy">
-        Hover a field above to pick it out. A field with no box was never read off the page by OCR.
-      </p>
-
-      {pages.length > 1 && (
-        <div className="highlight-pages">
-          {pages.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              className={`entity-toggle ${candidate === shown ? "" : "off"}`}
-              onClick={() => setPage(candidate)}
-            >
-              Page {candidate + 1}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="highlight-stage">
-        <img src={apiUrls.runPage(runId, shown)} alt={`Page ${shown + 1}`} />
-        {onThisPage.map((location) => {
-          const isActive = location.entity === active;
-          return (
+    <div className="highlight-view">
+      <div className="highlight-scroll">
+        <div className="highlight-stage">
+          <img src={apiUrls.runPage(runId, shown)} alt={`Page ${shown + 1}`} />
+          {onThisPage.map((location) => (
             <button
               key={location.entity}
               type="button"
-              className={`highlight-box ${isActive ? "active" : ""}`}
+              className={`highlight-box ${location.entity === active ? "active" : ""}`}
               style={{
                 left: `${location.left * 100}%`,
                 top: `${location.top * 100}%`,
@@ -84,9 +55,13 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
             >
               <span>{location.entity}</span>
             </button>
-          );
-        })}
+          ))}
+        </div>
       </div>
-    </section>
+      <p className="highlight-note">
+        {pages.length > 1 && `Page ${shown + 1} of ${pages.length} with values. `}
+        Hover a field to pick it out. A field with no box was never read off the page by OCR.
+      </p>
+    </div>
   );
 }

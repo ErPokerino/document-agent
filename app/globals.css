@@ -925,11 +925,19 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 :root[data-theme="dark"] .diff-tag.changed { background: #382c18; color: #e2b877; }
 
 /* --- where a value was found on the page --- */
-.highlight-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px 19px; display: grid; gap: 10px; align-content: start; }
-.highlight-pages { display: flex; flex-wrap: wrap; gap: 6px; }
+/* One of two things the preview panel can show, so it fills exactly the
+   space the iframe filled rather than adding a second copy below it. */
+.preview-modes { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
+.preview-modes button { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--muted); padding: 3px 8px; border-radius: 5px; cursor: pointer; font: 700 8px var(--font-manrope), sans-serif; }
+.preview-modes button.active { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px #17211f14; }
+.highlight-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+/* The panel is the viewer's own dark chrome; the page sits on it like a
+   sheet, the way the PDF viewer presents one. */
+.highlight-scroll { flex: 1; min-height: 0; overflow: auto; background: #3a403e; padding: 12px; display: flex; justify-content: center; align-items: flex-start; }
+.highlight-note { margin: 0; padding: 8px 13px; border-top: 1px solid #303a36; background: #242a28; color: #9aa8a3; font-size: 8px; line-height: 1.5; }
 /* The page is the ground the boxes are positioned against, so it establishes
    the coordinate space and the image fills it exactly. */
-.highlight-stage { position: relative; line-height: 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: #fff; }
+.highlight-stage { position: relative; line-height: 0; border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 3px 14px #0006; max-width: 100%; }
 .highlight-stage img { width: 100%; height: auto; display: block; }
 .highlight-box { position: absolute; margin: 0; padding: 0; border: 1.5px solid var(--accent); border-radius: 2px; background: var(--accent-soft); cursor: pointer; transition: background .12s, box-shadow .12s; }
 .highlight-box span { position: absolute; left: 0; bottom: 100%; margin-bottom: 2px; padding: 1px 4px; border-radius: 3px; background: var(--accent); color: #fff; font: 600 7px var(--font-mono), monospace; white-space: nowrap; opacity: 0; transition: opacity .12s; pointer-events: none; }
@@ -953,3 +961,5 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .supplier-rules .text-input { font-size: 9px; }
 .supplier-rules .text-input.mono { font-family: var(--font-mono), monospace; }
 .supplier-rules .field-help { display: flex; align-items: center; gap: 5px; margin: 0; }
+
+.rule-count { margin-left: 5px; padding: 1px 5px; border-radius: 5px; background: var(--accent); color: #fff; font: 700 8px var(--font-mono), monospace; font-style: normal; }
