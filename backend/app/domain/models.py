@@ -308,6 +308,22 @@ class ProcessingInfo(BaseModel):
     completion_tokens: int | None = None
 
 
+class FieldLocation(BaseModel):
+    """Where on the page a value was found, for highlighting it.
+
+    Coordinates are normalized 0-1 across the page, so they hold at whatever
+    size the page is rendered. Absent for a field the OCR never showed — and
+    absent entirely when no pipeline step read the page with OCR.
+    """
+
+    entity: str
+    page: int
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
 class ExtractionResponse(BaseModel):
     document_type: str = "invoice"
     run_id: int | None = None
@@ -316,6 +332,7 @@ class ExtractionResponse(BaseModel):
     elapsed_ms: int
     data: dict[str, FieldExtraction]
     processing: ProcessingInfo
+    locations: list[FieldLocation] = Field(default_factory=list)
 
 
 # --- datasets, master data and evaluation runs -------------------------------------------------------------

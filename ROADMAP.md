@@ -8,34 +8,6 @@ Anything already built is in the README, not here.
 
 ## Next
 
-### Provenance highlighting
-
-Show where on the page each extracted value came from, so a reviewer confirms
-by glancing instead of re-reading.
-
-Coordinates are **found, not asked for**. Document AI already returns every
-token with its bounding box; once the model answers `supplier_name: "ACME
-SUPPLIES LTD"`, that string is located in the token stream and the matching
-boxes are unioned. Asking the model to return coordinates would multiply output
-tokens and invite the same copying failures the value ceiling closed.
-
-Two limits accepted on purpose:
-
-- a string occurring several times in a document is ambiguous, and the first
-  match is taken;
-- a value the OCR never saw cannot be highlighted, which includes anything the
-  model inferred rather than read.
-
-An OCR step must therefore be addable to a pipeline **purely to supply boxes**,
-even when extraction is done by a multimodal model that never reads its text.
-
-### Run-to-run regression diff
-
-Compare two chosen runs document by document and field by field: what changed
-verdict, what improved, what regressed. An option the user selects, not
-something that happens automatically. Aggregates hide the case that matters —
-a prompt edit that fixes two documents and breaks two others reads as no change.
-
 ### Supplier-specific rules layer
 
 After `id_subject` resolves, a per-supplier rule set corrects or re-extracts

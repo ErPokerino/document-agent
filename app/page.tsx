@@ -40,6 +40,7 @@ import { MasterData } from "./master-data";
 import { Lab } from "./lab";
 import { formatBytes, modelDisplayName, modelStatusLabel } from "../lib/format";
 import { LanguageModels } from "./llm";
+import { PageHighlight } from "./page-highlight";
 import { Pipelines } from "./pipeline";
 import { Settings } from "./settings";
 import { stepLabels } from "../lib/pipeline-editor";
@@ -99,6 +100,9 @@ function prettyName(name: string) {
 
 export default function Home() {
   const [view, setView] = useState<View>("workspace");
+  // Which field the reader is pointing at, so the list and the page image
+  // can highlight the same one from either side.
+  const [locatedField, setLocatedField] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -478,6 +482,16 @@ export default function Home() {
     ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name)).length
     : 0;
 
+  const highlightPanel =
+    result?.run_id && result.locations.length > 0 ? (
+      <PageHighlight
+        runId={result.run_id}
+        locations={result.locations}
+        active={locatedField}
+        onActive={setLocatedField}
+      />
+    ) : null;
+
   const extractionPanel = (
     <section className={`schema-panel review-schema ${processState === "processing" || processState === "cancelling" ? "processing" : ""}`}>
       <div className="panel-heading">
@@ -514,7 +528,12 @@ export default function Home() {
               ? "number"
               : "text";
           return (
-            <div className={`field-row ${field?.warning && !edited ? "has-warning" : ""}`} key={entity.name}>
+            <div
+              className={`field-row ${field?.warning && !edited ? "has-warning" : ""} ${locatedField === entity.name ? "located" : ""}`}
+              key={entity.name}
+              onMouseEnter={() => setLocatedField(entity.name)}
+              onMouseLeave={() => setLocatedField(null)}
+            >
               <div className="field-meta"><span>{prettyName(entity.name)}</span><code>{entity.name}</code></div>
               <div className={`field-value ${editableValue ? "populated" : ""}`}>
                 {field ? (
@@ -669,6 +688,7 @@ export default function Home() {
                   <div className={`privacy-note ${dataFlow.leavesTheMachine ? "hosted" : ""}`}>{dataFlow.leavesTheMachine ? <Cloud size={16} /> : <ShieldCheck size={16} />}<p><strong>{dataFlow.heading}</strong> {dataFlow.detail}</p></div>
                 </section>
                 {extractionPanel}
+                {highlightPanel}
               </div>
             ) : (
               <div className="review-session">
@@ -709,6 +729,7 @@ export default function Home() {
                     </section>
                   )}
                   {extractionPanel}
+                {highlightPanel}
                 </div>
               </div>
             )}

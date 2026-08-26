@@ -497,14 +497,34 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                     </div>
                   )}
 
-                  {step.kind === "document_ai_ocr" && (
+                  {step.kind === "document_ai_ocr" && (() => {
+                    const feedsModel = (step.config as { feeds_model?: boolean }).feeds_model !== false;
+                    return (
                     <div className="flow-step-body">
+                      <label className="flow-field">
+                        <span>What this reading is for<InfoHint text="OCR reads the page and leaves two things behind: the text, and the position of every word. A multimodal model reads the picture itself and does not need the text — but the positions are what put a box round an extracted value on the page. Reading for positions only lets you have that highlighting without changing what the model is shown." /></span>
+                        <select
+                          value={feedsModel ? "text_and_positions" : "positions_only"}
+                          onChange={(event) =>
+                            setSteps(setStepConfig(draft.steps, index, {
+                              feeds_model: event.target.value === "text_and_positions",
+                            }))
+                          }
+                        >
+                          <option value="text_and_positions">Give the model the text, and locate values</option>
+                          <option value="positions_only">Locate values only, do not give the model the text</option>
+                        </select>
+                      </label>
                       <p className="field-help">
-                        Uses the OCR processor configured in Settings. Billed by Google per page, so
+                        {feedsModel
+                          ? "The model is shown the OCR text, and every value it returns is looked for on the page."
+                          : "The model is not shown this text — it reads the page some other way — and the reading is used only to find where each value sits."}
+                        {" "}Uses the OCR processor configured in Settings. Billed by Google per page, so
                         only the pages this pipeline allows are sent.
                       </p>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {step.kind === "document_ai_layout" && (
                     <div className="flow-step-body">

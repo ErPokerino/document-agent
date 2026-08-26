@@ -58,6 +58,7 @@ export const apiUrls = {
   evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
   datasetArchive: (dataset: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/export.zip`,
+  runPage: (runId: number, page: number) => `${API_BASE}/api/runs/${runId}/pages/${page}.png`,
   masterDataCsv: (table: string) =>
     `${API_BASE}/api/master-data/tables/${segment(table)}/export.csv`,
 };

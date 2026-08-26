@@ -923,3 +923,18 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 :root[data-theme="dark"] .diff-tag.fixed { background: #16362a; color: #6fd3a8; }
 :root[data-theme="dark"] .diff-tag.broken { background: #3a201c; color: #f0a89a; }
 :root[data-theme="dark"] .diff-tag.changed { background: #382c18; color: #e2b877; }
+
+/* --- where a value was found on the page --- */
+.highlight-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px 19px; display: grid; gap: 10px; align-content: start; }
+.highlight-pages { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The page is the ground the boxes are positioned against, so it establishes
+   the coordinate space and the image fills it exactly. */
+.highlight-stage { position: relative; line-height: 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: #fff; }
+.highlight-stage img { width: 100%; height: auto; display: block; }
+.highlight-box { position: absolute; margin: 0; padding: 0; border: 1.5px solid var(--accent); border-radius: 2px; background: var(--accent-soft); cursor: pointer; transition: background .12s, box-shadow .12s; }
+.highlight-box span { position: absolute; left: 0; bottom: 100%; margin-bottom: 2px; padding: 1px 4px; border-radius: 3px; background: var(--accent); color: #fff; font: 600 7px var(--font-mono), monospace; white-space: nowrap; opacity: 0; transition: opacity .12s; pointer-events: none; }
+.highlight-box:hover, .highlight-box.active { background: #0e7c6633; box-shadow: 0 0 0 2px var(--accent); }
+.highlight-box:hover span, .highlight-box.active span { opacity: 1; }
+.highlight-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field-row.located { background: var(--accent-soft); border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) { .highlight-box, .highlight-box span { transition: none; } }

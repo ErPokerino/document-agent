@@ -21,6 +21,7 @@ from app.domain.models import (
     EvaluationDetail,
     EvaluationRequest,
     ExtractionResponse,
+    FieldLocation,
     ExtractionRun,
     ExtractionRunDetail,
     GcpKeyStatus,
@@ -74,6 +75,7 @@ from app.services.master_data import (
 from app.services.master_data_csv import csv_to_rows, rows_to_csv
 from app.services.migrations import adopt_legacy_page_limit, clear_inherited_model_default
 from app.services.settings_store import SettingsStore
+from app.services.text_boxes import locate_value
 
 
 MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -583,6 +585,38 @@ def _selected_pipeline(settings: AppSettings) -> PipelineDefinition:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _field_locations(artifacts: dict[str, Any]) -> list[FieldLocation]:
+    """Where each extracted value sits on the page, when the page was read.
+
+    Nothing here asks the model for coordinates: the tokens an OCR step left
+    behind are searched for the value it answered. A pipeline with no OCR step
+    leaves no tokens and therefore no locations, which is the honest answer
+    rather than an empty rectangle.
+    """
+    tokens = artifacts.get("ocr_tokens") or []
+    extraction = artifacts.get("extraction") or {}
+    if not tokens:
+        return []
+
+    located: list[FieldLocation] = []
+    for entity, field in extraction.items():
+        value = getattr(field, "value", None)
+        found = locate_value(value, tokens)
+        if found is None:
+            continue
+        located.append(
+            FieldLocation(
+                entity=entity,
+                page=found.page,
+                left=found.box.left,
+                top=found.box.top,
+                right=found.box.right,
+                bottom=found.box.bottom,
+            )
+        )
+    return located
+
+
 def _document_pipeline(settings: AppSettings) -> DocumentPipeline:
     """The configured pipeline, compiled. Anything unusable is refused here.
 
@@ -672,6 +706,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
                     configured_page_limit=result.artifacts["configured_page_limit"],
                     **result.artifacts.get("inference_stats", {}),
                 ),
+                locations=_field_locations(result.artifacts),
             )
         finally:
             active_document_task = None
@@ -1343,6 +1378,38 @@ async def list_runs(limit: int = 50, validated_only: bool = False) -> list[Extra
         ExtractionRun(**asdict(run))
         for run in run_store.list_runs(limit=min(limit, 200), validated_only=validated_only)
     ]
+
+
+@app.get("/api/runs/{run_id}/pages/{page}.png", response_class=Response)
+async def run_page_image(run_id: int, page: int) -> Response:
+    """One page of a run's document, rendered.
+
+    Highlighting needs a surface with known coordinates, and the browser's PDF
+    viewer is not one: nothing outside it can know where it put the page. An
+    image can be overlaid exactly, and the app already renders pages.
+    """
+    detail = run_store.get_run(run_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No run with id {run_id}")
+    content = run_store.read_document(detail.file_sha256)
+    if content is None:
+        raise HTTPException(status_code=404, detail="That run's document is no longer stored.")
+
+    document = pymupdf.open(stream=content, filetype="pdf")
+    try:
+        if page < 0 or page >= document.page_count:
+            raise HTTPException(status_code=404, detail=f"That document has no page {page + 1}")
+        pixmap = document[page].get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
+        rendered = pixmap.tobytes("png")
+    finally:
+        document.close()
+
+    return Response(
+        content=rendered,
+        media_type="image/png",
+        # Addressed by run and page, and a run's document never changes.
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @app.get("/api/runs/{run_id}", response_model=ExtractionRunDetail)

@@ -152,6 +152,7 @@ export type ExtractionResponse = {
   elapsed_ms: number;
   data: Record<string, FieldExtraction>;
   processing: ProcessingInfo;
+  locations: FieldLocation[];
 };
 
 export type ExtractionRun = {
@@ -194,6 +195,15 @@ export type FieldExtraction = {
   confidence: "low" | "medium" | "high";
   warning: string | null;
   score: number | null;
+};
+
+export type FieldLocation = {
+  entity: string;
+  page: number;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 };
 
 export type GcpKeyStatus = {

@@ -25,6 +25,10 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 - initial schema with `date`, `document_number`, `supplier_name`, `currency` and `total_amount`;
 - JSON constrained by JSON Schema and validated with Pydantic;
 - JSON export;
+- highlighting of where each extracted value sits on the page, whenever a
+  pipeline step read it with OCR;
+- comparison of two runs field by field, to see what one change actually
+  moved;
 - a data-flow note on every run stating where the pages actually go: a
   pipeline built only from local steps keeps them on the machine, one with a
   Document AI step uploads them to Google, and a hosted model sends them to
@@ -73,6 +77,28 @@ from the built-in default on first run; datasets and register rows are yours to
 re-import if you want them on the new machine — copy `backend/data` across to
 carry everything, including the run history.
 
+
+## Where a value came from
+
+The model is never asked for coordinates: asking would multiply output tokens
+and invite the same copying failures a small model already makes, and a wrong
+rectangle is worse than none because it looks authoritative. Document AI already
+returns every token with its box, so the value the model answered is located in
+that token stream and the matching boxes are unioned.
+
+The page is shown as an image rather than in the PDF viewer, because nothing
+outside that viewer can know where it put the page, so nothing can be laid over
+it accurately. Coordinates are normalized, and hold at any size.
+
+An OCR step can be added to a pipeline **purely to supply positions**, without
+its text being given to the model — which is how a multimodal model can read
+the picture itself and still have its answers highlighted. The choice is on the
+step in Pipelines.
+
+Two limits are deliberate. A string that occurs several times in a document is
+ambiguous, and the first occurrence is taken. A value the OCR never saw cannot
+be highlighted at all, which includes anything the model inferred rather than
+read, and anything derived from a register.
 
 ## Working on it
 

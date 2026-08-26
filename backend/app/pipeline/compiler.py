@@ -90,7 +90,13 @@ def _build_one(
             if step.kind is StepKind.document_ai_ocr
             else gcp.layout_processor_id
         )
-        return ReadWithDocumentAi(step.kind.value, str(config.get("processor_id") or configured))
+        return ReadWithDocumentAi(
+            step.kind.value,
+            str(config.get("processor_id") or configured),
+            # Default on: an OCR step that was added before this flag
+            # existed was added to give the model text.
+            feeds_model=bool(config.get("feeds_model", True)),
+        )
     if step.kind is StepKind.llm_extract:
         return ExtractEntities(prompts)
     if step.kind is StepKind.regex_refine:

@@ -14,6 +14,7 @@ from app.services.document_ai import (
 from app.services.gemini import GeminiClient
 from app.services.master_data import MasterDataStore
 from app.services.similarity import DEFAULT_ALGORITHM, similarity
+from app.services.text_boxes import tokens_from_ocr
 from app.services.lm_studio import LMStudioClient
 
 
@@ -179,9 +180,14 @@ class ReadWithDocumentAi:
     keeps the headings and tables, plus the raw structure for anything later.
     """
 
-    def __init__(self, kind: str, processor_id: str) -> None:
+    def __init__(self, kind: str, processor_id: str, feeds_model: bool = True) -> None:
         self.kind = kind
         self.processor_id = processor_id
+        # An OCR step can be in a pipeline purely to supply the boxes that
+        # highlight a value on the page, while a multimodal model reads the
+        # picture and never sees this text. Handing the model text it was not
+        # meant to have would quietly change what it extracts.
+        self.feeds_model = feeds_model
 
     def _client(self, context: PipelineContext) -> DocumentAiClient:
         return DocumentAiClient(
@@ -205,9 +211,14 @@ class ReadWithDocumentAi:
         if self.kind == "document_ai_layout":
             layout = document.get("documentLayout") or {}
             context.artifacts["layout"] = layout
-            context.artifacts["text"] = markdown_from_layout(layout)
+            if self.feeds_model:
+                context.artifacts["text"] = markdown_from_layout(layout)
         else:
-            context.artifacts["text"] = text_from_ocr(document)
+            # Kept whether or not the model is shown the text: this is what
+            # locates an extracted value on the page afterwards.
+            context.artifacts["ocr_tokens"] = tokens_from_ocr(document)
+            if self.feeds_model:
+                context.artifacts["text"] = text_from_ocr(document)
 
         counted = dict(context.artifacts.get("document_ai_pages") or {})
         counted[self.kind] = counted.get(self.kind, 0) + processed_pages
