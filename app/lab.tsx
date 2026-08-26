@@ -35,6 +35,7 @@ import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import { labRunTarget } from "../lib/lab-target";
+import { usesModel } from "../lib/pipeline-steps";
 import {
   emptyFilters,
   filterEvaluations,
@@ -64,6 +65,9 @@ type Props = {
 
 /** Run the configured extraction over a dataset and score what comes back. */
 export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Props) {
+  // A pipeline that never asks a model anything runs the same whatever is
+  // loaded, so waiting for one would be a delay that buys nothing.
+  const modelBlocks = usesModel(pipelineKinds) && !isModelReady;
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
@@ -237,12 +241,12 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
           <Square size={14} /> Cancel
         </button>
       ) : (
-        <button className="primary-button" disabled={!selectedDataset || busy || !isModelReady} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!); await refreshEvaluations(); await refreshValidatedRuns(); })}>
+        <button className="primary-button" disabled={!selectedDataset || busy || modelBlocks} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!); await refreshEvaluations(); await refreshValidatedRuns(); })}>
           <Play size={14} /> Run test
         </button>
       )}
         </div>
-        {!isModelReady && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
+        {modelBlocks && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
         {runNote && (
           <div className="alert warning-alert" role="status">
             <Info size={17} />
@@ -486,8 +490,8 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
           </span>
           <button
             className="secondary-button"
-            disabled={busy || !!running || !isModelReady}
-            title={running ? "Another run is in progress" : !isModelReady ? "Load and warm up the model in LLM first" : "Process the documents this run did not score"}
+            disabled={busy || !!running || modelBlocks}
+            title={running ? "Another run is in progress" : modelBlocks ? "Load and warm up the model in LLM first" : "Process the documents this run did not score"}
             onClick={() => guard(async () => {
               await api.retryEvaluation(openEvaluation.id);
               await refreshEvaluations();

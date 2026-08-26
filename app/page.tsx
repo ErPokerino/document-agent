@@ -35,6 +35,7 @@ import { ChangeEvent, DragEvent, Fragment, useEffect, useRef, useState } from "r
 import { api } from "../lib/api";
 import { resolveBootstrap } from "../lib/bootstrap";
 import { describeDataFlow } from "../lib/data-flow";
+import { usesModel } from "../lib/pipeline-steps";
 import { Datasets } from "./datasets";
 import { Entities } from "./entities";
 import { MasterData } from "./master-data";
@@ -264,7 +265,7 @@ export default function Home() {
 
   async function processDocument() {
     if (!file) return;
-    if (!isModelReady) {
+    if (modelBlocks) {
       setError("The active model is not ready. Open LLM and use Load & warm up first.");
       return;
     }
@@ -481,6 +482,16 @@ export default function Home() {
   const isConnected = health?.lm_studio === true;
   const activeModel = models.find((model) => model.id === settings?.model);
   const isModelReady = activeModel?.ready === true;
+  // Not every pipeline asks a model anything. One that extracts with the Custom
+  // Extractor never does, so nothing here should hold its run back over a model
+  // it will not use.
+  const callsModel = usesModel(pipelineKinds);
+  const needsLmStudio = callsModel && !usingHostedModel;
+  const modelBlocks = callsModel && !isModelReady;
+  const lmStudioBlocks = needsLmStudio && !isConnected;
+  // The strip is numbered as it is walked, so dropping a step that never runs
+  // does not leave a gap in the numbering.
+  const firstStepNumber = callsModel ? 2 : 1;
   const activeModelStatus = modelStatusLabel(settings?.model ?? "", activeModel);
   const unresolvedWarningCount = result
     ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name)).length
@@ -692,23 +703,23 @@ export default function Home() {
                     <div className="document-preview"><FileText size={22} /><span>PDF</span></div>
                     <div className="document-details"><small>Selected document</small><h3>{file.name}</h3><p>{formatBytes(file.size)}</p></div>
                   </div>
-                  <div className={`session-privacy ${usingHostedModel ? "hosted" : ""}`}>{usingHostedModel ? <Cloud size={15} /> : <ShieldCheck size={15} />}<span>{usingHostedModel ? "Sent to Google" : "Processed locally"}</span></div>
+                  <div className={`session-privacy ${dataFlow.leavesTheMachine ? "hosted" : ""}`}>{dataFlow.leavesTheMachine ? <Cloud size={15} /> : <ShieldCheck size={15} />}<span>{dataFlow.heading}</span></div>
                   <div className="session-actions">
                     {processState === "processing" || processState === "cancelling" ? (
                       <button className="secondary-button session-process danger" disabled={processState === "cancelling"} onClick={cancelDocumentProcessing}>
                         {processState === "cancelling" ? <><LoaderCircle className="spin" size={15} /> Stopping…</> : <><Square size={14} /> Cancel</>}
                       </button>
                     ) : processState === "complete" ? (
-                      <button className="secondary-button session-process" disabled={!isModelReady} onClick={processDocument}><RotateCcw size={15} /> Process again</button>
+                      <button className="secondary-button session-process" disabled={modelBlocks} onClick={processDocument}><RotateCcw size={15} /> Process again</button>
                     ) : (
-                      <button className="primary-button session-process" disabled={!isConnected || !isModelReady} onClick={processDocument}>
+                      <button className="primary-button session-process" disabled={lmStudioBlocks || modelBlocks} onClick={processDocument}>
                         <><Sparkles size={16} /> Analyze invoice</>
                       </button>
                     )}
                     <button className="icon-button" disabled={processState === "processing" || processState === "cancelling"} onClick={resetDocument} aria-label="Remove document"><Trash2 size={16} /></button>
                   </div>
-                  {!isConnected && <small className="session-warning">Start LM Studio to process this document</small>}
-                  {isConnected && !isModelReady && <button className="session-warning action" onClick={() => setView("llm")}>Prepare the active model in LLM before processing</button>}
+                  {lmStudioBlocks && <small className="session-warning">Start LM Studio to process this document</small>}
+                  {!lmStudioBlocks && modelBlocks && <button className="session-warning action" onClick={() => setView("llm")}>Prepare the active model in LLM before processing</button>}
                 </section>
                 <div className="review-grid">
                   {previewUrl && (
@@ -757,19 +768,23 @@ export default function Home() {
 
             <footer className="pipeline-strip">
               <span>{settings?.pipeline ?? "Current pipeline"}</span>
-              <div className={`pipeline-step ${isModelReady ? "done" : "active"}`}><b>{isModelReady ? <Check size={10} /> : "1"}</b> Model ready</div>
-              <ChevronRight size={13} />
-              <div className={`pipeline-step ${file ? "done" : ""}`}><b>{file ? <Check size={10} /> : "2"}</b> PDF input</div>
+              {callsModel && (
+                <>
+                  <div className={`pipeline-step ${isModelReady ? "done" : "active"}`}><b>{isModelReady ? <Check size={10} /> : "1"}</b> Model ready</div>
+                  <ChevronRight size={13} />
+                </>
+              )}
+              <div className={`pipeline-step ${file ? "done" : ""}`}><b>{file ? <Check size={10} /> : firstStepNumber}</b> PDF input</div>
               {pipelineShape.map((label, index) => (
                 <Fragment key={`${label}-${index}`}>
                   <ChevronRight size={13} />
                   <div className={`pipeline-step ${processState === "processing" ? "active pulse" : result ? "done" : ""}`}>
-                    <b>{result ? <Check size={10} /> : index + 3}</b> {label}
+                    <b>{result ? <Check size={10} /> : firstStepNumber + index + 1}</b> {label}
                   </div>
                 </Fragment>
               ))}
               <ChevronRight size={13} />
-              <div className={`pipeline-step ${result ? "done" : ""}`}><b>{result ? <Check size={10} /> : pipelineShape.length + 3}</b> JSON validation</div>
+              <div className={`pipeline-step ${result ? "done" : ""}`}><b>{result ? <Check size={10} /> : firstStepNumber + pipelineShape.length + 1}</b> JSON validation</div>
             </footer>
           </>
         ) : !settings || !draftSettings ? (

@@ -52,10 +52,32 @@ API_VERSION = "v1beta3"
 
 _VALUE_TYPES = {
     EntityFormat.text: "string",
-    EntityFormat.currency: "string",
+    EntityFormat.currency: "currency",
     EntityFormat.date: "datetime",
     EntityFormat.decimal: "number",
     EntityFormat.integer: "number",
+}
+
+# How the processor is to arrive at each value, and the single most consequential
+# line in this file.
+#
+# EXTRACT points at a span on the page: it can only answer with what is printed,
+# so it cannot be asked for a form the document does not carry. Told a currency
+# must be an ISO 4217 code, an EXTRACT field on a page showing only `S$`
+# returned nothing at all — and a field it cannot satisfy takes others down with
+# it, which is how the date went missing from the same response.
+#
+# DERIVE lets it work the value out. The same field, the same strict
+# description, as DERIVE: `SGD`.
+#
+# So a value that has to be normalized is derived, and a value that is quoted
+# from the page is extracted.
+_METHODS = {
+    EntityFormat.date: "DERIVE",
+    EntityFormat.currency: "DERIVE",
+    EntityFormat.text: "EXTRACT",
+    EntityFormat.decimal: "EXTRACT",
+    EntityFormat.integer: "EXTRACT",
 }
 
 
@@ -85,6 +107,9 @@ def schema_override(entities: list[EntityDefinition]) -> dict:
     currency with no description this processor answered `$`, and told the code
     was ISO 4217 it answered `USD`.
 
+    It also carries a method, which decides what may be asked of it at all —
+    see `_METHODS`.
+
     Descriptions need the v1beta3 endpoint — v1 rejects the field outright —
     which is why `API_VERSION` is set here rather than inherited.
     """
@@ -93,9 +118,13 @@ def schema_override(entities: list[EntityDefinition]) -> dict:
             "name": entity.name,
             "valueType": _VALUE_TYPES.get(entity.format, "string"),
             "occurrenceType": "OPTIONAL_ONCE",
-            # This reader points at the page; it cannot be forbidden what the
-            # page shows, and a field it cannot satisfy costs the others too.
-            "description": described_for_reader(entity, reads_from_page=True),
+            "method": _METHODS.get(entity.format, "EXTRACT"),
+            # What may be asked for follows from the method: a derived field
+            # works the value out and can be told exactly how to write it, an
+            # extracted one can only be pointed at what is printed.
+            "description": described_for_reader(
+                entity, reads_from_page=_METHODS.get(entity.format, "EXTRACT") == "EXTRACT"
+            ),
         }
         for entity in model_entities(entities)
     ]
@@ -296,15 +325,12 @@ def validated_entities_from_response(
             continue
         update: dict[str, object] = {"score": extracted[name].score}
         if name not in answered:
-            # Silence, not absence. The processor returns nothing for a field
-            # whose description asks for something the page cannot show — told
-            # a currency must be an ISO 4217 code, it answered nothing at all
-            # for a page printing only `S$`. Unremarked, that reads exactly
-            # like an invoice with no currency on it.
+            # Silence, not absence: this processor omits a field it cannot
+            # answer rather than returning it empty. Unremarked, that reads
+            # exactly like an invoice that does not carry the value.
             update["warning"] = (
-                "The Custom Extractor did not return this field. It answers nothing for a "
-                "field it cannot satisfy, which includes a description asking for a form "
-                "the page does not show."
+                "The Custom Extractor returned no answer for this field. A blank here is "
+                "silence from the processor, not a document without the value."
             )
         result[name] = field.model_copy(update=update)
     return result

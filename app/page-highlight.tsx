@@ -68,7 +68,7 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
       <div className="highlight-note">
         <span>
           {pages.length > 1 && `Page ${shown + 1} of ${pages.length} with values. `}
-          Hover a field to pick it out. A field with no box was never read off the page by OCR.
+          Hover a field to pick it out. A field with no box was not traced to a spot on the page.
         </span>
         <span className="highlight-zoom">
           <button type="button" onClick={() => step(-0.25)} disabled={zoom <= 0.5} aria-label="Zoom out"><Minus size={12} /></button>

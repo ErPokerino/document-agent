@@ -179,6 +179,23 @@ def requires_vision(pipeline: PipelineDefinition) -> bool:
     return False
 
 
+def uses_model(pipeline: PipelineDefinition) -> bool:
+    """True when running this pipeline can call the selected language model.
+
+    Not every pipeline does. One that extracts with the Custom Extractor never
+    sends the document to a model at all, and making such a run wait until
+    several gigabytes are loaded and warm is a delay that buys nothing.
+
+    Supplier rules count, because one of them may be an instruction to ask the
+    model again, and which supplier a document is from is not known until the
+    run is under way.
+    """
+    return any(
+        step.kind in (StepKind.llm_extract, StepKind.supplier_rules)
+        for step in pipeline.steps
+    )
+
+
 def filled_entities(pipeline: PipelineDefinition) -> set[str]:
     """The entity names a step in this pipeline writes by itself."""
     filled: set[str] = set()

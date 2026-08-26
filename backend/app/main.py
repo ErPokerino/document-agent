@@ -61,6 +61,7 @@ from app.pipeline.definition import (
     describe_problems,
     describe_warnings,
     requires_vision,
+    uses_model,
 )
 from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.store import InvalidPipelineName, PipelineStore, UnknownPipeline
@@ -218,12 +219,23 @@ def _unique_model_alias(model_id: str, available: list[ModelInfo]) -> ModelInfo 
     return matches[0] if len(matches) == 1 else None
 
 
-async def _ensure_model_ready(settings: AppSettings) -> None:
+async def _ensure_model_ready(
+    settings: AppSettings, pipeline: PipelineDefinition | None = None
+) -> None:
     """Raise unless the configured model can answer right now.
 
     A hosted model is ready as soon as its key is present; a local one has to be
     in memory and warmed up, which costs a round trip to LM Studio to confirm.
+
+    Given a pipeline, only if that pipeline calls a model at all. A Custom
+    Extractor pipeline never sends the document to one, and holding its run back
+    until an unrelated model is loaded would cost minutes and several gigabytes
+    for nothing. Called without a pipeline — drafting labels asks the model
+    directly, outside any — the model is always needed.
     """
+    if pipeline is not None and not uses_model(pipeline):
+        return
+
     if settings.provider == "gemini":
         if find_model(settings.model) is None:
             raise HTTPException(
@@ -670,7 +682,7 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
     async with exclusive_model_operation("processing"):
         active_document_task = asyncio.current_task()
         try:
-            await _ensure_model_ready(settings)
+            await _ensure_model_ready(settings, _selected_pipeline(settings))
             context = _pipeline_context(settings, file.filename or "invoice.pdf", content)
             pipeline = _document_pipeline(settings)
             started = time.perf_counter()
@@ -1542,7 +1554,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     pipeline_definition = _selected_pipeline(settings)
     steps = _document_pipeline(settings).steps
 
-    await _ensure_model_ready(settings)
+    await _ensure_model_ready(settings, pipeline_definition)
 
     claim_model_operation("evaluating")
     evaluation_id = evaluation_store.start(
@@ -1619,14 +1631,6 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
     _require_dataset(detail.dataset)
 
     settings = settings_store.read()
-    if settings.model != detail.model:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"This run used {detail.model}. Select and warm up that model in LLM, "
-                "so the retried documents are scored the same way as the rest of the run."
-            ),
-        )
     try:
         # The run's own page limit, not the one the pipeline carries today.
         definition = pipeline_store.read(detail.pipeline)
@@ -1651,7 +1655,20 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
     except PipelineError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    await _ensure_model_ready(settings)
+    # Which model is selected matters only to a pipeline that asks one. Read
+    # after the pipeline, because a Custom Extractor run scores the same
+    # whatever is loaded, and refusing to finish it over an unused model would
+    # leave it half done for no reason.
+    if uses_model(definition) and settings.model != detail.model:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This run used {detail.model}. Select and warm up that model in LLM, "
+                "so the retried documents are scored the same way as the rest of the run."
+            ),
+        )
+
+    await _ensure_model_ready(settings, definition)
 
     attempted = evaluation_store.attempted_documents(evaluation_id)
     documents: list[tuple[str, dict[str, Any]]] = []

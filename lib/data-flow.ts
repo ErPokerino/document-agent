@@ -7,9 +7,8 @@
  * claim about where documents go is the worst copy in the app to get wrong.
  */
 
+import { readsInTheCloud, usesModel } from "./pipeline-steps.ts";
 import type { AppSettings } from "./types";
-
-const CLOUD_READERS = new Set(["document_ai_ocr", "document_ai_layout"]);
 
 export type DataFlow = {
   heading: string;
@@ -21,10 +20,12 @@ export function describeDataFlow(
   provider: AppSettings["provider"],
   steps: string[],
 ): DataFlow {
-  const readsInTheCloud = steps.some((step) => CLOUD_READERS.has(step));
-  const modelInTheCloud = provider === "gemini";
+  const uploaded = readsInTheCloud(steps);
+  const callsModel = usesModel(steps);
+  // A hosted model that is never called sends nothing.
+  const modelInTheCloud = provider === "gemini" && callsModel;
 
-  if (!readsInTheCloud && !modelInTheCloud) {
+  if (!uploaded && !modelInTheCloud) {
     return {
       heading: "Private processing",
       detail: "Documents stay on this machine: every step runs here.",
@@ -33,16 +34,18 @@ export function describeDataFlow(
   }
 
   const destinations: string[] = [];
-  if (readsInTheCloud) destinations.push("Google Document AI reads the pages");
+  if (uploaded) destinations.push("Google Document AI reads the pages");
   if (modelInTheCloud) destinations.push("the Gemini API extracts the fields");
+
+  const closing = !callsModel
+    ? "No language model is involved."
+    : modelInTheCloud
+      ? "Nothing is kept on this machine by them."
+      : "The model answers on this machine.";
 
   return {
     heading: "Sent to Google",
-    detail:
-      `${destinations.join(", and ")}. ` +
-      (modelInTheCloud
-        ? "Nothing is kept on this machine by them."
-        : "The model answers on this machine."),
+    detail: `${destinations.join(", and ")}. ${closing}`,
     leavesTheMachine: true,
   };
 }

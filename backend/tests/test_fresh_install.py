@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.domain.models import AppSettings
+from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.pipeline.store import PipelineStore
 from app.services.settings_store import SettingsStore
 
@@ -43,6 +44,37 @@ async def test_extraction_asks_for_a_model_rather_than_failing_obscurely() -> No
     """With nothing selected the answer has to name what is missing."""
     with pytest.raises(Exception) as raised:
         await main._ensure_model_ready(AppSettings(model=""))
+    assert "model" in str(raised.value).lower()
+
+
+@pytest.mark.anyio
+async def test_a_pipeline_that_calls_no_model_does_not_wait_for_one() -> None:
+    """A Custom Extractor run never sends the document to a model.
+
+    Requiring one anyway meant loading several gigabytes, over minutes, to sit
+    idle while Google did the reading — and on a machine with no model at all
+    it meant the pipeline could not be run.
+    """
+    custom_extractor = PipelineDefinition(
+        name="custom extractor",
+        steps=[PipelineStep(kind=StepKind.document_ai_extract, config={"processor_id": "abc"})],
+    )
+
+    await main._ensure_model_ready(AppSettings(model=""), custom_extractor)
+
+
+@pytest.mark.anyio
+async def test_a_pipeline_that_does_call_a_model_still_waits_for_one() -> None:
+    with_model = PipelineDefinition(
+        name="vision",
+        steps=[
+            PipelineStep(kind=StepKind.render_pages, config={"scale": 1.35}),
+            PipelineStep(kind=StepKind.llm_extract, config={}),
+        ],
+    )
+
+    with pytest.raises(Exception) as raised:
+        await main._ensure_model_ready(AppSettings(model=""), with_model)
     assert "model" in str(raised.value).lower()
 
 

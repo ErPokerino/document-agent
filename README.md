@@ -108,7 +108,15 @@ read, and anything derived from a register.
 ## Extraction without a model
 
 A Custom Extractor reads the configured fields itself, so a pipeline built on
-it needs no LLM extraction step at all. Three things follow.
+it needs no LLM extraction step at all — and nothing in the app waits for a
+model such a pipeline will never call. It used to: every run held until the
+selected model was loaded and warm, which on a Custom Extractor pipeline cost
+minutes and several gigabytes to sit idle while Google did the reading, and on a
+machine with no model at all made the pipeline unrunnable. Whether a pipeline
+calls a model is now read from its steps, and supplier rules count, because one
+of them may be an instruction to ask the model again.
+
+Four more things follow.
 
 **The schema travels with the request.** A generative Custom Extractor accepts a
 `schemaOverride` per call, so DocuFlow sends the fields it wants every time
@@ -124,6 +132,17 @@ asked for a currency with no description this processor answered `$`, and told
 the code was ISO 4217 it answered `USD`. Descriptions need the `v1beta3`
 endpoint — `v1` rejects the field outright — so the Custom Extractor alone uses
 it, while OCR and the Layout Parser stay on `v1`.
+
+**Each field says how it is to be answered**, and it is the most consequential
+line in the schema. `EXTRACT` points at a span on the page, so it can only
+return what is printed and cannot be asked for a form the document does not
+carry: told a currency must be an ISO 4217 code, an `EXTRACT` field on an
+invoice showing only `S$` returned nothing — and a field it cannot satisfy takes
+others down with it, which is how the date went missing from the same response.
+`DERIVE` lets it work the value out; the same field, the same description, as
+`DERIVE`: `SGD`. So dates and currencies are derived and everything else is
+extracted, and what a field may be told follows from which it is. A derived
+value has no span on the page, so it also has no highlight box.
 
 What a format requires is said in one place, shared by every reader that asks:
 Gemini's schema, the Custom Extractor's schema, and a local model's prompt. It

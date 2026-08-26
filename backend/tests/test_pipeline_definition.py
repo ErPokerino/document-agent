@@ -12,6 +12,7 @@ from app.pipeline.definition import (
     describe_problems,
     describe_warnings,
     requires_vision,
+    uses_model,
 )
 
 
@@ -215,3 +216,41 @@ def test_a_broken_pipeline_is_still_refused() -> None:
     backwards = pipeline(extract(), render(), name="backwards")
 
     assert describe_problems(backwards, entities=ENTITIES_WITH_DERIVED) != []
+
+
+def custom_extract(**config) -> PipelineStep:
+    return PipelineStep(kind=StepKind.document_ai_extract, config={"processor_id": "abc", **config})
+
+
+def test_a_pipeline_that_extracts_with_a_model_calls_one() -> None:
+    assert uses_model(pipeline(render(), extract())) is True
+
+
+def test_a_custom_extractor_pipeline_calls_no_model() -> None:
+    """Which is why nothing should hold its run back until one is warm.
+
+    Loading a local model costs minutes and several gigabytes, and this pipeline
+    never sends the document to it.
+    """
+    assert uses_model(pipeline(custom_extract())) is False
+
+
+def test_supplier_rules_count_because_one_of_them_may_ask_the_model() -> None:
+    """Which supplier a document is from is not known until the run is under
+    way, so a prompted rule cannot be ruled out in advance."""
+    with_rules = pipeline(
+        custom_extract(),
+        PipelineStep(kind=StepKind.master_data_lookup, config={"target_entity": "id_subject"}),
+        PipelineStep(kind=StepKind.supplier_rules, config={}),
+    )
+
+    assert uses_model(with_rules) is True
+
+
+def test_reading_and_refining_without_a_model_calls_no_model() -> None:
+    text_only = pipeline(
+        PipelineStep(kind=StepKind.document_ai_ocr, config={"processor_id": "abc"}),
+        regex(),
+    )
+
+    assert uses_model(text_only) is False

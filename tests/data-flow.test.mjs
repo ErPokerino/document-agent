@@ -44,3 +44,28 @@ test("an unknown pipeline shape claims nothing either way", () => {
 
   assert.equal(flow.leavesTheMachine, false);
 });
+
+test("the Custom Extractor sends the pages to Google, model or no model", () => {
+  // It reads the page at Google and answers from there. Calling that private
+  // processing because no local model was involved was the same false claim
+  // this module exists to prevent.
+  const flow = describeDataFlow("lm_studio", ["document_ai_extract"]);
+
+  assert.equal(flow.leavesTheMachine, true);
+  assert.match(flow.detail, /Document AI/);
+});
+
+test("a pipeline that calls no model says so instead of claiming one answers", () => {
+  const flow = describeDataFlow("lm_studio", ["document_ai_extract"]);
+
+  assert.match(flow.detail, /no language model/i);
+  assert.doesNotMatch(flow.detail, /the model answers/i);
+});
+
+test("a hosted model that is never called is not a destination", () => {
+  // Gemini selected in the corner does not mean Gemini sees the document.
+  const flow = describeDataFlow("gemini", ["document_ai_extract"]);
+
+  assert.doesNotMatch(flow.detail, /Gemini/);
+  assert.match(flow.detail, /no language model/i);
+});

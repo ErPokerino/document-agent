@@ -92,7 +92,7 @@ def test_each_field_asks_for_the_type_it_is_configured_as() -> None:
     assert properties["supplier_name"] == "string"
     assert properties["date"] == "datetime"
     assert properties["total_amount"] == "number"
-    assert properties["currency"] == "string"
+    assert properties["currency"] == "currency"
 
 
 def test_no_field_is_demanded_because_a_document_may_not_carry_it() -> None:
@@ -282,19 +282,38 @@ def test_every_property_carries_the_description_the_processor_reads() -> None:
     assert API_VERSION == "v1beta3"
 
 
-def test_the_wording_is_the_one_written_for_a_reader_that_points_at_the_page() -> None:
-    """Not the strict wording a model gets. This reader cannot be told "never a
-    symbol" about a page that shows only a symbol — it answers nothing at all,
-    and takes another field down with it."""
+def test_what_a_field_is_told_follows_from_how_it_is_to_answer() -> None:
+    """A derived field works the value out, so it can be told exactly how to
+    write it. An extracted one can only point at what is printed, and telling
+    it "never a symbol" about a page showing only a symbol makes it answer
+    nothing at all — and take another field down with it."""
     from app.services.field_wording import described_for_reader
 
     properties = {
-        prop["name"]: prop["description"]
-        for prop in schema_override(ENTITIES)["entityTypes"][0]["properties"]
+        prop["name"]: prop for prop in schema_override(ENTITIES)["entityTypes"][0]["properties"]
     }
-    for definition in ENTITIES:
-        assert properties[definition.name] == described_for_reader(definition, reads_from_page=True)
-    assert "never" not in properties["currency"].lower()
+    assert properties["currency"]["method"] == "DERIVE"
+    assert properties["date"]["method"] == "DERIVE"
+    assert properties["supplier_name"]["method"] == "EXTRACT"
+    assert properties["total_amount"]["method"] == "EXTRACT"
+
+    # Derived: the strict wording, the one a model would get.
+    currency = next(e for e in ENTITIES if e.name == "currency")
+    assert properties["currency"]["description"] == described_for_reader(currency)
+    assert "never a currency symbol" in properties["currency"]["description"].lower()
+
+    # Extracted: nothing it cannot obey.
+    total = next(e for e in ENTITIES if e.name == "total_amount")
+    assert properties["total_amount"]["description"] == described_for_reader(total, reads_from_page=True)
+
+
+def test_a_derived_field_is_what_lets_a_symbol_become_a_code() -> None:
+    """Measured against the real processor: a page printing only `S$`, asked
+    for an ISO 4217 code, answered nothing as EXTRACT and `SGD` as DERIVE."""
+    properties = {
+        prop["name"]: prop for prop in schema_override(ENTITIES)["entityTypes"][0]["properties"]
+    }
+    assert properties["currency"]["method"] == "DERIVE"
 
 
 # -- a field the processor never answered ----------------------------------------
@@ -302,16 +321,16 @@ def test_the_wording_is_the_one_written_for_a_reader_that_points_at_the_page() -
 
 def test_a_field_the_processor_left_out_says_so() -> None:
     """Not the same as a page that does not carry the value, and the difference
-    is what someone needs to know. This processor returns nothing for a field
-    whose description asks for something the page cannot show — told the code
-    must be ISO 4217, it answered nothing at all for a page printing only `S$`.
-    Without a word, that looks identical to an invoice with no currency on it.
+    is what someone needs to know. This processor omits a field it cannot
+    answer rather than returning it empty, so without a word that looks
+    identical to an invoice with no currency on it.
     """
     from app.services.custom_extractor import validated_entities_from_response
 
     result = validated_entities_from_response({"entities": []}, ENTITIES)
     warning = result["currency"].warning or ""
-    assert "did not return" in warning.lower() or "returned nothing" in warning.lower()
+    assert "no answer" in warning.lower()
+    assert "silence" in warning.lower()
     assert result["currency"].value is None
 
 
