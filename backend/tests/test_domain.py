@@ -174,6 +174,34 @@ async def test_warmup_uses_the_configured_extraction_schema(monkeypatch) -> None
     assert isinstance(captured[1]["messages"][1]["content"], str)
 
 
+@pytest.mark.asyncio
+async def test_text_only_warmup_rejects_corrupted_generation(monkeypatch) -> None:
+    client = LMStudioClient("http://localhost:1234")
+    entities = default_entities()
+    attempts = 0
+
+    async def fake_post(path, payload, timeout):
+        nonlocal attempts
+        attempts += 1
+        return {
+            "choices": [
+                {"message": {"content": "GGGGGGGG"}}
+            ]
+        }
+
+    monkeypatch.setattr(client, "_post_json", fake_post)
+
+    with pytest.raises(LMStudioError, match="Text generation warm-up failed"):
+        await client._warm_up_structured_output(
+            "target",
+            entities,
+            include_image=False,
+            include_schema=False,
+        )
+
+    assert attempts == 2
+
+
 def test_result_validation_normalizes_decimal() -> None:
     payload = {
         "date": {"value": "2026-08-18", "confidence": "high"},

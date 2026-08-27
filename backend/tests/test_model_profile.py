@@ -40,6 +40,7 @@ def item(
     size_gb: float = 1.0,
     instances: list | None = None,
     vision: bool = True,
+    architecture: str | None = None,
 ) -> dict:
     return {
         "type": "llm",
@@ -47,6 +48,7 @@ def item(
         "display_name": key,
         "quantization": {"name": quantization},
         "size_bytes": int(size_gb * 1024**3),
+        "architecture": architecture,
         "capabilities": {"vision": vision},
         "loaded_instances": instances or [],
     }
@@ -76,6 +78,16 @@ def test_an_iq_quant_needs_it_even_below_the_size_threshold(integrated_laptop) -
 def test_a_small_ordinary_quant_does_not_need_it(integrated_laptop) -> None:
     assert requires_cpu_safe_profile("Q8_0", int(0.95 * 1024**3), host=integrated_laptop) is False
     assert requires_cpu_safe_profile("Q5_K_S", int(1.97 * 1024**3), host=integrated_laptop) is False
+
+
+def test_qwen35_uses_cpu_on_an_integrated_only_host(integrated_laptop) -> None:
+    assert requires_cpu_safe_profile(
+        "Q8_0",
+        int(0.95 * 1024**3),
+        "0.8B",
+        integrated_laptop,
+        "qwen35",
+    ) is True
 
 
 @pytest.mark.asyncio
@@ -193,6 +205,44 @@ async def test_an_iq_quant_below_the_threshold_is_loaded_through_the_cli(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_an_loaded_cpu_safe_model_is_reloaded_because_gpu_placement_is_hidden(monkeypatch) -> None:
+    client = LMStudioClient("http://localhost:1234")
+    used_cli: list[str] = []
+    posted: list[tuple[str, dict]] = []
+
+    async def fake_items():
+        return [
+            item(
+                "qwen3.5-0.8b",
+                "Q8_0",
+                0.95,
+                loaded(parallel=1),
+                architecture="qwen35",
+            )
+        ]
+
+    monkeypatch.setattr(client, "_fetch_model_items", fake_items)
+
+    async def fake_cli(model: str) -> int:
+        used_cli.append(model)
+        return 1000
+
+    async def fake_post(path, payload, timeout):
+        posted.append((path, payload))
+        return {}
+
+    monkeypatch.setattr(client, "_load_large_model_with_cli", fake_cli)
+    monkeypatch.setattr(client, "_post_json", fake_post)
+    monkeypatch.setattr(client, "_warm_up_structured_output", lambda *args, **kwargs: _noop())
+
+    result = await client.load_and_warm_model("qwen3.5-0.8b")
+
+    assert posted == [("/api/v1/models/unload", {"instance_id": "i1"})]
+    assert used_cli == ["qwen3.5-0.8b"]
+    assert result["profile"] == "compatibility"
+
+
+@pytest.mark.asyncio
 async def test_a_text_only_model_is_listed_and_marked_as_such(monkeypatch) -> None:
     """OCR pipelines can use a model without vision, so it has to be offered."""
     monkeypatch.setattr(
@@ -229,7 +279,8 @@ async def test_a_text_only_model_is_warmed_up_without_an_image(monkeypatch) -> N
 
     async def fake_post(self, path, payload, timeout=None):
         posted.append(payload)
-        return {"load_time_seconds": 0.1, "choices": [{"message": {"content": answer}}]}
+        content = answer if "response_format" in payload else "OK"
+        return {"load_time_seconds": 0.1, "choices": [{"message": {"content": content}}]}
 
     monkeypatch.setattr(LMStudioClient, "_post_json", fake_post)
 

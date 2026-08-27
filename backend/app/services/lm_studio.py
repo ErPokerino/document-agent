@@ -200,6 +200,7 @@ def requires_cpu_safe_profile(
     size_bytes: int | None,
     params_string: str | None = None,
     host: HostCapabilities | None = None,
+    architecture: str | None = None,
 ) -> bool:
     """Whether this model must be kept off the accelerator on *this* machine.
 
@@ -219,6 +220,14 @@ def requires_cpu_safe_profile(
         return False
     budget = host.offload_budget_bytes
     if budget <= 0:
+        return True
+    # Qwen 3.5 currently produces repeated/corrupted tokens when its text
+    # layers are offloaded through Vulkan on the Intel UHD adapter measured by
+    # this project. The same Q8 GGUF answers correctly on CPU; disabling flash
+    # attention and switching between the 2.28.2 and 2.29.1 runtimes did not
+    # change the Vulkan failure. Keep the workaround scoped to integrated-only
+    # hosts so a dedicated GPU can still run this architecture normally.
+    if host.has_integrated_only and (architecture or "").lower().startswith("qwen35"):
         return True
     # IQ codebook lookups are what first raised vk::Queue::submit:
     # ErrorDeviceLost, on an integrated adapter. The observation belongs to
@@ -338,7 +347,11 @@ class LMStudioClient:
             loaded_config = (loaded_instances[0].get("config") or {}) if loaded_instances else {}
             quantization = (item.get("quantization") or {}).get("name")
             needs_safe = requires_cpu_safe_profile(
-                quantization, item.get("size_bytes"), item.get("params_string"), host
+                quantization,
+                item.get("size_bytes"),
+                item.get("params_string"),
+                host,
+                item.get("architecture"),
             )
             parallel = loaded_config.get("parallel")
             profile_matches = not loaded_instances or loaded_profile_matches(
@@ -392,6 +405,7 @@ class LMStudioClient:
         large_model = requires_cpu_safe_profile(
             quantization, size_bytes, selected_item.get("params_string"),
             await self.host_capabilities(),
+            selected_item.get("architecture"),
         )
         profile = "compatibility" if large_model else "standard"
         # A model without vision has no projector to initialize, so the only
@@ -430,7 +444,12 @@ class LMStudioClient:
         # integrated GPU/shared RAM for 27B models. If the backend has not
         # already prepared the model, reload it with GPU layers disabled so
         # the Load action establishes a deterministic, safe runtime profile.
-        if already_loaded and not skip_warmup and not selected_profile_matches:
+        # LM Studio's model API does not echo the GPU-layer placement selected
+        # by `lms load --gpu off`. After a backend restart, matching context
+        # and parallelism therefore cannot prove that an already-loaded safe
+        # model is actually on CPU. Reload it explicitly unless this backend
+        # has already marked the instance ready and asked us to skip warm-up.
+        if already_loaded and not skip_warmup and (large_model or not selected_profile_matches):
             for instance in selected_instances:
                 await self._post_json(
                     "/api/v1/models/unload",
@@ -746,6 +765,14 @@ class LMStudioClient:
         include_schema: bool = True,
         include_image: bool = True,
     ) -> None:
+        # Qwen 3.5 on the measured Intel Vulkan runtime can satisfy a JSON
+        # grammar while filling it with repeated multilingual garbage. A text
+        # pipeline would therefore look warmed up and fail every document. A
+        # tiny unconstrained answer catches that corruption; keep it off the
+        # vision path, whose image request is already its runtime probe.
+        if not include_image:
+            await self._run_text_sanity_warmup(model)
+
         # A single generated token is enough to initialize the vision projector.
         # Running a full structured generation here can itself get stuck and is
         # not representative of document extraction performance.
@@ -825,6 +852,32 @@ class LMStudioClient:
             lambda parsed: self._named_response_shape_is_valid(parsed, entities),
             "Entity schema",
         )
+
+    async def _run_text_sanity_warmup(self, model: str) -> None:
+        payload = {
+            "model": model,
+            "reasoning_effort": "none",
+            "messages": [{"role": "user", "content": "Reply with exactly OK"}],
+            "temperature": 0,
+            "seed": MODEL_PROFILE_SEED,
+            "max_tokens": 8,
+            "stream": False,
+        }
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                response = await self._post_json(
+                    "/v1/chat/completions",
+                    payload,
+                    timeout=600,
+                )
+                content = response["choices"][0]["message"]["content"]
+                if isinstance(content, str) and content.strip().upper() == "OK":
+                    return
+                raise ValueError("response was not OK")
+            except (KeyError, IndexError, ValueError) as exc:
+                last_error = exc
+        raise LMStudioError(f"Text generation warm-up failed: {last_error}")
 
     async def _run_warmup_payload(
         self,
