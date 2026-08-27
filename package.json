@@ -10,7 +10,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run typecheck && npm run lint && npm run test:frontend && npm run test:backend",
-    "test:frontend": "node --test \"tests/*.test.mjs\"",
+    "test:frontend": "node --experimental-strip-types --test \"tests/*.test.mjs\"",
     "verify": "npm run test && npm run build",
     "test:backend": ".venv\\Scripts\\python.exe -m pytest -q",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
