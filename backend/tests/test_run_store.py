@@ -1,6 +1,6 @@
 import pytest
 
-from app.domain.models import FieldExtraction, PromptConfiguration
+from app.domain.models import FieldExtraction, ModelExecutionProfile, PromptConfiguration
 from app.services.run_store import RunStore
 
 
@@ -183,3 +183,24 @@ def test_a_run_records_the_steps_that_actually_ran(store) -> None:
 
 def test_a_run_from_before_the_steps_were_recorded_lists_none(store) -> None:
     assert store.get_run(record(store)).steps == []
+
+
+def test_the_model_execution_profile_is_snapshotted_with_the_run(store) -> None:
+    """A model id alone cannot explain accuracy changes after runtime settings change."""
+    profile = ModelExecutionProfile(
+        provider="lm_studio",
+        profile="standard",
+        context_length=8192,
+        parallel=1,
+        eval_batch_size=512,
+        flash_attention=True,
+        offload_kv_cache_to_gpu=False,
+        temperature=0,
+        seed=0,
+        reasoning_effort="none",
+    )
+
+    run_id = record(store, execution_profile=profile)
+
+    assert store.get_run(run_id).execution_profile == profile
+    assert store.list_runs()[0].execution_profile == profile

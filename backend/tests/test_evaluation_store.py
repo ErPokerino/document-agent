@@ -1,8 +1,15 @@
 import pytest
 
-from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, PromptConfiguration
+from app.domain.models import (
+    EntityDefinition,
+    EntityFormat,
+    FieldExtraction,
+    ModelExecutionProfile,
+    PromptConfiguration,
+)
 from app.evaluation.scoring import score_document
 from app.evaluation.store import EvaluationStore
+from app.pipeline.definition import PipelineDefinition
 
 
 ENTITIES = [
@@ -399,6 +406,35 @@ def test_pages_sent_to_document_ai_are_recorded_and_totalled(store) -> None:
     assert detail.ocr_pages == 5
     assert detail.layout_pages == 2
     assert detail.documents[0].ocr_pages == 2
+
+
+def test_an_evaluation_snapshots_its_pipeline_and_model_profile(store) -> None:
+    """Editing a named pipeline later must not rewrite what an experiment ran."""
+    definition = PipelineDefinition.default()
+    profile = ModelExecutionProfile(
+        provider="lm_studio",
+        profile="standard",
+        context_length=8192,
+        parallel=1,
+        temperature=0,
+        seed=0,
+    )
+    evaluation_id = store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        pipeline=definition.name,
+        steps=[step.kind.value for step in definition.steps],
+        pipeline_definition=definition,
+        execution_profile=profile,
+    )
+    definition.steps[0].config["scale"] = 9
+
+    detail = store.get_evaluation(evaluation_id)
+
+    assert detail.pipeline_definition.steps[0].config["scale"] == 1.35
+    assert detail.execution_profile == profile
 
 
 def test_a_run_that_never_touched_document_ai_counts_no_pages(store) -> None:

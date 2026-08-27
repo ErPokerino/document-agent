@@ -8,7 +8,7 @@ export type EvaluationFilters = {
   dataset: string;
   // Where the run happened. Same three choices as the model list in LLM, in
   // the same words, so the two places do not describe one idea differently.
-  runsOn: "" | "lm_studio" | "gemini";
+  runsOn: "" | "lm_studio" | "gemini" | "none";
   since: string;
   minAccuracy: string;
   minDocuments: string;

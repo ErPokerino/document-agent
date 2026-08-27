@@ -7,10 +7,13 @@ type RunTargetModel = Pick<ModelInfo, "id" | "name">;
 export function labRunTarget(
   settings: RunTargetSettings,
   activeModel: RunTargetModel | undefined,
+  modelIsUsed = true,
 ) {
   return {
     pipeline: settings.pipeline,
-    modelId: settings.model,
-    modelName: activeModel?.id === settings.model ? activeModel.name : settings.model,
+    modelId: modelIsUsed ? settings.model : "",
+    modelName: modelIsUsed
+      ? activeModel?.id === settings.model ? activeModel.name : settings.model
+      : "Not used by this pipeline",
   };
 }

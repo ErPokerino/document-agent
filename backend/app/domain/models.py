@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.pipeline.definition import DEFAULT_PIPELINE_NAME, PipelineStep
+from app.pipeline.definition import DEFAULT_PIPELINE_NAME, PipelineDefinition, PipelineStep
 
 
 DEFAULT_SYSTEM_PROMPT = """You are an information extraction agent specialized in invoices.
@@ -258,6 +258,27 @@ class AppSettings(BaseModel):
     prompts: PromptConfiguration = Field(default_factory=PromptConfiguration)
 
 
+class ModelExecutionProfile(BaseModel):
+    """The provider settings that can change an otherwise identical run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["lm_studio", "gemini"]
+    profile: Literal["standard", "compatibility", "compatibility_partial", "hosted"]
+    parameters: str | None = None
+    quantization: str | None = None
+    model_size_bytes: int | None = None
+    temperature: float = 0
+    seed: int | None = None
+    reasoning_effort: str | None = None
+    thinking_level: str | None = None
+    context_length: int | None = None
+    parallel: int | None = None
+    eval_batch_size: int | None = None
+    flash_attention: bool | None = None
+    offload_kv_cache_to_gpu: bool | None = None
+
+
 class PromptPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -434,6 +455,7 @@ class ExtractionRun(BaseModel):
     provider: str
     pipeline: str
     steps: list[str] = Field(default_factory=list)
+    execution_profile: ModelExecutionProfile | None = None
     has_corrections: bool
 
 
@@ -488,10 +510,11 @@ class Evaluation(BaseModel):
     error: str | None = None
     max_pages: int
     pipeline: str
-    # Where the work went, recorded when the run started. Past runs filter on
-    # it, and it cannot be recovered from the model id afterwards.
-    provider: Literal["lm_studio", "gemini"] = "lm_studio"
+    # Where the model ran, or `none` when this pipeline called no model. It
+    # cannot be recovered from the selected model id afterwards.
+    provider: Literal["lm_studio", "gemini", "none"] = "lm_studio"
     steps: list[str] = Field(default_factory=list)
+    execution_profile: ModelExecutionProfile | None = None
     succeeded_documents: int
     failed_documents: int
     pending_documents: int
@@ -524,6 +547,7 @@ class EvaluationDocumentResult(BaseModel):
 
 class EvaluationDetail(Evaluation):
     prompts: PromptConfiguration
+    pipeline_definition: PipelineDefinition | None = None
     documents: list[EvaluationDocumentResult]
 
 

@@ -42,10 +42,12 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "dataset_store", DatasetStore(tmp_path / "datasets"))
     monkeypatch.setattr(main, "LMStudioClient", FakeClient)
     main.model_runtime_states.clear()
+    main.model_runtime_profiles.clear()
     main.release_model_operation()
     with TestClient(main.app) as client:
         yield client
     main.model_runtime_states.clear()
+    main.model_runtime_profiles.clear()
     main.release_model_operation()
 
 
@@ -482,6 +484,36 @@ def test_retrying_requires_the_model_the_run_used(api) -> None:
 
     assert response.status_code == 409
     assert "another-model" in response.json()["detail"]
+
+
+def test_retrying_refuses_a_different_model_execution_profile(api) -> None:
+    """A retry must not merge results produced under different runtime controls."""
+    from app.domain.models import ModelExecutionProfile
+
+    labelled_dataset(api)
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=2,
+        execution_profile=ModelExecutionProfile(
+            provider="lm_studio",
+            profile="standard",
+            context_length=4096,
+            parallel=1,
+            temperature=0,
+            seed=0,
+        ),
+    )
+    main.evaluation_store.record_document_failure(evaluation_id, "a.pdf", "boom")
+    main.evaluation_store.complete(evaluation_id)
+    main.model_runtime_states["vision-model"] = "ready"
+    main.model_runtime_profiles["vision-model"] = "standard"
+
+    response = api.post(f"/api/evaluations/{evaluation_id}/retry")
+
+    assert response.status_code == 409
+    assert "execution profile differs" in response.json()["detail"]
 
 
 def test_retrying_a_run_with_nothing_left_to_do_is_refused(api) -> None:

@@ -1,6 +1,6 @@
-"""Where a run happened, recorded on the run.
+"""Where a run's model happened, recorded on the run.
 
-Past runs can be filtered by where the work went, and that cannot be worked
+Past runs can be filtered by where the model ran, and that cannot be worked
 out afterwards from the model id: a local model can be uninstalled, and a
 hosted one renamed. It is a fact about what happened, so it is stored with
 the pipeline, the page limit and everything else the run was started with.
@@ -38,6 +38,18 @@ def test_a_hosted_run_records_the_api_it_used(tmp_path) -> None:
         provider="gemini",
     )
     assert store.get_evaluation(run).provider == "gemini"
+
+
+def test_a_pipeline_that_called_no_model_records_none(tmp_path) -> None:
+    store = make_store(tmp_path)
+    run = store.start(
+        dataset="d",
+        model="Not used",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        provider="none",
+    )
+    assert store.get_evaluation(run).provider == "none"
 
 
 def test_runs_from_before_this_column_are_placed_by_their_model(tmp_path) -> None:

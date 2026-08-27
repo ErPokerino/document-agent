@@ -5,6 +5,7 @@ from app import main
 from app.domain.models import AppSettings, FieldExtraction, ModelInfo
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.store import EvaluationStore
+from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.services.lm_studio import LMStudioError
 from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
@@ -36,6 +37,19 @@ def pdf_bytes() -> bytes:
     data = document.tobytes()
     document.close()
     return data
+
+
+def test_a_pipeline_that_calls_no_model_records_no_selected_model() -> None:
+    """The LLM setting is unrelated metadata for a Custom Extractor run."""
+    pipeline = PipelineDefinition(
+        name="Custom Extractor",
+        steps=[PipelineStep(kind=StepKind.document_ai_extract)],
+    )
+
+    assert main._recorded_model(AppSettings(model="vision-model"), pipeline) == (
+        "Not used",
+        "none",
+    )
 
 
 @pytest.fixture

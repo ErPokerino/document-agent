@@ -45,7 +45,8 @@ const rows = (csv) => csv.trim().split("\n").map((line) => line.split(","));
 test("one row per run, with the columns an analysis needs", () => {
   const [header, first] = rows(runsToCsv([run()], null));
 
-  assert.deepEqual(header.slice(0, 7), ["run_id", "created_at", "dataset", "pipeline", "model", "runs_on", "status"]);
+  assert.deepEqual(header.slice(0, 6), ["run_id", "created_at", "dataset", "pipeline", "model", "runs_on"]);
+  assert.ok(header.includes("status"));
   assert.equal(first[0], "16");
   assert.equal(first[3], "OCR then model");
   assert.equal(header.length, first.length);
@@ -114,6 +115,37 @@ test("the export carries where the run happened, so a filtered view survives it"
   const column = header.split(",").indexOf("runs_on");
   assert.ok(column > -1, "runs_on must be a column");
   assert.equal(row.split(",")[column], "gemini");
+});
+
+test("the export carries the model controls that make runs comparable", () => {
+  const csv = runsToCsv(
+    [run({
+      execution_profile: {
+        provider: "lm_studio",
+        profile: "standard",
+        parameters: "0.8B",
+        quantization: "Q8_0",
+        model_size_bytes: 1019215872,
+        temperature: 0,
+        seed: 0,
+        reasoning_effort: "none",
+        thinking_level: null,
+        context_length: 8192,
+        parallel: 1,
+        eval_batch_size: 512,
+        flash_attention: true,
+        offload_kv_cache_to_gpu: false,
+      },
+    })],
+    null,
+  );
+  const [header, row] = rows(csv);
+
+  assert.equal(row[header.indexOf("execution_profile")], "standard");
+  assert.equal(row[header.indexOf("quantization")], "Q8_0");
+  assert.equal(row[header.indexOf("model_size_bytes")], "1019215872");
+  assert.equal(row[header.indexOf("context_length")], "8192");
+  assert.equal(row[header.indexOf("seed")], "0");
 });
 
 test("a run from before the field existed exports as local", () => {

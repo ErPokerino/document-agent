@@ -11,6 +11,7 @@ request handlers.
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from app.domain.models import FieldExtraction, PromptConfiguration
+from app.domain.models import FieldExtraction, ModelExecutionProfile, PromptConfiguration
 from app.pipeline.definition import PipelineDefinition
 
 
@@ -38,7 +39,8 @@ CREATE TABLE IF NOT EXISTS runs (
     source          TEXT    NOT NULL,
     provider        TEXT    NOT NULL DEFAULT 'lm_studio',
     pipeline        TEXT,
-    steps           TEXT
+    steps           TEXT,
+    execution_profile_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS run_corrections (
@@ -69,6 +71,7 @@ class RunSummary:
     pipeline: str
     # What actually ran, in order, rather than only the name it ran under.
     steps: list[str]
+    execution_profile: ModelExecutionProfile | None
     has_corrections: bool
 
 
@@ -104,6 +107,8 @@ class RunStore:
                 connection.execute("ALTER TABLE runs ADD COLUMN pipeline TEXT")
             if "steps" not in existing:
                 connection.execute("ALTER TABLE runs ADD COLUMN steps TEXT")
+            if "execution_profile_json" not in existing:
+                connection.execute("ALTER TABLE runs ADD COLUMN execution_profile_json TEXT")
 
     def read_document(self, file_sha256: str) -> bytes | None:
         path = self._document_path(file_sha256)
@@ -142,6 +147,7 @@ class RunStore:
         provider: str = "lm_studio",
         pipeline: str | None = None,
         steps: list[str] | None = None,
+        execution_profile: ModelExecutionProfile | None = None,
     ) -> int:
         serialized = {
             name: field.model_dump(mode="json") for name, field in extraction.items()
@@ -149,14 +155,21 @@ class RunStore:
         digest = hashlib.sha256(content).hexdigest()
         document_path = self._document_path(digest)
         if not document_path.exists():
-            document_path.write_bytes(content)
+            # The database row must never point at a PDF truncated by a stopped
+            # backend. An identical document may be reused by many runs.
+            temporary = document_path.with_name(f"{document_path.name}.{os.getpid()}.tmp")
+            try:
+                temporary.write_bytes(content)
+                os.replace(temporary, document_path)
+            finally:
+                temporary.unlink(missing_ok=True)
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO runs (created_at, filename, file_sha256, model, page_count,
                                   processed_pages, elapsed_ms, prompts_json, extraction_json,
-                                  source, provider, pipeline, steps)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source, provider, pipeline, steps, execution_profile_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -172,6 +185,11 @@ class RunStore:
                     provider,
                     pipeline or PipelineDefinition.default().name,
                     ",".join(steps or []),
+                    (
+                        json.dumps(execution_profile.model_dump(mode="json"), ensure_ascii=False)
+                        if execution_profile is not None
+                        else None
+                    ),
                 ),
             )
             return int(cursor.lastrowid)
@@ -268,5 +286,10 @@ class RunStore:
             provider=row["provider"],
             pipeline=row["pipeline"] or PipelineDefinition.default().name,
             steps=[step for step in (row["steps"] or "").split(",") if step],
+            execution_profile=(
+                ModelExecutionProfile.model_validate(json.loads(row["execution_profile_json"]))
+                if row["execution_profile_json"]
+                else None
+            ),
             has_corrections=bool(row["correction_count"]),
         )

@@ -30,6 +30,7 @@ from app.domain.models import (
     LabelsRequest,
     MetricTally,
     Metrics,
+    ModelExecutionProfile,
     ModelInfo,
     RuntimeEngineInfo,
     ModelLoadRequest,
@@ -67,7 +68,17 @@ from app.pipeline.engine import DocumentPipeline, PipelineContext
 from app.pipeline.store import InvalidPipelineName, PipelineStore, UnknownPipeline
 from app.services.document_ai import DocumentAiClient, DocumentAiError, ServiceAccount
 from app.services.gemini import GEMINI_MODELS, GeminiClient, GeminiError, find_model
-from app.services.lm_studio import LMStudioClient, LMStudioError, runtime_uses_gpu
+from app.services.lm_studio import (
+    LMStudioClient,
+    LMStudioError,
+    MODEL_PROFILE_CONTEXT_LENGTH,
+    MODEL_PROFILE_EVAL_BATCH_SIZE,
+    MODEL_PROFILE_FLASH_ATTENTION,
+    MODEL_PROFILE_OFFLOAD_KV_CACHE,
+    MODEL_PROFILE_PARALLEL,
+    MODEL_PROFILE_SEED,
+    runtime_uses_gpu,
+)
 from app.services.run_store import RunStore
 from app.services.master_data import (
     TABLES,
@@ -120,6 +131,7 @@ clear_inherited_model_default(SETTINGS_PATH)
 pipeline_store.seed_default()
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
+model_runtime_profiles: dict[str, str] = {}
 active_model_operation: str | None = None
 active_document_task: asyncio.Task[Any] | None = None
 evaluation_task: asyncio.Task | None = None
@@ -221,7 +233,7 @@ def _unique_model_alias(model_id: str, available: list[ModelInfo]) -> ModelInfo 
 
 async def _ensure_model_ready(
     settings: AppSettings, pipeline: PipelineDefinition | None = None
-) -> None:
+) -> Any | None:
     """Raise unless the configured model can answer right now.
 
     A hosted model is ready as soon as its key is present; a local one has to be
@@ -234,10 +246,11 @@ async def _ensure_model_ready(
     directly, outside any — the model is always needed.
     """
     if pipeline is not None and not uses_model(pipeline):
-        return
+        return None
 
     if settings.provider == "gemini":
-        if find_model(settings.model) is None:
+        selected = find_model(settings.model)
+        if selected is None:
             raise HTTPException(
                 status_code=409,
                 detail=f"{settings.model} is not one of the supported hosted models.",
@@ -247,7 +260,7 @@ async def _ensure_model_ready(
                 status_code=409,
                 detail="No Gemini API key is configured. Add one in LLM.",
             )
-        return
+        return selected
 
     try:
         # Every installed model, not only the ones that can see: a text-only
@@ -276,6 +289,59 @@ async def _ensure_model_ready(
             status_code=409,
             detail="The active model is not ready. Open LLM and use Load & warm up first.",
         )
+    return selected
+
+
+def _execution_profile(
+    settings: AppSettings,
+    pipeline: PipelineDefinition | None,
+    selected: Any | None,
+) -> ModelExecutionProfile | None:
+    """Snapshot provider controls that are otherwise lost after a run."""
+    if pipeline is not None and not uses_model(pipeline):
+        return None
+    if settings.provider == "gemini":
+        supports_thinking = bool(getattr(selected, "supports_thinking", True))
+        return ModelExecutionProfile(
+            provider="gemini",
+            profile="hosted",
+            temperature=0,
+            thinking_level=settings.gemini.thinking_level if supports_thinking else None,
+        )
+
+    runtime_profile = model_runtime_profiles.get(settings.model)
+    if runtime_profile not in {"standard", "compatibility", "compatibility_partial"}:
+        runtime_profile = (
+            "compatibility" if getattr(selected, "requires_safe_profile", False) else "standard"
+        )
+    # The CLI path for a CPU-safe load controls context, concurrency and CPU
+    # placement, but LM Studio does not expose the remaining load settings on
+    # that path. Null records that limit instead of claiming they were applied.
+    complete_load_controls = runtime_profile != "compatibility"
+    return ModelExecutionProfile(
+        provider="lm_studio",
+        profile=runtime_profile,
+        parameters=getattr(selected, "parameters", None),
+        quantization=getattr(selected, "quantization", None),
+        model_size_bytes=getattr(selected, "size_bytes", None),
+        temperature=0,
+        seed=MODEL_PROFILE_SEED,
+        reasoning_effort="none",
+        context_length=MODEL_PROFILE_CONTEXT_LENGTH,
+        parallel=MODEL_PROFILE_PARALLEL,
+        eval_batch_size=(MODEL_PROFILE_EVAL_BATCH_SIZE if complete_load_controls else None),
+        flash_attention=(MODEL_PROFILE_FLASH_ATTENTION if complete_load_controls else None),
+        offload_kv_cache_to_gpu=(
+            MODEL_PROFILE_OFFLOAD_KV_CACHE if complete_load_controls else None
+        ),
+    )
+
+
+def _recorded_model(settings: AppSettings, pipeline: PipelineDefinition) -> tuple[str, str]:
+    """Name only a model the pipeline can actually call."""
+    if not uses_model(pipeline):
+        return "Not used", "none"
+    return settings.model, settings.provider
 
 
 def _pipeline_context(settings: AppSettings, filename: str, content: bytes) -> PipelineContext:
@@ -428,8 +494,10 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
             for model_id in list(model_runtime_states):
                 if model_id != request.model:
                     model_runtime_states[model_id] = "not_loaded"
+                    model_runtime_profiles.pop(model_id, None)
             model_runtime_states[request.model] = "ready"
             model_warmup_modes[request.model] = str(result["warmup_mode"])
+            model_runtime_profiles[request.model] = str(result["profile"])
             # Re-read rather than write back the snapshot this request
             # started with: a load takes minutes, and anything chosen in the
             # meantime — a pipeline, above all — would be reverted by it.
@@ -688,7 +756,12 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
     async with exclusive_model_operation("processing"):
         active_document_task = asyncio.current_task()
         try:
-            await _ensure_model_ready(settings, _selected_pipeline(settings))
+            pipeline_definition = _selected_pipeline(settings)
+            selected_model = await _ensure_model_ready(settings, pipeline_definition)
+            execution_profile = _execution_profile(
+                settings, pipeline_definition, selected_model
+            )
+            recorded_model, recorded_provider = _recorded_model(settings, pipeline_definition)
             context = _pipeline_context(settings, file.filename or "invoice.pdf", content)
             pipeline = _document_pipeline(settings)
             started = time.perf_counter()
@@ -709,22 +782,23 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             run_id = run_store.record_run(
                 filename=context.filename,
                 content=content,
-                model=context.model,
+                model=recorded_model,
                 prompts=settings.prompts,
                 extraction=result.artifacts["extraction"],
                 page_count=result.artifacts["page_count"],
                 processed_pages=result.artifacts["processed_pages"],
                 elapsed_ms=round((time.perf_counter() - started) * 1000),
                 source="workspace",
-                provider=settings.provider,
+                provider=recorded_provider,
                 pipeline=settings.pipeline,
-                steps=[step.kind.value for step in _selected_pipeline(settings).steps],
+                steps=[step.kind.value for step in pipeline_definition.steps],
+                execution_profile=execution_profile,
             )
 
             return ExtractionResponse(
                 run_id=run_id,
                 filename=context.filename,
-                model=context.model,
+                model=recorded_model,
                 elapsed_ms=round((time.perf_counter() - started) * 1000),
                 data=result.artifacts["extraction"],
                 processing=ProcessingInfo(
@@ -786,6 +860,7 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "pipeline",
                 "provider",
                 "steps",
+                "execution_profile",
                 "succeeded_documents",
                 "failed_documents",
                 "pending_documents",
@@ -1411,7 +1486,10 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
     """
     _require_dataset(name)
     settings = settings_store.read()
-    await _ensure_model_ready(settings)
+    pipeline_definition = _selected_pipeline(settings)
+    selected_model = await _ensure_model_ready(settings, pipeline_definition)
+    execution_profile = _execution_profile(settings, pipeline_definition, selected_model)
+    recorded_model, recorded_provider = _recorded_model(settings, pipeline_definition)
 
     try:
         content = dataset_store.read_document(name, document)
@@ -1436,16 +1514,17 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
         run_store.record_run(
             filename=document,
             content=content,
-            model=settings.model,
+            model=recorded_model,
             prompts=settings.prompts,
             extraction=extraction,
             page_count=result.artifacts["page_count"],
             processed_pages=result.artifacts["processed_pages"],
             elapsed_ms=elapsed_ms,
             source="labelling",
-            provider=settings.provider,
+            provider=recorded_provider,
             pipeline=settings.pipeline,
-            steps=[step.kind.value for step in _selected_pipeline(settings).steps],
+            steps=[step.kind.value for step in pipeline_definition.steps],
+            execution_profile=execution_profile,
         )
         return DraftLabels(
             document=document,
@@ -1530,6 +1609,7 @@ async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
     return EvaluationDetail(
         **summary.model_dump(),
         prompts=detail.prompts,
+        pipeline_definition=detail.pipeline_definition,
         documents=[asdict(document) for document in detail.documents],
     )
 
@@ -1572,18 +1652,22 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     pipeline_definition = _selected_pipeline(settings)
     steps = _document_pipeline(settings).steps
 
-    await _ensure_model_ready(settings, pipeline_definition)
+    selected_model = await _ensure_model_ready(settings, pipeline_definition)
+    execution_profile = _execution_profile(settings, pipeline_definition, selected_model)
+    recorded_model, recorded_provider = _recorded_model(settings, pipeline_definition)
 
     claim_model_operation("evaluating")
     evaluation_id = evaluation_store.start(
         dataset=request.dataset,
-        model=settings.model,
+        model=recorded_model,
         prompts=settings.prompts,
         total_documents=len(documents),
         max_pages=pipeline_definition.page_limit,
         pipeline=settings.pipeline,
-        provider=settings.provider,
+        provider=recorded_provider,
         steps=[step.kind.value for step in pipeline_definition.steps],
+        pipeline_definition=pipeline_definition,
+        execution_profile=execution_profile,
     )
     evaluation_cancelled = asyncio.Event()
 
@@ -1598,12 +1682,13 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 documents=documents,
                 entities=settings.prompts.entities,
                 prompts=settings.prompts,
-                model=settings.model,
-                provider=settings.provider,
+                model=recorded_model,
+                provider=recorded_provider,
                 max_pages=pipeline_definition.page_limit,
                 steps=steps,
                 pipeline_name=settings.pipeline,
                 pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
+                execution_profile=execution_profile,
                 make_context=lambda name, content: _pipeline_context(settings, name, content),
                 cancelled=cancelled,
             )
@@ -1650,8 +1735,13 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
 
     settings = settings_store.read()
     try:
-        # The run's own page limit, not the one the pipeline carries today.
-        definition = pipeline_store.read(detail.pipeline)
+        # New runs carry the complete definition. Legacy rows fall back to the
+        # saved pipeline because the earlier schema retained only its name.
+        definition = (
+            detail.pipeline_definition.model_copy(deep=True)
+            if detail.pipeline_definition is not None
+            else pipeline_store.read(detail.pipeline)
+        )
         page_limit = detail.max_pages or definition.page_limit
         definition.page_limit = page_limit
         steps = build_steps(
@@ -1677,16 +1767,33 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
     # after the pipeline, because a Custom Extractor run scores the same
     # whatever is loaded, and refusing to finish it over an unused model would
     # leave it half done for no reason.
-    if uses_model(definition) and settings.model != detail.model:
+    if uses_model(definition) and (
+        settings.provider != detail.provider or settings.model != detail.model
+    ):
         raise HTTPException(
             status_code=409,
             detail=(
-                f"This run used {detail.model}. Select and warm up that model in LLM, "
-                "so the retried documents are scored the same way as the rest of the run."
+                f"This run used {detail.provider}/{detail.model}; the active selection is "
+                f"{settings.provider}/{settings.model}. The retry was not started."
             ),
         )
 
-    await _ensure_model_ready(settings, definition)
+    selected_model = await _ensure_model_ready(settings, definition)
+    current_profile = _execution_profile(settings, definition, selected_model)
+    if detail.execution_profile is not None and current_profile != detail.execution_profile:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The active model execution profile differs from the one recorded for this run. "
+                "The retry was not started."
+            ),
+        )
+
+    retry_settings = (
+        settings.model_copy(update={"provider": detail.provider, "model": detail.model})
+        if uses_model(definition)
+        else settings
+    )
 
     attempted = evaluation_store.attempted_documents(evaluation_id)
     documents: list[tuple[str, dict[str, Any]]] = []
@@ -1718,13 +1825,14 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 entities=detail.prompts.entities,
                 prompts=detail.prompts,
                 model=detail.model,
-                provider=settings.provider,
+                provider=detail.provider,
                 max_pages=page_limit,
                 steps=steps,
                 pipeline_name=detail.pipeline,
                 pipeline_steps=detail.steps,
+                execution_profile=detail.execution_profile,
                 make_context=lambda name, content: _pipeline_context(
-                    settings.model_copy(update={"model": detail.model}), name, content
+                    retry_settings, name, content
                 ),
                 cancelled=cancelled,
             )

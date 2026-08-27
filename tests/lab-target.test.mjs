@@ -25,3 +25,14 @@ test("a stale model object cannot change the model shown for the next run", () =
   assert.equal(target.modelId, "google/gemma-4-e4b");
   assert.equal(target.modelName, "google/gemma-4-e4b");
 });
+
+test("a pipeline that calls no model names no selected model", () => {
+  const target = labRunTarget(
+    { pipeline: "Custom Extractor", model: "gemini-3.5-flash-lite" },
+    { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite" },
+    false,
+  );
+
+  assert.equal(target.modelId, "");
+  assert.equal(target.modelName, "Not used by this pipeline");
+});

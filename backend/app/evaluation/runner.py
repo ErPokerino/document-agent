@@ -10,7 +10,7 @@ import asyncio
 import time
 from typing import Any, Callable, Iterable
 
-from app.domain.models import EntityDefinition, PromptConfiguration
+from app.domain.models import EntityDefinition, ModelExecutionProfile, PromptConfiguration
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.scoring import score_document
 from app.evaluation.store import EvaluationStore
@@ -62,6 +62,7 @@ async def run_evaluation(
     pipeline_name: str = DEFAULT_PIPELINE_NAME,
     pipeline_steps: list[str] | None = None,
     provider: str = "lm_studio",
+    execution_profile: ModelExecutionProfile | None = None,
     cancelled: asyncio.Event | None = None,
 ) -> None:
     try:
@@ -136,6 +137,7 @@ async def run_evaluation(
                     provider=provider,
                     pipeline=pipeline_name,
                     steps=pipeline_steps or [],
+                    execution_profile=execution_profile,
                 )
 
         if cancelled is not None and cancelled.is_set():

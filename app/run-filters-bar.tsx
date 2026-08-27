@@ -49,11 +49,12 @@ export function RunFiltersBar({ evaluations, filters, setFilters, children }: Pr
           {distinctPipelines(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
       </label>
-      <label><span>Runs on</span>
+      <label><span>Model runs on</span>
         <select value={filters.runsOn} onChange={(event) => setFilters({ ...filters, runsOn: event.target.value as EvaluationFilters["runsOn"] })}>
           <option value="">Anywhere</option>
           <option value="lm_studio">On this machine</option>
           <option value="gemini">Through an API</option>
+          <option value="none">No model</option>
         </select>
       </label>
       <label><span>From</span>

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from app.domain.models import PromptConfiguration
+from app.domain.models import ModelExecutionProfile, PromptConfiguration
 from app.pipeline.definition import PipelineDefinition
 from app.evaluation.scoring import EvaluationMetrics, FieldOutcome, aggregate
 
@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS evaluations (
     max_pages           INTEGER NOT NULL DEFAULT 0,
     pipeline            TEXT,
     steps               TEXT,
-    provider            TEXT
+    provider            TEXT,
+    pipeline_json       TEXT,
+    execution_profile_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_documents (
@@ -100,13 +102,13 @@ class EvaluationSummary:
     error: str | None
     max_pages: int
     pipeline: str
-    # Where the work went. Not derivable afterwards from the model id: a local
-    # model can be uninstalled and a hosted one renamed, and either way the run
-    # already happened somewhere.
+    # Where the model ran, or none when the pipeline called no model. Not
+    # derivable afterwards from whichever model happens to be selected today.
     provider: str
     # What actually ran, in order. The pipeline name is a label and can be
     # edited or reused; this is the only record of the shape of the run.
     steps: list[str]
+    execution_profile: ModelExecutionProfile | None
     succeeded_documents: int
     failed_documents: int
     pending_documents: int
@@ -125,6 +127,7 @@ class EvaluationSummary:
 @dataclass(frozen=True)
 class EvaluationDetail(EvaluationSummary):
     prompts: PromptConfiguration = None  # type: ignore[assignment]
+    pipeline_definition: PipelineDefinition | None = None
     documents: list[EvaluationDocument] = None  # type: ignore[assignment]
 
     @property
@@ -164,6 +167,12 @@ class EvaluationStore:
             connection.execute("ALTER TABLE evaluations ADD COLUMN steps TEXT")
         if "provider" not in existing:
             connection.execute("ALTER TABLE evaluations ADD COLUMN provider TEXT")
+        if "pipeline_json" not in existing:
+            connection.execute("ALTER TABLE evaluations ADD COLUMN pipeline_json TEXT")
+        if "execution_profile_json" not in existing:
+            connection.execute(
+                "ALTER TABLE evaluations ADD COLUMN execution_profile_json TEXT"
+            )
         # Runs recorded before the column exists still happened somewhere. The
         # registry of hosted models is the best evidence available in
         # hindsight; anything it does not know ran through LM Studio.
@@ -228,14 +237,17 @@ class EvaluationStore:
         pipeline: str | None = None,
         steps: list[str] | None = None,
         provider: str = "lm_studio",
+        pipeline_definition: PipelineDefinition | None = None,
+        execution_profile: ModelExecutionProfile | None = None,
     ) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO evaluations
                     (created_at, dataset, model, prompts_json, status, total_documents,
-                     max_pages, pipeline, steps, provider)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)
+                     max_pages, pipeline, steps, provider, pipeline_json,
+                     execution_profile_json)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -247,6 +259,16 @@ class EvaluationStore:
                     pipeline or PipelineDefinition.default().name,
                     ",".join(steps or []),
                     provider,
+                    (
+                        json.dumps(pipeline_definition.model_dump(mode="json"), ensure_ascii=False)
+                        if pipeline_definition is not None
+                        else None
+                    ),
+                    (
+                        json.dumps(execution_profile.model_dump(mode="json"), ensure_ascii=False)
+                        if execution_profile is not None
+                        else None
+                    ),
                 ),
             )
             return int(cursor.lastrowid)
@@ -431,6 +453,11 @@ class EvaluationStore:
         return EvaluationDetail(
             **{key: getattr(summary, key) for key in EvaluationSummary.__dataclass_fields__},
             prompts=PromptConfiguration.model_validate(json.loads(row["prompts_json"])),
+            pipeline_definition=(
+                PipelineDefinition.model_validate(json.loads(row["pipeline_json"]))
+                if row["pipeline_json"]
+                else None
+            ),
             documents=[
                 EvaluationDocument(
                     name=document["document"],
@@ -493,6 +520,11 @@ class EvaluationStore:
             pipeline=row["pipeline"] or PipelineDefinition.default().name,
             provider=row["provider"] or "lm_studio",
             steps=[step for step in (row["steps"] or "").split(",") if step],
+            execution_profile=(
+                ModelExecutionProfile.model_validate(json.loads(row["execution_profile_json"]))
+                if row["execution_profile_json"]
+                else None
+            ),
             succeeded_documents=int(progress["succeeded"] or 0),
             failed_documents=int(progress["failed"] or 0),
             pending_documents=max(row["total_documents"] - completed, 0),

@@ -52,6 +52,7 @@ import type {
   Evaluation,
   EvaluationDetail,
   MetricTally,
+  ModelExecutionProfile,
   ModelInfo,
 } from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
@@ -62,6 +63,13 @@ type Props = {
   activeModel: ModelInfo | undefined;
   pipelineKinds: string[];
 };
+
+function executionProfileLabel(profile: ModelExecutionProfile): string {
+  if (profile.provider === "gemini") {
+    return `hosted profile · temperature ${profile.temperature}${profile.thinking_level ? ` · thinking ${profile.thinking_level}` : ""}`;
+  }
+  return `${profile.profile} profile${profile.context_length ? ` · ${profile.context_length.toLocaleString()} context` : ""}${profile.seed !== null ? ` · seed ${profile.seed}` : ""}`;
+}
 
 /** Run the configured extraction over a dataset and score what comes back. */
 export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Props) {
@@ -90,7 +98,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
   // Reads this machine's own history rather than assuming a cost, so it
   // still tells the truth on a machine this one knows nothing about.
-  const runTarget = labRunTarget(settings, activeModel);
+  const runTarget = labRunTarget(settings, activeModel, usesModel(pipelineKinds));
   const runNote = runWarning(activeModel, pipelineKinds, evaluations, runTarget.pipeline);
   const visibleEvaluations = sortEvaluations(
     filterEvaluations(evaluations, filters),
@@ -228,7 +236,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         <div className="run-target">
           <span><Workflow size={13} /> Pipeline <strong>{runTarget.pipeline}</strong></span>
           <span><Cpu size={13} /> Model <strong>{runTarget.modelName}</strong></span>
-          <InfoHint text="A run always uses the pipeline and model selected right now, and records both, so two runs can be compared afterwards." />
+          <InfoHint text="A run records the pipeline and its execution profile. The selected model is recorded only when the pipeline can call it." />
         </div>
 
         <div className="run-controls">
@@ -263,7 +271,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         <span className="run-progress-bar"><i style={{ width: `${(running.completed_documents / Math.max(running.total_documents, 1)) * 100}%` }} /></span>
       </div>
         )}
-        <p className="field-help">A test uses the model, so document processing in Workspace is refused while it runs.</p>
+        <p className="field-help">While a Lab test runs, document processing in Workspace is refused so the two pipelines cannot overlap.</p>
       </div>
 
       <div className="settings-tabs lab-tabs">
@@ -281,7 +289,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       <div>
         <h3>{view === "runs" ? "Past runs" : "Analytics"}</h3>
         <p>{view === "runs"
-          ? "Each run remembers the prompts, the model and the page limit it used."
+          ? "Each run remembers the prompts, full pipeline and model execution profile it used."
           : "Approaches compared over the runs these filters leave in view."}</p>
       </div>
         </div>
@@ -454,6 +462,11 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         )}
         <span className="pages-tag">{openEvaluation.max_pages || "?"} pages per extraction</span>
         <span className="pages-tag">{openEvaluation.prompts.entities.length} entities</span>
+        {openEvaluation.execution_profile && (
+          <span className="pages-tag" title="The model controls recorded when this run started">
+            {executionProfileLabel(openEvaluation.execution_profile)}
+          </span>
+        )}
         {openEvaluation.prompt_tokens > 0 && (
           <span className="pages-tag">
             {openEvaluation.prompt_tokens.toLocaleString()} in / {openEvaluation.completion_tokens.toLocaleString()} out tokens
@@ -486,7 +499,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
               .
             </strong>{" "}
             The accuracy above covers only the {openEvaluation.succeeded_documents} documents that were scored.
-            A retry reuses this run&apos;s prompts, model and page limit, so the result stays one experiment.
+            A retry reuses this run&apos;s prompts, pipeline, model profile and page limit, so the result stays one experiment.
           </span>
           <button
             className="secondary-button"

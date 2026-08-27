@@ -16,6 +16,17 @@ COLUMNS = (
     "run_id",
     "dataset",
     "model",
+    "provider",
+    "pipeline",
+    "steps",
+    "execution_profile",
+    "parameters",
+    "quantization",
+    "model_size_bytes",
+    "context_length",
+    "parallel",
+    "seed",
+    "thinking_level",
     "max_pages",
     "created_at",
     "document",
@@ -51,6 +62,37 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
         "run_id": detail.id,
         "dataset": detail.dataset,
         "model": detail.model,
+        "provider": detail.provider,
+        "pipeline": detail.pipeline,
+        "steps": " > ".join(detail.steps),
+        "execution_profile": (
+            detail.execution_profile.profile if detail.execution_profile is not None else None
+        ),
+        "parameters": (
+            detail.execution_profile.parameters if detail.execution_profile is not None else None
+        ),
+        "quantization": (
+            detail.execution_profile.quantization if detail.execution_profile is not None else None
+        ),
+        "model_size_bytes": (
+            detail.execution_profile.model_size_bytes
+            if detail.execution_profile is not None
+            else None
+        ),
+        "context_length": (
+            detail.execution_profile.context_length
+            if detail.execution_profile is not None
+            else None
+        ),
+        "parallel": (
+            detail.execution_profile.parallel if detail.execution_profile is not None else None
+        ),
+        "seed": detail.execution_profile.seed if detail.execution_profile is not None else None,
+        "thinking_level": (
+            detail.execution_profile.thinking_level
+            if detail.execution_profile is not None
+            else None
+        ),
         "max_pages": detail.max_pages,
         "created_at": detail.created_at,
     }

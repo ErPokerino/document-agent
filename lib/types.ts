@@ -80,8 +80,9 @@ export type Evaluation = {
   error: string | null;
   max_pages: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini";
+  provider: "lm_studio" | "gemini" | "none";
   steps: string[];
+  execution_profile: ModelExecutionProfile | null;
   succeeded_documents: number;
   failed_documents: number;
   pending_documents: number;
@@ -106,8 +107,9 @@ export type EvaluationDetail = {
   error: string | null;
   max_pages: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini";
+  provider: "lm_studio" | "gemini" | "none";
   steps: string[];
+  execution_profile: ModelExecutionProfile | null;
   succeeded_documents: number;
   failed_documents: number;
   pending_documents: number;
@@ -119,6 +121,7 @@ export type EvaluationDetail = {
   layout_pages: number;
   metrics: Metrics;
   prompts: PromptConfiguration;
+  pipeline_definition: PipelineDefinition | null;
   documents: EvaluationDocumentResult[];
 };
 
@@ -168,6 +171,7 @@ export type ExtractionRun = {
   provider: string;
   pipeline: string;
   steps: string[];
+  execution_profile: ModelExecutionProfile | null;
   has_corrections: boolean;
 };
 
@@ -184,6 +188,7 @@ export type ExtractionRunDetail = {
   provider: string;
   pipeline: string;
   steps: string[];
+  execution_profile: ModelExecutionProfile | null;
   has_corrections: boolean;
   prompts: PromptConfiguration;
   extraction: Record<string, FieldExtraction>;
@@ -291,6 +296,23 @@ export type Metrics = {
   accuracy: number | null;
   per_entity: Record<string, MetricTally>;
   per_confidence: Record<string, MetricTally>;
+};
+
+export type ModelExecutionProfile = {
+  provider: "lm_studio" | "gemini";
+  profile: "standard" | "compatibility" | "compatibility_partial" | "hosted";
+  parameters: string | null;
+  quantization: string | null;
+  model_size_bytes: number | null;
+  temperature: number;
+  seed: number | null;
+  reasoning_effort: string | null;
+  thinking_level: string | null;
+  context_length: number | null;
+  parallel: number | null;
+  eval_batch_size: number | null;
+  flash_attention: boolean | null;
+  offload_kv_cache_to_gpu: boolean | null;
 };
 
 export type ModelInfo = {

@@ -1,7 +1,7 @@
 import csv
 import io
 
-from app.domain.models import PromptConfiguration
+from app.domain.models import ModelExecutionProfile, PromptConfiguration
 from app.evaluation.export import evaluation_to_csv
 from app.evaluation.store import (
     EvaluationDetail,
@@ -11,7 +11,7 @@ from app.evaluation.store import (
 from app.evaluation.scoring import EvaluationMetrics
 
 
-def detail(documents) -> EvaluationDetail:
+def detail(documents, execution_profile=None) -> EvaluationDetail:
     return EvaluationDetail(
         id=7,
         created_at="2026-08-20T19:24:00+00:00",
@@ -26,6 +26,7 @@ def detail(documents) -> EvaluationDetail:
         max_pages=1,
         pipeline="Vision extraction",
         steps=["render_pages", "llm_extract"],
+        execution_profile=execution_profile,
         succeeded_documents=sum(d.status == "ok" for d in documents),
         failed_documents=sum(d.status == "failed" for d in documents),
         pending_documents=0,
@@ -80,6 +81,33 @@ def test_every_row_carries_the_run_context() -> None:
     assert row["max_pages"] == "1"
     assert row["document"] == "invoice.pdf"
     assert row["elapsed_ms"] == "2500"
+
+
+def test_every_row_carries_the_execution_profile() -> None:
+    document = EvaluationDocument(
+        name="invoice.pdf", status="ok", error=None, elapsed_ms=1, items=[]
+    )
+    profile = ModelExecutionProfile(
+        provider="lm_studio",
+        profile="standard",
+        parameters="0.8B",
+        quantization="Q8_0",
+        model_size_bytes=1019215872,
+        context_length=8192,
+        parallel=1,
+        temperature=0,
+        seed=0,
+    )
+
+    row = rows(evaluation_to_csv(detail([document], profile)))[0]
+
+    assert row["execution_profile"] == "standard"
+    assert row["parameters"] == "0.8B"
+    assert row["quantization"] == "Q8_0"
+    assert row["model_size_bytes"] == "1019215872"
+    assert row["context_length"] == "8192"
+    assert row["parallel"] == "1"
+    assert row["seed"] == "0"
 
 
 def test_a_failed_document_is_still_a_row_carrying_its_error() -> None:

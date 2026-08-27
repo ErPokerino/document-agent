@@ -150,6 +150,17 @@ test("runs can be narrowed to the ones that went to an API", () => {
   assert.deepEqual(hosted.map((run) => run.id), [2, 3]);
 });
 
+test("a run whose pipeline called no model has its own filter", () => {
+  const runs = [
+    evaluation({ id: 1, provider: "lm_studio" }),
+    evaluation({ id: 2, provider: "none", model: "Not used" }),
+  ];
+
+  const withoutModel = filterEvaluations(runs, { ...emptyFilters, runsOn: "none" });
+
+  assert.deepEqual(withoutModel.map((run) => run.id), [2]);
+});
+
 test("no choice shows both, and counts as no active filter", () => {
   const runs = [evaluation({ id: 1, provider: "lm_studio" }), evaluation({ id: 2, provider: "gemini" })];
   assert.equal(filterEvaluations(runs, emptyFilters).length, 2);
