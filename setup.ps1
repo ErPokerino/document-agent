@@ -44,9 +44,10 @@ Write-Host "Checking prerequisites..."
 Require-Command "python" "Install Python 3.11 or newer from python.org." | Out-Null
 Require-Command "npm" "Install Node.js 22 or newer from nodejs.org." | Out-Null
 
-$nodeVersion = (& node --version) -replace "^v", ""
-if ([int]($nodeVersion -split "\.")[0] -lt 22) {
-    throw "Node.js $nodeVersion is too old. This project needs 22 or newer."
+$nodeVersion = [version]((& node --version) -replace "^v", "")
+$minimumNodeVersion = [version]"22.13.0"
+if ($nodeVersion -lt $minimumNodeVersion) {
+    throw "Node.js $nodeVersion is too old. This project needs 22.13.0 or newer."
 }
 $pythonVersion = (& python --version) -replace "^Python ", ""
 $pythonParts = $pythonVersion -split "\."
@@ -62,13 +63,15 @@ if (-not (Test-Path -LiteralPath $python)) {
 Write-Host "Installing Python dependencies..."
 Invoke-Native { & $python -m pip install --quiet --upgrade pip } "pip could not update itself"
 Invoke-Native {
-    & $python -m pip install --quiet -r (Join-Path $projectRoot "backend\requirements.txt")
+    & $python -m pip install --quiet -r (Join-Path $projectRoot "backend\requirements.lock.txt")
 } "Python dependencies failed to install"
 
 Write-Host "Installing Node dependencies..."
 Push-Location $projectRoot
 try {
-    Invoke-Native { & npm.cmd install } "npm install failed"
+    # package-lock.json is the cross-machine contract. `npm install` is allowed
+    # to rewrite it and can silently select a newer transitive dependency.
+    Invoke-Native { & npm.cmd ci } "npm ci failed"
     Write-Host "Building the frontend..."
     Invoke-Native { & npm.cmd run build } "Frontend build failed"
 }

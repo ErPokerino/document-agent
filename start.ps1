@@ -4,6 +4,7 @@ $projectRoot = $PSScriptRoot
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 $runtime = Join-Path $projectRoot ".runtime"
 $backend = Join-Path $projectRoot "backend"
+. (Join-Path $projectRoot "scripts\process-safety.ps1")
 
 # A clone that has never been set up is the common case on a new machine, and
 # the failure it produces otherwise is a stack trace from whichever step got
@@ -58,12 +59,10 @@ function Test-BuildIsStale {
     return $newest -gt $builtAt
 }
 
-function Get-ListenerPid([int]$Port) {
-    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    return $listener.OwningProcess
-}
-
-if (-not (Get-ListenerPid 8000)) {
+$backendPid = Get-ListenerProcessId 8000
+if ($backendPid) {
+    Assert-DocuFlowProcess -ProcessId $backendPid -Port 8000 -Root $projectRoot
+} else {
     Start-Process -FilePath $python `
         -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000" `
         -WorkingDirectory $backend -WindowStyle Hidden `
@@ -76,8 +75,11 @@ if (-not (Get-ListenerPid 8000)) {
 # itself still renders and only its scripts 404: the browser shows the first
 # screen, no navigation works, and nothing looks broken. Recover instead of
 # leaving someone clicking a dead sidebar.
-$frontendPid = Get-ListenerPid 3000
+$frontendPid = Get-ListenerProcessId 3000
 if ($frontendPid) {
+    # A listener is not proof that DocuFlow owns the port. In particular, do
+    # not probe and then terminate another application's development server.
+    Assert-DocuFlowProcess -ProcessId $frontendPid -Port 3000 -Root $projectRoot
     try {
         $probe = Invoke-WebRequest "http://localhost:3000" -UseBasicParsing -TimeoutSec 15
         $healthy = $probe.StatusCode -eq 200
@@ -88,6 +90,7 @@ if ($frontendPid) {
             $chunks = [regex]::Matches($probe.Content, '_next/static/chunks/[A-Za-z0-9_\-]+\.js') |
                 ForEach-Object { $_.Value } |
                 Select-Object -Unique
+            if (-not $chunks) { $healthy = $false }
             foreach ($chunk in $chunks) {
                 try {
                     $asset = Invoke-WebRequest "http://localhost:3000/$chunk" -UseBasicParsing -TimeoutSec 15
@@ -106,7 +109,12 @@ if ($frontendPid) {
         # that starts the backend has already run and found it healthy, so
         # stopping it here would leave it down for the rest of this run.
         Stop-Process -Id $frontendPid -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
+        for ($attempt = 0; $attempt -lt 20 -and (Get-ListenerProcessId 3000); $attempt++) {
+            Start-Sleep -Milliseconds 250
+        }
+        if (Get-ListenerProcessId 3000) {
+            throw "The DocuFlow frontend did not release port 3000."
+        }
         Push-Location $projectRoot
         try {
             & npm.cmd run build
@@ -118,7 +126,7 @@ if ($frontendPid) {
     }
 }
 
-if (-not (Get-ListenerPid 3000)) {
+if (-not (Get-ListenerProcessId 3000)) {
     if (Test-BuildIsStale -Root $projectRoot) {
         Write-Host "The frontend build is older than the source. Rebuilding..."
         & npm.cmd run build
@@ -136,9 +144,10 @@ foreach ($service in @(@{ Name = "backend"; Port = 8000 }, @{ Name = "frontend";
     $listenerPid = $null
     for ($attempt = 0; $attempt -lt 30 -and -not $listenerPid; $attempt++) {
         Start-Sleep -Milliseconds 500
-        $listenerPid = Get-ListenerPid $service.Port
+        $listenerPid = Get-ListenerProcessId $service.Port
     }
     if (-not $listenerPid) { throw "$($service.Name) did not start on port $($service.Port)" }
+    Assert-DocuFlowProcess -ProcessId $listenerPid -Port $service.Port -Root $projectRoot
     $listenerPid | Set-Content -LiteralPath (Join-Path $runtime "$($service.Name).pid")
 }
 
