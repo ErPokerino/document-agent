@@ -110,6 +110,7 @@ test("steps are offered grouped by what they do", () => {
   const catalogue = [
     { kind: "render_pages", label: "Render pages" },
     { kind: "document_ai_ocr", label: "Document AI OCR" },
+    { kind: "document_ai_extract", label: "Document AI Custom Extractor" },
     { kind: "llm_extract", label: "LLM extraction" },
     { kind: "regex_refine", label: "Regex refinement" },
     { kind: "master_data_lookup", label: "Master data lookup" },
@@ -123,7 +124,11 @@ test("steps are offered grouped by what they do", () => {
     "Derived",
     "Post processing",
   ]);
-  assert.deepEqual(grouped[0].entries.map((entry) => entry.kind), ["render_pages", "document_ai_ocr"]);
+  assert.deepEqual(grouped[0].entries.map((entry) => entry.kind), [
+    "render_pages",
+    "document_ai_ocr",
+    "document_ai_extract",
+  ]);
   // Deriving a field and tidying one up are different jobs, and a rule can be
   // applied to a derived field just as well as to an extracted one.
   assert.deepEqual(grouped[2].entries.map((entry) => entry.kind), ["master_data_lookup"]);

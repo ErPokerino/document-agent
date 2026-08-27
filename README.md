@@ -42,18 +42,20 @@ POC for extracting structured data from invoice PDFs, through composable pipelin
 
 ## Start
 
-Requirements: Python 3.11+, Node.js 22+, and LM Studio if you want to run models
-locally. A vision model is needed only for a pipeline that renders pages; one
-that reads OCR text does not need vision.
+Requirements: Python 3.11+, Node.js 22.13.0+, and LM Studio if you want to run
+models locally. A vision model is needed only for a pipeline that renders pages;
+one that reads OCR text does not need vision.
 
 ```powershell
 .\setup.ps1
 .\start.ps1 -OpenBrowser
 ```
 
-`setup.ps1` creates the virtual environment, installs both dependency sets and
-builds the frontend. It is safe to run again — every step checks before it acts —
-and it finishes by listing what only a person can supply.
+`setup.ps1` creates the virtual environment, installs the exact Python and Node
+dependency versions committed in `backend/requirements.lock.txt` and
+`package-lock.json`, and builds the frontend. It is safe to run again — every
+step checks before it acts — and it finishes by listing what only a person can
+supply.
 
 ### On a machine DocuFlow has not run on before
 
@@ -73,10 +75,13 @@ browser.
 Save the JSON key as `backend/data/gcp-service-account.json`, then fill in the
 project id, region and processor ids under **Settings**.
 
-Nothing else is machine-specific. How models are loaded adapts on its own: the
-app reads the accelerator from LM Studio and derives its own limits from it, so a
-laptop with integrated graphics and a workstation with a discrete card each get
-the right decision without a setting to change. **LLM** shows what it found.
+The application configuration is portable, but the inference runtime is still
+machine-specific. DocuFlow reads the accelerator from LM Studio and derives its
+own safe placement from it, so a laptop with integrated graphics and a
+workstation with a discrete card need no copied hardware setting. **LLM** shows
+what it found. The LM Studio version, selected runtime backend, drivers and
+hardware can still change speed and, occasionally, numerical output; the app
+does not claim bit-for-bit equality across unlike inference stacks.
 
 Datasets, pipelines and Master Data do not travel either. Pipelines are recreated
 from the built-in default on first run; datasets and register rows are yours to
@@ -219,6 +224,11 @@ gone. React never boots, the sidebar renders, and every click does nothing.
 `start.ps1` and `restart.ps1` detect it — they ask for each chunk the page names,
 not just the page — and rebuild.
 
+The lifecycle scripts identify a running service by both its listener port and
+its process command line. If another project owns port 3000 or 8000, startup
+stops with that PID in the error; it never adopts or terminates the foreign
+process.
+
 ## Architecture
 
 ```text
@@ -273,6 +283,30 @@ The LLM section reports the accelerator found and the budget derived from it, wh
 Note that `--gpu off` governs the model's own layers. A vision projector follows the selected runtime, so on a GPU build page images are encoded on the GPU whatever the load flags said.
 
 The UI reports load, warm-up and document-processing times separately. Extraction is rejected until the active model is loaded, so LM Studio cannot silently auto-load it inside the document timer — for a pipeline that calls a model at all. One that does not is never held back by a model it will not use, and says so where the model is named.
+
+Every new Workspace and Lab run also records the execution profile that was
+actually selected: provider profile, model parameters, quantization, file size,
+context, concurrency, deterministic seed and, for hosted models, thinking
+level. Lab shows the profile on the run and includes it in both CSV exports. A
+model id by itself is not enough evidence that two runs used the same artefact
+and controls. The full pipeline definition is stored with each new Lab run as
+well; editing or deleting a pipeline later does not rewrite that history. A
+retry is refused when the active provider/model profile differs from the
+recorded one instead of combining two configurations into one accuracy figure.
+A pipeline with no model step records `Not used` rather than the unrelated model
+currently selected in LLM. Older runs retain `null` for facts the previous
+database schema did not record.
+
+This provenance makes cross-PC differences explainable, not impossible. For a
+strict comparison use the same GGUF quantization, LM Studio and runtime-backend
+versions, driver family and pipeline snapshot; then compare the stored profile
+and CSV columns before attributing a score change to prompt quality.
+
+The snapshot currently freezes the pipeline definition and model controls, not
+the deployed revision of a remote Document AI processor or the contents of
+Master Data and supplier rules. A retry after one of those mutable inputs has
+changed can therefore produce a different answer even when the stored pipeline
+and model profile match; use a new run when comparing such a change.
 
 ## Multi-page documents
 

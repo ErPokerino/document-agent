@@ -67,6 +67,13 @@ Pydantic models, then run:
 `test_generated_types.py` fails whenever the committed file and the live schema
 disagree. Do not hand-edit it.
 
+**Dependency locks are part of the cross-machine behaviour.** `setup.ps1` uses
+`npm ci` and `backend/requirements.lock.txt`; changing only a broad range in
+`backend/requirements.txt` changes no fresh install. Update the environment from
+the direct requirements, run the full suite, then regenerate and commit the
+lock deliberately. `package-lock.json` receives the same treatment: change it
+through npm and never replace `npm ci` with `npm install` in setup.
+
 **Prefer a map typed by a generated union over a map keyed by `string`.**
 `STEP_LABELS` was `Record<string, string>`, went two step kinds without an
 entry, and Lab showed runs as `document_ai_extract → supplier_rules`. Typed
@@ -77,6 +84,27 @@ missing, the server may not be running, and the same installed model can be
 reported as `qwen3.5-0.8b` or `lmstudio-community/qwen3.5-0.8b`. Hardware is
 read at runtime and the loading profile is derived from it; nothing about the
 accelerator is assumed.
+
+**A run's model id is not its execution configuration.** New runs snapshot the
+provider controls and local-model artefact metadata (parameters, quantization
+and file size); Lab evaluations snapshot the complete pipeline definition. Keep
+those fields when adding stores or exports. A retry must not merge a new profile
+into an old evaluation; historical rows from before the columns existed say
+`null` rather than inventing the missing facts. A pipeline that cannot call a
+model records provider `none` and model `Not used`, not the selection sitting in
+settings. LM Studio/runtime/driver versions are not exposed reliably, so do not
+promise bit-identical output across different inference stacks.
+
+The evaluation snapshot does not freeze a deployed Document AI processor
+revision, Master Data or supplier rules. Do not describe retry as a fully
+immutable experiment until those mutable inputs gain their own revisions or
+snapshots.
+
+**Ports do not establish process ownership.** `start.ps1` and `stop.ps1` use
+`scripts/process-safety.ps1` before adopting or stopping a listener. A foreign
+service on 3000 or 8000 is an error with its PID, never something DocuFlow may
+terminate. Keep `backend/tests/test_powershell_scripts.py` green when changing
+the lifecycle scripts.
 
 **Document AI: `v1` for OCR and the Layout Parser, `v1beta3` for the Custom
 Extractor.** Only `v1beta3` accepts a `description` on a schema property, and

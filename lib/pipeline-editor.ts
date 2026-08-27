@@ -127,8 +127,8 @@ export type CatalogueGroup = {
 const GROUPS: { title: string; blurb: string; kinds: string[] }[] = [
   {
     title: "Read the document",
-    blurb: "Turn the PDF into something a later step can use.",
-    kinds: ["render_pages", "document_ai_ocr", "document_ai_layout"],
+    blurb: "Read images, text or fields from the PDF for the pipeline.",
+    kinds: ["render_pages", "document_ai_ocr", "document_ai_layout", "document_ai_extract"],
   },
   { title: "Ask a model", blurb: "One call that fills the extracted fields.", kinds: ["llm_extract"] },
   {
