@@ -10,6 +10,41 @@ from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
 
 
+def test_lab_pins_the_invoked_extractor_and_its_retry_definition(api, monkeypatch):
+    """Changing the remote default after start must not change executable steps."""
+    from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
+    from app.services.document_ai import DocumentAiClient
+    from unittest.mock import AsyncMock
+    from threading import Event
+
+    seed_document(api)
+    api.put("/api/datasets/invoices/documents/invoice21.pdf/labels", json={"labels": {"currency": "EUR"}})
+    definition = PipelineDefinition(name="Pinned extractor", steps=[PipelineStep(kind=StepKind.document_ai_extract, config={"processor_id": "p"})])
+    main.pipeline_store.save(definition)
+    settings = main.settings_store.read()
+    settings.pipeline = definition.name
+    settings.gcp.project_id = "project"
+    main.settings_store.write(settings)
+    resource = "projects/project/locations/eu/processors/p"
+    monkeypatch.setattr(DocumentAiClient, "metadata", AsyncMock(side_effect=[{"name": resource, "displayName": "Invoices", "defaultProcessorVersion": resource + "/processorVersions/v3"}, {}]))
+    seen = []
+    executed = Event()
+
+    async def run(**kwargs):
+        seen.extend(step.processor_id for step in kwargs["steps"] if type(step).__name__ == "ExtractWithCustomExtractor")
+        main.evaluation_store.finish(kwargs["evaluation_id"], "completed")
+        executed.set()
+
+    monkeypatch.setattr(main, "run_evaluation", run)
+    response = api.post("/api/evaluations", json={"dataset": "invoices"})
+    assert response.status_code == 202
+    assert response.json()["extraction_engine"]["version"] == "v3"
+    detail = main.evaluation_store.get_evaluation(response.json()["id"])
+    assert detail.pipeline_definition.steps[0].config["processor_id"] == "p/processorVersions/v3"
+    assert executed.wait(2), "The evaluation worker did not start"
+    assert seen == ["p/processorVersions/v3"]
+
+
 READY_MODEL = ModelInfo(id="vision-model", name="Vision Model", loaded=True)
 
 
@@ -398,6 +433,16 @@ def wait_for_run(api, evaluation_id: int, attempts: int = 100) -> dict:
     raise AssertionError(f"evaluation {evaluation_id} never left the running state")
 
 
+def snapshot_dataset() -> dict:
+    return {
+        doc.name: {
+            "sha256": main.evaluation_store.snapshot_document(main.dataset_store.read_document("invoices", doc.name)),
+            "labels": main.dataset_store.read_labels("invoices", doc.name).labels,
+        }
+        for doc in main.dataset_store.list_documents("invoices")
+    }
+
+
 def partial_run(api) -> int:
     """One document scored, one failed: the case the UI was calling "completed"."""
     evaluation_id = main.evaluation_store.start(
@@ -406,6 +451,7 @@ def partial_run(api) -> int:
         prompts=PromptConfiguration(),
         total_documents=2,
         max_pages=1,
+        dataset_snapshot=snapshot_dataset(),
     )
     main.evaluation_store.record_document(evaluation_id, "b.pdf", [], elapsed_ms=1000)
     main.evaluation_store.record_document_failure(evaluation_id, "a.pdf", "Model is unloaded")
@@ -438,7 +484,9 @@ def test_documents_a_run_never_reached_are_counted_as_pending(api) -> None:
     assert body["pending_documents"] == 2
 
 
-def test_retrying_reprocesses_only_the_documents_that_did_not_succeed(api, monkeypatch) -> None:
+@pytest.mark.parametrize("mutation", ["none", "add", "labels", "replace", "rename", "delete"])
+def test_retrying_uses_only_the_original_unfinished_inputs(api, monkeypatch, mutation) -> None:
+    """Dataset edits must not change the inputs, labels or size of a retry."""
     labelled_dataset(api)
     evaluation_id = partial_run(api)
     main.model_runtime_states["vision-model"] = "ready"
@@ -452,29 +500,44 @@ def test_retrying_reprocesses_only_the_documents_that_did_not_succeed(api, monke
             return {"currency": FieldExtraction(value="EUR", confidence="high")}
 
     monkeypatch.setattr("app.pipeline.steps.LMStudioClient", Recovered)
-    original_read = main.dataset_store.read_document
+    original_read = main.evaluation_store.read_snapshot_document
+    original_digest = main.evaluation_store.get_evaluation(evaluation_id).dataset_snapshot["a.pdf"]["sha256"]
 
-    def spy(dataset, document):
-        seen.append(document)
-        return original_read(dataset, document)
+    def spy(digest):
+        seen.append(digest)
+        return original_read(digest)
 
-    monkeypatch.setattr(main.dataset_store, "read_document", spy)
+    monkeypatch.setattr(main.evaluation_store, "read_snapshot_document", spy)
+    if mutation == "add":
+        main.dataset_store.add_document("invoices", "new.pdf", pdf_bytes(), labels={"currency": "USD"})
+    elif mutation == "labels":
+        main.dataset_store.set_labels("invoices", "a.pdf", {"currency": "USD"})
+    elif mutation == "replace":
+        main.dataset_store.remove_document("invoices", "a.pdf")
+        main.dataset_store.add_document("invoices", "a.pdf", b"not even a PDF", labels={"currency": "USD"})
+    elif mutation == "rename":
+        main.dataset_store.rename("invoices", "renamed")
+    elif mutation == "delete":
+        main.dataset_store.delete("invoices")
 
     response = api.post(f"/api/evaluations/{evaluation_id}/retry")
 
     assert response.status_code == 202
     detail = wait_for_run(api, evaluation_id)
     # b.pdf already succeeded, so the model is not asked about it again.
-    assert seen == ["a.pdf"]
+    assert seen == [original_digest]
     assert detail["status"] == "completed"
     assert detail["failed_documents"] == 0
     assert detail["succeeded_documents"] == 2
+    assert detail["total_documents"] == 2
+    assert detail["metrics"]["accuracy"] == 1
 
 
 def test_retrying_requires_the_model_the_run_used(api) -> None:
     labelled_dataset(api)
     evaluation_id = main.evaluation_store.start(
-        dataset="invoices", model="another-model", prompts=PromptConfiguration(), total_documents=2
+        dataset="invoices", model="another-model", prompts=PromptConfiguration(), total_documents=2,
+        dataset_snapshot=snapshot_dataset(),
     )
     main.evaluation_store.record_document_failure(evaluation_id, "a.pdf", "boom")
     main.evaluation_store.complete(evaluation_id)
@@ -496,6 +559,7 @@ def test_retrying_refuses_a_different_model_execution_profile(api) -> None:
         model="vision-model",
         prompts=PromptConfiguration(),
         total_documents=2,
+        dataset_snapshot=snapshot_dataset(),
         execution_profile=ModelExecutionProfile(
             provider="lm_studio",
             profile="standard",
@@ -519,7 +583,8 @@ def test_retrying_refuses_a_different_model_execution_profile(api) -> None:
 def test_retrying_a_run_with_nothing_left_to_do_is_refused(api) -> None:
     labelled_dataset(api, names=("a.pdf",))
     evaluation_id = main.evaluation_store.start(
-        dataset="invoices", model="vision-model", prompts=PromptConfiguration(), total_documents=1
+        dataset="invoices", model="vision-model", prompts=PromptConfiguration(), total_documents=1,
+        dataset_snapshot=snapshot_dataset(),
     )
     main.evaluation_store.record_document(
         evaluation_id, "a.pdf", [], elapsed_ms=1
@@ -533,13 +598,18 @@ def test_retrying_a_run_with_nothing_left_to_do_is_refused(api) -> None:
     assert "nothing left" in response.json()["detail"].lower()
 
 
-def test_retrying_a_run_whose_dataset_is_gone_is_a_404(api) -> None:
+def test_retrying_a_legacy_run_without_input_snapshots_is_refused(api) -> None:
     labelled_dataset(api)
-    evaluation_id = partial_run(api)
+    evaluation_id = main.evaluation_store.start(
+        dataset="invoices", model="vision-model", prompts=PromptConfiguration(), total_documents=2,
+    )
+    main.evaluation_store.finish(evaluation_id, "failed")
     main.model_runtime_states["vision-model"] = "ready"
     api.delete("/api/datasets/invoices")
 
-    assert api.post(f"/api/evaluations/{evaluation_id}/retry").status_code == 404
+    response = api.post(f"/api/evaluations/{evaluation_id}/retry")
+    assert response.status_code == 409
+    assert "no snapshot" in response.json()["detail"]
 
 
 def test_retrying_a_running_evaluation_conflicts(api) -> None:
@@ -632,3 +702,64 @@ def test_a_preview_of_an_edited_prompt_uses_the_edit(api) -> None:
     ).json()
 
     assert "A completely different instruction" in body["system_prompt"]
+
+
+def test_a_duplicate_upload_returns_a_conflict_and_preserves_ground_truth(api) -> None:
+    """A duplicate filename is not an instruction to replace a labelled PDF."""
+    labelled_dataset(api, names=("a.pdf",))
+    original = main.dataset_store.read_document("invoices", "a.pdf")
+    response = api.post("/api/datasets/invoices/documents", files={"file": ("a.pdf", pdf_bytes(), "application/pdf")})
+    assert response.status_code == 409
+    assert main.dataset_store.read_document("invoices", "a.pdf") == original
+    assert main.dataset_store.read_labels("invoices", "a.pdf").labels == {"currency": "EUR"}
+
+
+def test_a_promotion_batch_with_duplicate_names_writes_nothing(api) -> None:
+    """Two reviewed runs may share a filename without being the same document."""
+    api.post("/api/datasets", json={"name": "invoices"})
+    ids = [main.run_store.record_run(filename="same.pdf", content=pdf_bytes(), model="m", prompts=PromptConfiguration(), extraction={}, page_count=1, processed_pages=1, elapsed_ms=1) for _ in range(2)]
+    response = api.post("/api/datasets/invoices/documents/from-run", json={"run_ids": ids})
+    assert response.status_code == 409
+    assert main.dataset_store.list_documents("invoices") == []
+
+
+def test_history_cursors_reach_every_evaluation_without_duplicates(api) -> None:
+    """Lab filters and exports must also reach runs older than the first page."""
+    for _ in range(53):
+        main.evaluation_store.start(dataset="invoices", model="m", prompts=PromptConfiguration(), total_documents=1)
+    first = api.get("/api/evaluations?limit=50").json()
+    second = api.get(f"/api/evaluations?limit=50&before_id={first[-1]['id']}").json()
+    assert [row["id"] for row in first + second] == list(range(53, 0, -1))
+    assert api.get("/api/evaluations?limit=0").status_code == 422
+    assert api.get("/api/runs?limit=-1").status_code == 422
+
+
+def test_an_evaluation_started_over_the_api_captures_its_inputs(api, monkeypatch) -> None:
+    """Snapshotting in the store alone would not protect the actual start route."""
+    from app.pipeline import steps
+    labelled_dataset(api, names=("a.pdf",))
+    original = main.dataset_store.read_document("invoices", "a.pdf")
+    class Reader:
+        async def extract_entities(self, *args, **kwargs):
+            return {"currency": FieldExtraction(value="EUR", confidence="high")}
+    monkeypatch.setattr(steps, "build_extraction_client", lambda context: Reader())
+    main.model_runtime_states["vision-model"] = "ready"
+    response = api.post("/api/evaluations", json={"dataset": "invoices"})
+    assert response.status_code == 202, response.text
+    eid = response.json()["id"]
+    wait_for_run(api, eid)
+    snapshot = main.evaluation_store.get_evaluation(eid).dataset_snapshot
+    assert snapshot["a.pdf"]["labels"] == {"currency": "EUR"}
+    assert main.evaluation_store.read_snapshot_document(snapshot["a.pdf"]["sha256"]) == original
+
+
+def test_evaluation_preview_uses_the_snapshot_after_dataset_removal(api) -> None:
+    """Reading a historical result must show the PDF that was actually scored."""
+    labelled_dataset(api)
+    original = main.dataset_store.read_document("invoices", "a.pdf")
+    eid = partial_run(api)
+    main.dataset_store.delete("invoices")
+    response = api.get(f"/api/evaluations/{eid}/documents/a.pdf/file")
+    assert response.status_code == 200
+    assert response.content == original
+    assert api.get(f"/api/evaluations/{eid}/documents/unknown.pdf/file").status_code == 404

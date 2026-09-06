@@ -349,3 +349,23 @@ async def test_no_prompted_rule_makes_no_call_at_all(monkeypatch) -> None:
     })
     await step.run(context)
     assert context.artifacts["extraction"]["currency"].value == "EUR"
+
+
+@pytest.mark.asyncio
+async def test_prompted_supplier_rules_add_their_tokens_to_the_first_call(monkeypatch) -> None:
+    """The second call must contribute even if its answer does not change."""
+    from app.domain.models import PromptConfiguration
+    from app.pipeline import steps
+    from app.pipeline.engine import PipelineContext
+    class Client:
+        last_prediction_stats = {"prompt_tokens": 300, "completion_tokens": 30}
+        async def extract_entities(self, *args, **kwargs):
+            return {"currency": FieldExtraction(value="EUR", confidence="high")}
+    monkeypatch.setattr(steps, "build_extraction_client", lambda context: Client())
+    context = PipelineContext(filename="a.pdf", content=b"", model="m", lm_studio_url="")
+    context.artifacts = {"processed_pages": 1, "page_count": 1, "extraction": {
+        "id_subject": FieldExtraction(value="S1", confidence="high"),
+        "currency": FieldExtraction(value="EUR", confidence="high")},
+        "inference_stats": {"prompt_tokens": 100, "completion_tokens": 10}}
+    await steps.ApplySupplierRules([SupplierRule(id_subject="S1", entity="currency", kind="prompt", prompt="Read currency")], PromptConfiguration()).run(context)
+    assert context.artifacts["inference_stats"] == {"prompt_tokens": 400, "completion_tokens": 40}

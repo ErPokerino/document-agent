@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.domain.models import AppSettings, PromptConfiguration
+from app.domain.models import AppSettings, PromptConfiguration, default_gemini_pricing
 
 
 OLD_SYSTEM_PROMPT = """Sei un agente di estrazione dati specializzato in fatture.
@@ -56,6 +56,11 @@ class SettingsStore:
         gemini = data.get("gemini")
         if isinstance(gemini, dict) and gemini.get("thinking_level") == "minimal":
             gemini["thinking_level"] = "low"
+        if data.get("provider") == "gemini" and data.get("model") == "gemini-3.7-flash":
+            data["model"] = "gemini-3.8-flash"
+        if isinstance(gemini, dict) and isinstance(gemini.get("pricing"), dict):
+            for model, pricing in default_gemini_pricing().items():
+                gemini["pricing"].setdefault(model, pricing.model_dump())
         prompts = data.get("prompts")
         if not isinstance(prompts, dict):
             return data

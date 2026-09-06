@@ -51,16 +51,21 @@ class GeminiModel:
     supports_thinking: bool
 
 
-# A curated list rather than everything the key can see: these are the two the
+# A curated list rather than everything the key can see: these are the models the
 # app is set up for. `list_models` reports what the key actually exposes.
 GEMINI_MODELS = (
-    GeminiModel(id="gemini-3.7-flash", name="Gemini 3.7 Flash", supports_thinking=True),
+    GeminiModel(id="gemini-3.8-flash", name="Gemini 3.8 Flash", supports_thinking=True),
+    GeminiModel(id="gemini-3.1-pro-preview", name="Gemini 3.1 Pro Preview", supports_thinking=True),
     GeminiModel(id="gemini-3.5-flash-lite", name="Gemini 3.5 Flash Lite", supports_thinking=False),
 )
 
 
+# Kept executable for saved experiments, but no longer offered for new runs.
+LEGACY_GEMINI_MODELS = (GeminiModel(id="gemini-3.7-flash", name="Gemini 3.7 Flash", supports_thinking=True),)
+
+
 def find_model(model_id: str) -> GeminiModel | None:
-    return next((model for model in GEMINI_MODELS if model.id == model_id), None)
+    return next((model for model in (*GEMINI_MODELS, *LEGACY_GEMINI_MODELS) if model.id == model_id), None)
 
 
 class GeminiClient:

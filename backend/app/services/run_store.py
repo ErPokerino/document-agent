@@ -212,7 +212,7 @@ class RunStore:
                 ],
             )
 
-    def list_runs(self, limit: int = 50, offset: int = 0, validated_only: bool = False) -> list[RunSummary]:
+    def list_runs(self, limit: int = 50, offset: int = 0, validated_only: bool = False, before_id: int | None = None) -> list[RunSummary]:
         having = "HAVING COUNT(c.entity) > 0" if validated_only else ""
         with self._connect() as connection:
             rows = connection.execute(
@@ -220,12 +220,13 @@ class RunStore:
                 SELECT r.*, COUNT(c.entity) AS correction_count
                 FROM runs r
                 LEFT JOIN run_corrections c ON c.run_id = r.id
+                WHERE (? IS NULL OR r.id < ?)
                 GROUP BY r.id
                 {having}
                 ORDER BY r.id DESC
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                (before_id, before_id, limit, offset),
             ).fetchall()
         return [self._summary(row) for row in rows]
 

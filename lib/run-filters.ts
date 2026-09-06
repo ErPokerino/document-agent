@@ -1,24 +1,25 @@
+import { engineKey } from "./extraction-engine.ts";
 import type { Evaluation } from "./types";
 
 export type EvaluationFilters = {
-  model: string;
-  pipeline: string;
+  model: string[];
+  pipeline: string[];
   // Accuracy on one dataset says nothing about accuracy on another, so
   // comparing approaches means holding the dataset still.
-  dataset: string;
+  dataset: string[];
   // Where the run happened. Same three choices as the model list in LLM, in
   // the same words, so the two places do not describe one idea differently.
-  runsOn: "" | "lm_studio" | "gemini" | "none";
+  runsOn: string[];
   since: string;
   minAccuracy: string;
   minDocuments: string;
 };
 
 export const emptyFilters: EvaluationFilters = {
-  model: "",
-  pipeline: "",
-  dataset: "",
-  runsOn: "",
+  model: [],
+  pipeline: [],
+  dataset: [],
+  runsOn: [],
   since: "",
   minAccuracy: "",
   minDocuments: "",
@@ -38,12 +39,12 @@ export function filterEvaluations(
   const minDocuments = threshold(filters.minDocuments);
 
   return evaluations.filter((evaluation) => {
-    if (filters.model && evaluation.model !== filters.model) return false;
-    if (filters.pipeline && evaluation.pipeline !== filters.pipeline) return false;
-    if (filters.dataset && evaluation.dataset !== filters.dataset) return false;
+    if (filters.model.length && !filters.model.includes(engineKey(evaluation))) return false;
+    if (filters.pipeline.length && !filters.pipeline.includes(evaluation.pipeline)) return false;
+    if (filters.dataset.length && !filters.dataset.includes(evaluation.dataset)) return false;
     // A payload from a backend older than the provider column has no field at
     // all; those runs were local, because hosted models came later.
-    if (filters.runsOn && (evaluation.provider ?? "lm_studio") !== filters.runsOn) return false;
+    if (filters.runsOn.length && !filters.runsOn.includes(evaluation.provider ?? "lm_studio")) return false;
     // created_at is ISO, so a date-only prefix compares correctly as text.
     if (filters.since && evaluation.created_at.slice(0, 10) < filters.since) return false;
     if (minAccuracy !== null) {
@@ -68,5 +69,5 @@ export function distinctPipelines(evaluations: Evaluation[]): string[] {
 }
 
 export function hasActiveFilters(filters: EvaluationFilters): boolean {
-  return Object.values(filters).some((value) => value.trim() !== "");
+  return Object.values(filters).some((value) => Array.isArray(value) ? value.length > 0 : value.trim() !== "");
 }

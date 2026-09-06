@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   AXES,
   approachPoints,
+  approachDescription,
   fieldAccuracy,
   paretoFrontier,
   type ApproachPoint,
@@ -80,6 +81,7 @@ function ParetoChart({
   meta: (typeof AXES)[number];
   onAxis: (axis: Axis) => void;
 }) {
+  const [inspected, setInspected] = useState<string | null>(null);
   const placeable = points.filter((point) => {
     const value = point[axis];
     return value !== null && value !== undefined && Number.isFinite(value);
@@ -99,6 +101,11 @@ function ParetoChart({
   const plotHeight = PLOT.height - PLOT.top - PLOT.bottom;
   const x = (value: number) => PLOT.left + (value / xMax) * plotWidth;
   const y = (value: number) => PLOT.top + plotHeight - ((value - yLow) / ySpan) * plotHeight;
+  const labels: ApproachPoint[] = [];
+  for (const point of frontier) {
+    if (!labels.some(other => Math.abs(x(other[axis] as number) - x(point[axis] as number)) < 28 && Math.abs(y(other.accuracy) - y(point.accuracy)) < 18)) labels.push(point);
+  }
+  const selected = placeable.find(point => point.key === inspected);
 
   const gridY = [0, 0.25, 0.5, 0.75, 1]
     .map((fraction) => yLow + fraction * ySpan)
@@ -109,8 +116,8 @@ function ParetoChart({
       <div className="settings-card-heading">
         <div>
           <h3>
-            Accuracy against cost
-            <InfoHint text="One point per model and pipeline, averaged over every run of it in the current selection. The line joins the approaches nothing else beats outright: to leave it, something has to be both more accurate and cheaper on this axis." />
+            Accuracy against {axis === "secondsPerDocument" ? "time" : axis === "tokensPerDocument" ? "tokens" : "cost"}
+            <InfoHint text="Numbered points match the comparison table. One point per extraction engine, version, dataset and pipeline, averaged over every run of it in the current selection. The line joins the approaches nothing else beats outright: to leave it, something has to be both more accurate and cheaper on this axis." />
           </h3>
           <p>Up is better, left is cheaper. The line is the Pareto frontier — everything below and to the right of it is beaten by something on it.</p>
         </div>
@@ -126,7 +133,7 @@ function ParetoChart({
           <svg
             viewBox={`0 0 ${PLOT.width} ${PLOT.height}`}
             className="pareto-chart"
-            role="img"
+            role="group"
             aria-label={`Accuracy against ${meta.label.toLowerCase()} for ${placeable.length} approaches`}
           >
             {gridY.map((value) => (
@@ -153,26 +160,28 @@ function ParetoChart({
             {placeable.map((point) => {
               const onFrontier = frontierKeys.has(point.key);
               return (
-                <g key={point.key} className={`chart-point ${onFrontier ? "frontier" : ""}`}>
+                <g key={point.key} role="button" tabIndex={0} onFocus={() => setInspected(point.key)} onClick={() => setInspected(point.key)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setInspected(point.key); } }} aria-label={`${points.indexOf(point) + 1}. ${approachDescription(point)}. ${percent(point.accuracy)}. ${meta.format(point[axis] as number)}`} className={`chart-point ${onFrontier ? "frontier" : ""}`}>
                   <circle cx={x(point[axis] as number)} cy={y(point.accuracy)} r={onFrontier ? 6 : 4.5} />
                   <title>
-                    {`${point.model} · ${point.pipeline}\n${percent(point.accuracy)} · ${meta.format(point[axis] as number)}${point.runs > 1 ? `\nmean of ${point.runs} runs` : ""}`}
+                    {`${approachDescription(point)}\n${percent(point.accuracy)} · ${meta.format(point[axis] as number)}${point.runs > 1 ? `\nmean of ${point.runs} runs` : ""}`}
                   </title>
                 </g>
               );
             })}
 
-            {frontier.map((point) => (
+            {labels.map((point) => (
               <text
                 key={`label-${point.key}`}
                 className="chart-point-label"
                 x={x(point[axis] as number) + 9}
                 y={y(point.accuracy) + 3}
               >
-                {point.model}
+                {points.indexOf(point) + 1}
               </text>
             ))}
           </svg>
+          <p className="field-help">Numbers refer to the comparison table. Select a point to inspect it.</p>
+          {selected && <div className="chart-inspection" aria-live="polite"><strong>{points.indexOf(selected) + 1}. {selected.model}</strong><span>{percent(selected.accuracy)} · {meta.format(selected[axis] as number)}</span><small>{approachDescription(selected).split("\n").slice(1).join(" · ")}</small></div>}
         </div>
       )}
     </div>
@@ -182,7 +191,7 @@ function ParetoChart({
 // -- the same points as a table someone can sort ------------------------------
 
 const COLUMNS: { key: Column; label: string; numeric: boolean }[] = [
-  { key: "model", label: "Model", numeric: false },
+  { key: "model", label: "Extraction engine", numeric: false },
   { key: "pipeline", label: "Pipeline", numeric: false },
   { key: "runs", label: "Runs", numeric: true },
   { key: "accuracy", label: "Accuracy", numeric: true },
@@ -201,6 +210,7 @@ function ApproachTable({
   sort: Sort;
   onSort: (sort: Sort) => void;
 }) {
+  const frontier = new Set(paretoFrontier(points, axis).map(point => point.key));
   const columns = [...COLUMNS, { key: axis as Column, label: meta.label, numeric: true }];
   const sorted = [...points].sort((left, right) => {
     const a = left[sort.key as keyof ApproachPoint];
@@ -220,8 +230,8 @@ function ApproachTable({
     <div className="settings-card">
       <div className="settings-card-heading">
         <div>
-          <h3>Compare<InfoHint text="One row per model and pipeline. Every column sorts. The figures are per document and averaged over each run of that approach in the current selection." /></h3>
-          <p>{points.length} approaches over the runs in view.</p>
+          <h3>Compare<InfoHint text="One row per extraction engine, version, dataset and pipeline. Every column sorts. The figures are per document and averaged over each run of that approach in the current selection." /></h3>
+          <p>{points.length} approaches. Highlighted rows are on the Pareto frontier for the selected axis.</p>
         </div>
       </div>
       <div className="runs-table-wrap">
@@ -248,9 +258,9 @@ function ApproachTable({
           </thead>
           <tbody>
             {sorted.map((point) => (
-              <tr key={point.key}>
-                <td>{point.model}</td>
-                <td>{point.pipeline}</td>
+              <tr key={point.key} className={frontier.has(point.key) ? "pareto-row" : undefined}>
+                <td><span className="engine-tag">{points.indexOf(point) + 1}. {point.model}</span>{frontier.has(point.key) && <span className="pareto-badge">Pareto</span>}{point.detail !== point.model && <details className="engine-details"><summary>Processor details</summary><small className="engine-detail">{point.detail}</small></details>}</td>
+                <td>{point.pipeline}<small className="engine-detail">{point.dataset}</small></td>
                 <td className="numeric">{point.runs}</td>
                 <td className="numeric"><strong className={accuracyClass(point.accuracy)}>{percent(point.accuracy)}</strong></td>
                 <td className="numeric">

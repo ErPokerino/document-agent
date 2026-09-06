@@ -148,6 +148,11 @@ class ExtractEntities:
             document_text=document_text,
         )
         context.artifacts["inference_stats"] = getattr(client, "last_prediction_stats", None) or {}
+        if context.provider == "gemini" and any(
+            context.artifacts["inference_stats"].get(key) is None
+            for key in ("prompt_tokens", "completion_tokens")
+        ):
+            context.artifacts["usage_complete"] = False
 
 
 class RefineWithRegex:
@@ -447,6 +452,17 @@ class ApplySupplierRules:
             processed_pages=processed_pages,
             document_text=context.artifacts.get("text") or "",
         )
+
+        # A supplier exception is an additional paid call, not a replacement
+        # for the extraction whose counters are already in the context.
+        previous = dict(context.artifacts.get("inference_stats") or {})
+        extra = getattr(client, "last_prediction_stats", None) or {}
+        if context.provider == "gemini" and any(extra.get(key) is None for key in ("prompt_tokens", "completion_tokens")):
+            context.artifacts["usage_complete"] = False
+        for key in ("prompt_tokens", "completion_tokens"):
+            if key in extra:
+                previous[key] = (previous.get(key) or 0) + (extra.get(key) or 0)
+        context.artifacts["inference_stats"] = previous
 
         result = dict(extraction)
         changed: list[str] = []

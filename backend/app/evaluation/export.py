@@ -7,6 +7,7 @@ can be concatenated and compared without losing which run a row came from.
 
 import csv
 import io
+import json
 from typing import Any
 
 from app.evaluation.store import EvaluationDetail
@@ -16,6 +17,11 @@ COLUMNS = (
     "run_id",
     "dataset",
     "model",
+    "extractor_name",
+    "extractor_processor",
+    "extractor_version",
+    "extractor_base_model",
+    "additional_extractors",
     "provider",
     "pipeline",
     "steps",
@@ -34,6 +40,10 @@ COLUMNS = (
     "elapsed_ms",
     "prompt_tokens",
     "completion_tokens",
+    "ocr_pages",
+    "layout_pages",
+    "custom_extractor_pages",
+    "usage_complete",
     "entity",
     "expected",
     "actual",
@@ -62,6 +72,11 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
         "run_id": detail.id,
         "dataset": detail.dataset,
         "model": detail.model,
+        "extractor_name": (detail.extraction_engine or {}).get("display_name"),
+        "extractor_processor": (detail.extraction_engine or {}).get("processor_id"),
+        "extractor_version": (detail.extraction_engine or {}).get("version"),
+        "extractor_base_model": (detail.extraction_engine or {}).get("base_model"),
+        "additional_extractors": json.dumps(detail.extraction_engine["additional_processors"]) if (detail.extraction_engine or {}).get("additional_processors") else None,
         "provider": detail.provider,
         "pipeline": detail.pipeline,
         "steps": " > ".join(detail.steps),
@@ -95,6 +110,7 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
         ),
         "max_pages": detail.max_pages,
         "created_at": detail.created_at,
+        "usage_complete": detail.usage_complete,
     }
 
     for document in detail.documents:
@@ -105,6 +121,9 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
             "elapsed_ms": document.elapsed_ms,
             "prompt_tokens": document.prompt_tokens,
             "completion_tokens": document.completion_tokens,
+            "ocr_pages": document.ocr_pages,
+            "layout_pages": document.layout_pages,
+            "custom_extractor_pages": document.custom_extractor_pages,
             "error": document.error,
         }
         if not document.items:

@@ -126,3 +126,15 @@ test("two runs with nothing in common do not pretend to compare", () => {
   assert.equal(diff.summary.unchanged, 0);
   assert.equal(diff.byDocument.length, 0);
 });
+
+test("a changed ground truth is excluded from model regressions", () => {
+  const diff = diffRuns(
+    run(1, [doc("a.pdf", [field("amount", 100, 100, true)])]),
+    run(2, [doc("a.pdf", [field("amount", 200, 100, false)])]),
+  );
+  assert.equal(diff.summary.net, 0);
+  assert.equal(diff.summary.broken, 0);
+  assert.equal(diff.relabeled.length, 1);
+  assert.equal(diff.relabeled[0].previousExpected, 100);
+  assert.equal(diff.relabeled[0].expected, 200);
+});

@@ -973,3 +973,30 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .supplier-rules .field-help { display: flex; align-items: center; gap: 5px; margin: 0; }
 
 .rule-count { margin-left: 5px; padding: 1px 5px; border-radius: 5px; background: var(--accent); color: #fff; font: 700 8px var(--font-mono), monospace; font-style: normal; }
+
+.multi-filter { position: relative; flex: 1 1 150px; min-width: 140px; max-width: 240px; }
+.filter-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.multi-filter summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); font-size: 12px; }
+.multi-filter-menu { position: absolute; z-index: 30; top: 100%; left: 0; width: min(320px, 75vw); padding: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #0002; }
+.multi-filter-menu > input { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+.multi-filter-options { max-height: 230px; overflow-y: auto; margin-top: 8px; }
+.run-filters .multi-filter-options label { flex-direction: row; align-items: flex-start; padding: 8px 0; cursor: pointer; }
+.run-filters .multi-filter-options input { min-width: 0; flex: 0 0 auto; margin-top: 3px; }
+.run-filters .multi-filter-options span { font-size: 12px; text-transform: none; letter-spacing: normal; color: var(--ink); overflow-wrap: anywhere; }
+.run-pagination { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding-top: 16px; font-size: 12px; }
+.run-pagination > span { margin-right: auto; }
+.run-pagination select { padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: inherit; }
+.engine-tag { display: inline-block; max-width: 240px; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.engine-detail { display: block; max-width: 320px; font-size: 11px; line-height: 1.5; color: var(--muted); white-space: normal; overflow-wrap: anywhere; margin-top: 4px; }
+.chart-point:focus { outline: none; stroke: var(--ink); stroke-width: 3px; }
+
+.chart-inspection { display: grid; gap: 5px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; overflow-wrap: anywhere; }
+.chart-inspection small { color: var(--muted); line-height: 1.5; }
+.engine-details summary { cursor: pointer; font-size: 11px; margin-top: 5px; color: var(--muted); }
+
+.filter-selections { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-selections button { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 5px 9px; cursor: pointer; }
+
+.compare-table .pareto-row { background: #edf8f4; }
+.compare-table .pareto-row td:first-child { border-left: 3px solid #218576; }
+.pareto-badge { display: inline-block; margin: 4px 0 4px 8px; padding: 2px 6px; font-size: 10px; color: #126556; background: #d8efe6; border-radius: 5px; }

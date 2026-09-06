@@ -129,3 +129,44 @@ in flight.
 A drawn graph of the selected pipeline. Low value while pipelines are linear and
 three to six steps long — the sentence already shown carries the same
 information. Worth revisiting only once flows branch, as part of document types.
+
+## Proposed next work following the September review
+
+These are proposals awaiting prioritisation, not implemented features.
+
+### Native PDF text as a pipeline reader
+
+Make this an explicit `read_pdf_text` step in the same first layer as rendering,
+OCR and Layout. It consumes the PDF within the pipeline page limit and produces
+page-delimited text, optionally normalized word boxes, plus per-page coverage
+signals. It does not extract entities itself. An LLM or deterministic reader can
+consume its text through the existing artifact contract.
+
+Start with a standalone reader to measure native PDFs separately. Empty or
+unusable text must be visible, not passed off as a successful reading. Handling
+mixed scanned/native files needs an explicit fallback policy and per-page
+provenance, not an implicit Google call. Native text is not automatically correct:
+reading order, stale embedded OCR, tables and missing fonts need evaluation.
+Measure field accuracy, runtime and API usage on matched dataset snapshots before
+making it a default. This is deliberately left for a later development cycle.
+
+### Further Lab comparison work
+
+The implemented multi-select filters, history pagination, extractor identities
+and Pareto presentation are documented in README. Remaining work:
+
+- Give historical analysis its own space by moving Run a test into a New
+  evaluation action and offering Runs, Analytics and Compare as peer views.
+- Apply field exclusions consistently to thresholds, Runs and Analytics.
+  Accuracy thresholds currently use the unadjusted score, and Analytics does
+  not expose the exclusion control available in Runs.
+- Identify a configuration by dataset/input hashes, prompt/schema, complete
+  pipeline and model profile. Current chart grouping separates dataset names
+  and extractor versions, but not all input or configuration revisions.
+- Prefer paired comparisons on shared document hashes; show sample size,
+  completion coverage and label changes. Avoid treating changes in the scored
+  field set as evidence of better extraction.
+- Consider a logarithmic time axis for wide runtime ranges and explain missing
+  cost measurements directly in the chart.
+- Add per-request context-tier accounting before enabling automatic Gemini
+  3.1 Pro Preview rates. Summed run token counts cannot select a request's tier.

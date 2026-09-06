@@ -1,11 +1,12 @@
 "use client";
 
+import { MultiFilter } from "./multi-filter";
+import { engineKey, engineOptionLabel } from "../lib/extraction-engine";
 import { FilterX } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
   distinctDatasets,
-  distinctModels,
   distinctPipelines,
   emptyFilters,
   hasActiveFilters,
@@ -29,34 +30,19 @@ type Props = {
  * able to narrow by something the other cannot.
  */
 export function RunFiltersBar({ evaluations, filters, setFilters, children }: Props) {
+  const engineOptions = [...new Map(evaluations.map(run => [engineKey(run), {
+    value: engineKey(run), label: engineOptionLabel(run),
+  }])).values()].sort((a, b) => a.label.localeCompare(b.label));
+  const locations: Record<string, string> = { lm_studio: "On this machine", gemini: "Through an API", none: "No LLM" };
+  const selections = (["dataset", "model", "pipeline", "runsOn"] as const).flatMap(facet => filters[facet].map(value => ({
+    facet, value, label: facet === "model" ? engineOptions.find(option => option.value === value)?.label || "Unavailable engine" : facet === "runsOn" ? locations[value] || value : value,
+  })));
   return (
     <div className="run-filters">
-      <label><span>Dataset</span>
-        <select value={filters.dataset} onChange={(event) => setFilters({ ...filters, dataset: event.target.value })}>
-          <option value="">Any</option>
-          {distinctDatasets(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <label><span>Model</span>
-        <select value={filters.model} onChange={(event) => setFilters({ ...filters, model: event.target.value })}>
-          <option value="">Any</option>
-          {distinctModels(evaluations).map((model) => <option key={model} value={model}>{model}</option>)}
-        </select>
-      </label>
-      <label><span>Pipeline</span>
-        <select value={filters.pipeline} onChange={(event) => setFilters({ ...filters, pipeline: event.target.value })}>
-          <option value="">Any</option>
-          {distinctPipelines(evaluations).map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <label><span>Model runs on</span>
-        <select value={filters.runsOn} onChange={(event) => setFilters({ ...filters, runsOn: event.target.value as EvaluationFilters["runsOn"] })}>
-          <option value="">Anywhere</option>
-          <option value="lm_studio">On this machine</option>
-          <option value="gemini">Through an API</option>
-          <option value="none">No model</option>
-        </select>
-      </label>
+      <MultiFilter label="Dataset" options={distinctDatasets(evaluations).map(value => ({ value, label: value }))} value={filters.dataset} onChange={dataset => setFilters({ ...filters, dataset })} />
+      <MultiFilter label="Extraction engine" options={engineOptions} value={filters.model} onChange={model => setFilters({ ...filters, model })} />
+      <MultiFilter label="Pipeline" options={distinctPipelines(evaluations).map(value => ({ value, label: value }))} value={filters.pipeline} onChange={pipeline => setFilters({ ...filters, pipeline })} />
+      <MultiFilter label="LLM runs on" options={[{ value: "lm_studio", label: "On this machine" }, { value: "gemini", label: "Through an API" }, { value: "none", label: "No LLM" }]} value={filters.runsOn} onChange={runsOn => setFilters({ ...filters, runsOn })} />
       <label><span>From</span>
         <input type="date" value={filters.since} onChange={(event) => setFilters({ ...filters, since: event.target.value })} />
       </label>
@@ -70,6 +56,7 @@ export function RunFiltersBar({ evaluations, filters, setFilters, children }: Pr
       <button type="button" className="secondary-button small" disabled={!hasActiveFilters(filters)} onClick={() => setFilters(emptyFilters)}>
         <FilterX size={13} /> Clear
       </button>
+      {selections.length > 0 && <div className="filter-selections" aria-label="Active filters">{selections.map(({ facet, value, label }) => <button key={facet + value} type="button" title={label} aria-label={`Remove ${facet}: ${label}`} onClick={() => setFilters({ ...filters, [facet]: filters[facet].filter(item => item !== value) })}>{label}<span aria-hidden="true"> ×</span></button>)}</div>}
     </div>
   );
 }

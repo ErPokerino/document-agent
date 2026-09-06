@@ -5,8 +5,12 @@ evaluations is only meaningful if each one remembers the configuration it ran
 with, rather than reading today's settings.
 """
 
+import hashlib
 import json
+import os
+import re
 import sqlite3
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -87,6 +91,7 @@ class EvaluationDocument:
     completion_tokens: int | None = None
     ocr_pages: int | None = None
     layout_pages: int | None = None
+    custom_extractor_pages: int | None = None
 
 
 @dataclass(frozen=True)
@@ -121,7 +126,10 @@ class EvaluationSummary:
     # Pages sent to Document AI, which is billed per page rather than per token.
     ocr_pages: int
     layout_pages: int
+    custom_extractor_pages: int | None
+    usage_complete: bool
     metrics: EvaluationMetrics
+    extraction_engine: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,7 @@ class EvaluationDetail(EvaluationSummary):
     prompts: PromptConfiguration = None  # type: ignore[assignment]
     pipeline_definition: PipelineDefinition | None = None
     documents: list[EvaluationDocument] = None  # type: ignore[assignment]
+    dataset_snapshot: dict[str, Any] | None = None
 
     @property
     def failures(self) -> list[tuple[str, str]]:
@@ -173,12 +182,16 @@ class EvaluationStore:
             connection.execute(
                 "ALTER TABLE evaluations ADD COLUMN execution_profile_json TEXT"
             )
+        if "extraction_engine_json" not in existing:
+            connection.execute("ALTER TABLE evaluations ADD COLUMN extraction_engine_json TEXT")
+        if "dataset_snapshot_json" not in existing:
+            connection.execute("ALTER TABLE evaluations ADD COLUMN dataset_snapshot_json TEXT")
         # Runs recorded before the column exists still happened somewhere. The
         # registry of hosted models is the best evidence available in
         # hindsight; anything it does not know ran through LM Studio.
-        from app.services.gemini import GEMINI_MODELS
+        from app.services.gemini import GEMINI_MODELS, LEGACY_GEMINI_MODELS
 
-        hosted = [model.id for model in GEMINI_MODELS]
+        hosted = [model.id for model in (*GEMINI_MODELS, *LEGACY_GEMINI_MODELS)]
         placeholders = ",".join("?" for _ in hosted) or "NULL"
         connection.execute(
             f"""
@@ -193,7 +206,7 @@ class EvaluationStore:
         document_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
         }
-        for column in ("prompt_tokens", "completion_tokens", "ocr_pages", "layout_pages"):
+        for column in ("prompt_tokens", "completion_tokens", "ocr_pages", "layout_pages", "custom_extractor_pages", "usage_complete"):
             if column not in document_columns:
                 connection.execute(
                     f"ALTER TABLE evaluation_documents ADD COLUMN {column} INTEGER"
@@ -239,15 +252,19 @@ class EvaluationStore:
         provider: str = "lm_studio",
         pipeline_definition: PipelineDefinition | None = None,
         execution_profile: ModelExecutionProfile | None = None,
+        dataset_snapshot: dict[str, Any] | None = None,
+        extraction_engine: dict[str, Any] | None = None,
     ) -> int:
+        if dataset_snapshot is not None and len(dataset_snapshot) != total_documents:
+            raise ValueError("The document snapshot does not match the evaluation total")
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO evaluations
                     (created_at, dataset, model, prompts_json, status, total_documents,
                      max_pages, pipeline, steps, provider, pipeline_json,
-                     execution_profile_json)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
+                     execution_profile_json, dataset_snapshot_json, extraction_engine_json)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -269,9 +286,35 @@ class EvaluationStore:
                         if execution_profile is not None
                         else None
                     ),
+                    json.dumps(dataset_snapshot, ensure_ascii=False) if dataset_snapshot is not None else None,
+                    json.dumps(extraction_engine) if extraction_engine is not None else None,
                 ),
             )
             return int(cursor.lastrowid)
+
+    def snapshot_document(self, content: bytes) -> str:
+        """Keep inputs even when their dataset is renamed, removed or edited."""
+        digest = hashlib.sha256(content).hexdigest()
+        directory = self.path.parent / "evaluation-inputs"
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{digest}.pdf"
+        if not target.exists():
+            with tempfile.NamedTemporaryFile(dir=directory, delete=False) as output:
+                temporary = Path(output.name)
+                output.write(content)
+            try:
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return digest
+
+    def read_snapshot_document(self, digest: str) -> bytes:
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("Invalid evaluation document digest")
+        content = (self.path.parent / "evaluation-inputs" / f"{digest}.pdf").read_bytes()
+        if hashlib.sha256(content).hexdigest() != digest:
+            raise ValueError("The stored evaluation document differs from its recorded digest")
+        return content
 
     def attempted_documents(self, evaluation_id: int) -> dict[str, str]:
         """Every document this run reached, and how it went."""
@@ -324,14 +367,16 @@ class EvaluationStore:
         completion_tokens: int | None = None,
         ocr_pages: int | None = None,
         layout_pages: int | None = None,
+        custom_extractor_pages: int = 0,
+        usage_complete: bool = True,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO evaluation_documents
                     (evaluation_id, document, status, elapsed_ms, prompt_tokens,
-                     completion_tokens, ocr_pages, layout_pages)
-                VALUES (?, ?, 'ok', ?, ?, ?, ?, ?)
+                     completion_tokens, ocr_pages, layout_pages, custom_extractor_pages, usage_complete)
+                VALUES (?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(evaluation_id, document) DO UPDATE SET
                     status = 'ok',
                     elapsed_ms = excluded.elapsed_ms,
@@ -339,6 +384,8 @@ class EvaluationStore:
                     completion_tokens = excluded.completion_tokens,
                     ocr_pages = excluded.ocr_pages,
                     layout_pages = excluded.layout_pages,
+                    custom_extractor_pages = excluded.custom_extractor_pages,
+                    usage_complete = excluded.usage_complete,
                     error = NULL
                 """,
                 (
@@ -349,6 +396,8 @@ class EvaluationStore:
                     completion_tokens,
                     ocr_pages,
                     layout_pages,
+                    custom_extractor_pages,
+                    int(usage_complete),
                 ),
             )
             connection.executemany(
@@ -414,10 +463,11 @@ class EvaluationStore:
             )
             return cursor.rowcount
 
-    def list_evaluations(self, limit: int = 50) -> list[EvaluationSummary]:
+    def list_evaluations(self, limit: int = 50, before_id: int | None = None) -> list[EvaluationSummary]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM evaluations ORDER BY id DESC LIMIT ?", (limit,)
+                "SELECT * FROM evaluations WHERE (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+                (before_id, before_id, limit),
             ).fetchall()
             return [self._summary(connection, row) for row in rows]
 
@@ -458,6 +508,7 @@ class EvaluationStore:
                 if row["pipeline_json"]
                 else None
             ),
+            dataset_snapshot=json.loads(row["dataset_snapshot_json"]) if row["dataset_snapshot_json"] else None,
             documents=[
                 EvaluationDocument(
                     name=document["document"],
@@ -469,6 +520,7 @@ class EvaluationStore:
                     completion_tokens=document["completion_tokens"],
                     ocr_pages=document["ocr_pages"],
                     layout_pages=document["layout_pages"],
+                    custom_extractor_pages=document["custom_extractor_pages"],
                 )
                 for document in documents
             ],
@@ -486,7 +538,9 @@ class EvaluationStore:
                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                    COALESCE(SUM(ocr_pages), 0) AS ocr_pages,
-                   COALESCE(SUM(layout_pages), 0) AS layout_pages
+                   COALESCE(SUM(layout_pages), 0) AS layout_pages,
+                   SUM(custom_extractor_pages) AS custom_extractor_pages,
+                   MIN(COALESCE(usage_complete, 0)) AS usage_complete
             FROM evaluation_documents WHERE evaluation_id = ?
             """,
             (row["id"],),
@@ -534,5 +588,8 @@ class EvaluationStore:
             completion_tokens=int(progress["completion_tokens"] or 0),
             ocr_pages=int(progress["ocr_pages"] or 0),
             layout_pages=int(progress["layout_pages"] or 0),
+            custom_extractor_pages=progress["custom_extractor_pages"],
+            usage_complete=bool(progress["usage_complete"]) and progress["succeeded"] == row["total_documents"],
             metrics=aggregate(outcomes),
+            extraction_engine=json.loads(row["extraction_engine_json"]) if row["extraction_engine_json"] else None,
         )

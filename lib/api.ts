@@ -53,11 +53,28 @@ function upload(file: File, signal?: AbortSignal): RequestInit {
 
 const segment = encodeURIComponent;
 
+/** Read every cursor page before filters, charts or exports see the result. */
+async function history<T extends { id: number }>(path: string): Promise<T[]> {
+  const rows: T[] = [];
+  let before: number | undefined;
+  for (;;) {
+    const separator = path.includes("?") ? "&" : "?";
+    const page = await request<T[]>(`${path}${separator}limit=200${before === undefined ? "" : `&before_id=${before}`}`);
+    rows.push(...page);
+    if (page.length < 200) return rows;
+    const next = page[page.length - 1].id;
+    if (before !== undefined && next >= before) throw new Error("The history cursor did not advance");
+    before = next;
+  }
+}
+
 /** Direct links, for an <iframe> preview and for a browser download. */
 export const apiUrls = {
   documentFile: (dataset: string, document: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/documents/${segment(document)}/file`,
   evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
+  evaluationDocument: (id: number, document: string) =>
+    `${API_BASE}/api/evaluations/${id}/documents/${segment(document)}/file`,
   datasetArchive: (dataset: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/export.zip`,
   runPage: (runId: number, page: number) => `${API_BASE}/api/runs/${runId}/pages/${page}.png`,
@@ -66,6 +83,7 @@ export const apiUrls = {
 };
 
 export const api = {
+  extractionEngine: () => request<import("./types").ExtractionEngine | null>("/api/lab/extraction-engine"),
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
   supplierRules: (idSubject?: string) =>
@@ -108,7 +126,7 @@ export const api = {
   verifyGcpKey: () => request<GcpKeyStatus>("/api/settings/gcp/verify", { method: "POST" }),
 
   runs: (validatedOnly = false) =>
-    request<ExtractionRun[]>(`/api/runs?validated_only=${validatedOnly}`),
+    history<ExtractionRun>(`/api/runs?validated_only=${validatedOnly}`),
   saveCorrections: (runId: number, corrections: Record<string, unknown>) =>
     request<void>(`/api/runs/${runId}/corrections`, json("POST", { corrections })),
 
@@ -196,7 +214,7 @@ export const api = {
   deletePipeline: (name: string) =>
     request<void>(`/api/pipelines/${segment(name)}`, { method: "DELETE" }),
 
-  evaluations: () => request<Evaluation[]>("/api/evaluations"),
+  evaluations: () => history<Evaluation>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
   startEvaluation: (dataset: string) => request<Evaluation>("/api/evaluations", json("POST", { dataset })),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),

@@ -75,3 +75,22 @@ test("the total adds what the model cost to what the pages cost", () => {
   assert.equal(totalCost({ promptTokens: 0, completionTokens: 0, ocrPages: 1000, layoutPages: 0 }, null, gcp), 1.5);
   assert.equal(totalCost({ promptTokens: 0, completionTokens: 0, ocrPages: 0, layoutPages: 0 }, pricing, gcp), null);
 });
+
+test("a missing model rate cannot turn OCR's subtotal into the total", () => {
+  assert.equal(totalCost({promptTokens:1000, completionTokens:100, ocrPages:1000, layoutPages:0}, null, {ocr_per_thousand_pages:1.5, layout_per_thousand_pages:10}), null);
+});
+
+test("Custom Extractor pages require a rate and contribute to the total", () => {
+  const usage = {promptTokens:0, completionTokens:0, ocrPages:0, layoutPages:0, customExtractorPages:20, customExtractorUsed:true};
+  const rates = {ocr_per_thousand_pages:1.5, layout_per_thousand_pages:10};
+  assert.equal(totalCost(usage, null, rates), null);
+  assert.equal(totalCost(usage, null, {...rates, custom_extractor_per_thousand_pages:30}), 0.6);
+  assert.equal(totalCost({...usage, customExtractorPages:null}, null, {...rates, custom_extractor_per_thousand_pages:30}), null);
+});
+
+test("local tokens need no API tariff and unknown historical usage is not priced", () => {
+  const usage = {promptTokens:100, completionTokens:10, ocrPages:1000, layoutPages:0, modelBillable:false};
+  const rates = {ocr_per_thousand_pages:1.5, layout_per_thousand_pages:10};
+  assert.equal(totalCost(usage, null, rates), 1.5);
+  assert.equal(totalCost({...usage, usageComplete:false}, null, rates), null);
+});

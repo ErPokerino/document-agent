@@ -41,7 +41,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
         <span className="settings-card-icon"><Cloud size={18} /></span>
         <div>
           <h3>Google Document AI</h3>
-          <p>Used by the OCR and Layout Parser steps. Billed by Google per page.</p>
+          <p>Used by the OCR, Layout Parser and Custom Extractor steps. Billed by Google per page.</p>
         </div>
         <span className={`connection-badge ${status?.configured ? "online" : ""}`}>
           <CircleDot size={12} /> {status?.configured ? "Key found" : "No key"}
@@ -64,7 +64,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           The name matters. Nothing is uploaded: the backend reads it from disk and the browser
           never sees it.
         </li>
-        <li>Fill in the project and the two processor ids, save, then press Verify.</li>
+        <li>Fill in the project and the processor ids you use, save, then press Verify.</li>
       </ol>
 
       {status && !status.configured && status.problem && (
@@ -181,6 +181,18 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
               type="number" step="0.01" min="0"
               value={draftSettings.gcp.layout_per_thousand_pages ?? ""}
               onChange={(event) => setGcp({ layout_per_thousand_pages: event.target.value === "" ? null : Number(event.target.value) })}
+            />
+          </label>
+        </div>
+        <div className="pricing-row">
+          <code>Custom Extractor</code>
+          <label>
+            <span>Per 1000 pages</span>
+            <input
+              type="number" step="0.01" min="0"
+              placeholder="Not configured"
+              value={draftSettings.gcp.custom_extractor_per_thousand_pages ?? ""}
+              onChange={(event) => setGcp({ custom_extractor_per_thousand_pages: event.target.value === "" ? null : Number(event.target.value) })}
             />
           </label>
         </div>

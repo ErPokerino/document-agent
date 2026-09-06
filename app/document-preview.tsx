@@ -5,7 +5,7 @@ import { useEffect } from "react";
 
 import { apiUrls } from "../lib/api";
 
-export type PreviewTarget = { dataset: string; document: string };
+export type PreviewTarget = { dataset: string; document: string; evaluationId?: number };
 
 /** The PDF beside the work: shared by labelling and by reading a run. */
 export function DocumentPreview({
@@ -25,7 +25,9 @@ export function DocumentPreview({
   }, [target, onClose]);
 
   if (!target) return null;
-  const href = apiUrls.documentFile(target.dataset, target.document);
+  const href = target.evaluationId === undefined
+    ? apiUrls.documentFile(target.dataset, target.document)
+    : apiUrls.evaluationDocument(target.evaluationId, target.document);
 
   return (
     <div className="pdf-modal">

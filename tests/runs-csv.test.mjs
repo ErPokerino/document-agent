@@ -155,3 +155,10 @@ test("a run from before the field existed exports as local", () => {
   const [header, row] = csv.split("\n");
   assert.equal(row.split(",")[header.split(",").indexOf("runs_on")], "lm_studio");
 });
+
+test("CSV keeps extractor usage and does not export an incomplete cost as money", () => {
+  const [header, row] = rows(runsToCsv([run({custom_extractor_pages:3, usage_complete:false})], null));
+  assert.equal(row[header.indexOf("custom_extractor_pages")], "3");
+  assert.equal(row[header.indexOf("usage_complete")], "0");
+  assert.equal(row[header.indexOf("cost_usd")], "");
+});

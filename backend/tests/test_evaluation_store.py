@@ -463,3 +463,31 @@ def test_a_run_from_before_the_steps_were_recorded_says_nothing_rather_than_gues
     evaluation_id = start(store)
 
     assert store.get_evaluation(evaluation_id).steps == []
+
+
+def test_custom_extractor_usage_survives_a_database_restart(store) -> None:
+    """The extractor's billable pages used to disappear between pipeline and Lab."""
+    eid = start(store, total=1)
+    store.record_document(eid, "a.pdf", outcomes("EUR", 125.31), 1, custom_extractor_pages=3)
+    detail = EvaluationStore(store.path).get_evaluation(eid)
+    assert detail.custom_extractor_pages == 3
+    assert detail.documents[0].custom_extractor_pages == 3
+    assert detail.usage_complete is True
+
+
+def test_legacy_usage_is_not_relabelled_as_complete(store) -> None:
+    """Missing historical counters are unknown, not proof of free processing."""
+    eid = start(store, total=1)
+    store.record_document(eid, "a.pdf", outcomes("EUR", 125.31), 1)
+    with store._connect() as connection:
+        connection.execute("UPDATE evaluation_documents SET usage_complete=NULL, custom_extractor_pages=NULL")
+    assert store.get_evaluation(eid).usage_complete is False
+    assert store.get_evaluation(eid).custom_extractor_pages is None
+
+
+def test_snapshot_bytes_are_verified_before_reuse(store) -> None:
+    """A corrupted snapshot must not become a different experimental input."""
+    digest = store.snapshot_document(b"original")
+    (store.path.parent / "evaluation-inputs" / f"{digest}.pdf").write_bytes(b"corrupted")
+    with pytest.raises(ValueError, match="digest"):
+        store.read_snapshot_document(digest)

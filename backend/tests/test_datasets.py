@@ -197,3 +197,15 @@ def test_renaming_to_the_same_name_is_a_no_op(store) -> None:
     store.create("invoices")
 
     assert store.rename("invoices", "invoices").name == "invoices"
+
+
+def test_uploading_a_duplicate_keeps_the_original_pdf_and_its_labels(store) -> None:
+    """An upload must not inherit another document's ground truth."""
+    from app.evaluation.datasets import DuplicateDocument
+    original = pdf_bytes()
+    store.create("invoices")
+    store.add_document("invoices", "invoice.pdf", original, labels={"total_amount": 100})
+    with pytest.raises(DuplicateDocument):
+        store.add_document("invoices", "invoice.pdf", b"replacement")
+    assert store.read_document("invoices", "invoice.pdf") == original
+    assert store.read_labels("invoices", "invoice.pdf").labels == {"total_amount": 100}

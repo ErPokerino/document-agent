@@ -74,7 +74,7 @@ async def extract(client: GeminiClient, model: str = "gemini-3.7-flash"):
 
 
 def test_the_curated_models_are_the_two_we_support() -> None:
-    assert [model.id for model in GEMINI_MODELS] == ["gemini-3.7-flash", "gemini-3.5-flash-lite"]
+    assert [model.id for model in GEMINI_MODELS] == ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite"]
 
 
 def test_the_schema_never_uses_pattern_because_gemini_rejects_it() -> None:

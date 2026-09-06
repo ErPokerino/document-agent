@@ -304,11 +304,12 @@ strict comparison use the same GGUF quantization, LM Studio and runtime-backend
 versions, driver family and pipeline snapshot; then compare the stored profile
 and CSV columns before attributing a score change to prompt quality.
 
-The snapshot currently freezes the pipeline definition and model controls, not
-the deployed revision of a remote Document AI processor or the contents of
-Master Data and supplier rules. A retry after one of those mutable inputs has
-changed can therefore produce a different answer even when the stored pipeline
-and model profile match; use a new run when comparing such a change.
+New Lab snapshots freeze the pipeline definition, model controls, PDF inputs
+and labels. Custom Extractor revisions are also pinned when processor metadata
+is available. Other remote processors, Master Data and supplier rules remain
+mutable. A retry after those inputs change can therefore produce a different
+answer even when the stored pipeline and model profile match; use a new run
+when comparing such a change.
 
 ## Multi-page documents
 
@@ -338,8 +339,72 @@ retry would only add prompt tokens and could never recover.
 
 If a model returns a value in the wrong format, only that field is cleared and marked for review. Other valid entities remain available. A currency is stored as a three-letter ISO 4217 code, with whitespace removed and lowercase canonicalized. A symbol naming exactly one currency is read as that currency — `S$` is Singapore's and nobody else's — while a bare `$` belongs to a dozen countries and is refused, because a wrong currency on an invoice is worse than an empty one. That line used to sit at every symbol, which was right while only models read the page: a model writing `$` had chosen not to give the code. A processor that points at a span can only answer with what is printed, and documents print symbols.
 
+## Dataset integrity, retries and usage accounting
+
+Uploading a PDF under an existing document name returns a conflict. It never
+replaces the original or inherits its labels. Promoting several reviewed runs
+checks names across the entire selection before writing any document.
+
+Every new Lab evaluation stores its input manifest (names, content hashes and
+labels) and keeps the original PDFs in `backend/data/evaluation-inputs`, deduplicated
+by hash. Both its first execution and retries read those bytes. Adding documents,
+editing labels, removing or renaming the source dataset no longer changes a retry.
+The Lab preview also reads the snapshot. Evaluations predating this change remain
+readable, but cannot be retried: their original input set cannot be reconstructed
+reliably. New Lab runs pin Custom Extractor versions when metadata is available; other
+remote processors, registers and supplier rules remain mutable. Input files are retained when a run is deleted; automatic reclamation is
+not implemented, so deleting history does not promise to reclaim PDF storage.
+
+Lab and reviewed-run selectors traverse cursor pages before filtering, comparing
+or exporting, rather than silently using only the newest fifty records. For a
+large history this reads all summaries; server-side filtering and aggregation
+remain a future scalability improvement.
+
+Supplier-rule model calls contribute their token counts. Custom Extractor pages
+are persisted and exported alongside OCR/Layout usage, with an editable USD rate
+per thousand pages in Settings. Its rate starts unset rather than assuming an
+account's tariff. Costs are estimates at the configured rates, not invoices or
+local hardware/energy costs. Missing rates or incomplete usage produce no total;
+older runs, failed runs and resumed evaluations do not claim complete accounting
+for calls that may have been billed without reporting usage. Recorded usage is
+still available in CSV. A changed expected label is shown separately in the
+run comparison and excluded from its net fixes/regressions.
+
 ## Why Outlines is not required
 
 LM Studio directly supports `response_format.type = json_schema`. The backend supplies the dynamic schema in every `/v1/chat/completions` extraction request, so the Structured Output field in the LM Studio desktop UI does not need to be configured manually. Pydantic provides a second application-level validation layer. Outlines remains a useful future adapter for direct Transformers or MLX inference, but would duplicate the structured-output layer in this setup.
 
 References: [LM Studio Structured Output](https://lmstudio.ai/docs/developer/openai-compat/structured-output), [LM Studio model loading API](https://lmstudio.ai/docs/developer/rest/load), [Outlines multimodal models](https://dottxt-ai.github.io/outlines/main/features/models/transformers_multimodal/).
+
+
+## Lab navigation and extraction engines
+
+Dataset, extraction engine, pipeline and LLM location filters support searchable
+checkboxes, Select all, Clear selection and removable chips. Choices combine
+with OR within a filter and AND between filters, and persist between Past runs
+and Analytics. Past runs offers 10/25/50 rows per page, Previous/Next and direct
+page selection. Export and Analytics use all matching runs, not just that page.
+
+New Lab evaluations snapshot Custom Extractor display names, processor ids,
+project/location, exact versions and base versions when exposed by Google.
+Resolved versions are explicitly invoked and retained in the retry pipeline.
+Metadata access failures retain unknown facts; historical records are never
+filled with today's default. Additional LLMs are identified separately. A retry
+with a different Google project/location is refused. Multiple extractor steps
+are resolved and pinned independently. CSV includes the recorded identities.
+
+Analytics groups by engine/version, pipeline and dataset. This separates dataset
+names, not revisions of their input manifests; full configuration fingerprints
+remain future work. Charts use compact numbers linked to comparison rows and a
+detail panel, with collision avoidance for labels. Tooltips omit dataset names
+and duplicate reader names. Pareto rows have a subtle background and a badge,
+recomputed for the selected axis; this is a trade-off frontier, not a universal
+ranking. Field accuracy remains pooled across the selection as its help states.
+
+The offered Gemini models are 3.8 Flash, 3.1 Pro Preview and 3.5 Flash Lite.
+Saved 3.7 selections migrate to 3.8; historical runs retain 3.7 and its pricing.
+New model prices are added without replacing customized rates. 3.8 Flash starts
+at the standard introductory USD 0.75/3.75 per million input/output tokens,
+checked on 2026-09-06. Pro's context-tiered pricing cannot be represented by the
+current flat-rate calculator, so its rates start unset and its cost is unknown
+until explicitly configured. Source: [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).

@@ -1,3 +1,4 @@
+import { engineKey, engineLabel, engineDetail } from "./extraction-engine.ts";
 import type { Evaluation } from "./types";
 
 /**
@@ -13,6 +14,8 @@ export type Axis = "secondsPerDocument" | "costPerDocument" | "tokensPerDocument
 
 export type ApproachPoint = {
   key: string;
+  detail?: string;
+  dataset?: string;
   model: string;
   pipeline: string;
   runs: number;
@@ -54,7 +57,7 @@ function mean(values: number[]): number | null {
 export function approachPoints(evaluations: Evaluation[], costOf: CostOf): ApproachPoint[] {
   const grouped = new Map<
     string,
-    { model: string; pipeline: string; accuracy: number[]; seconds: number[]; cost: number[]; tokens: number[] }
+    { model: string; pipeline: string; dataset: string; detail: string; accuracy: number[]; seconds: number[]; cost: number[]; tokens: number[] }
   >();
 
   for (const evaluation of evaluations) {
@@ -63,10 +66,10 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
     // run that failed, and plotting it as a point would libel the approach.
     if (accuracy === null || accuracy === undefined) continue;
 
-    const key = `${evaluation.model}\u0000${evaluation.pipeline}`;
+    const key = `${engineKey(evaluation)}\u0000${evaluation.pipeline}\u0000${evaluation.dataset}`;
     const group =
       grouped.get(key) ??
-      { model: evaluation.model, pipeline: evaluation.pipeline, accuracy: [], seconds: [], cost: [], tokens: [] };
+      { model: engineLabel(evaluation), pipeline: evaluation.pipeline, dataset: evaluation.dataset, detail: engineDetail(evaluation), accuracy: [], seconds: [], cost: [], tokens: [] };
 
     group.accuracy.push(accuracy);
     if (evaluation.average_elapsed_ms) group.seconds.push(evaluation.average_elapsed_ms / 1000);
@@ -85,6 +88,8 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
     .map(([key, group]) => ({
       key,
       model: group.model,
+      detail: group.detail,
+      dataset: group.dataset,
       pipeline: group.pipeline,
       runs: group.accuracy.length,
       accuracy: mean(group.accuracy) as number,
@@ -93,6 +98,12 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
       tokensPerDocument: mean(group.tokens),
     }))
     .sort((a, b) => a.model.localeCompare(b.model) || a.pipeline.localeCompare(b.pipeline));
+}
+
+/** Keep the hover concise; dataset context already lives in the comparison table. */
+export function approachDescription(point: ApproachPoint): string {
+  const detail = point.detail === point.model ? "" : (point.detail || "").replace(/^Document AI Custom Extractor · /, "");
+  return [point.model, point.pipeline !== point.model ? `Pipeline: ${point.pipeline}` : "", detail].filter(Boolean).join("\n");
 }
 
 /**

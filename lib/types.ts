@@ -69,6 +69,7 @@ export type EntityDefinition = {
 };
 
 export type Evaluation = {
+  extraction_engine: ExtractionEngine | null;
   id: number;
   created_at: string;
   finished_at: string | null;
@@ -92,10 +93,13 @@ export type Evaluation = {
   completion_tokens: number;
   ocr_pages: number;
   layout_pages: number;
+  custom_extractor_pages: number | null;
+  usage_complete: boolean;
   metrics: Metrics;
 };
 
 export type EvaluationDetail = {
+  extraction_engine: ExtractionEngine | null;
   id: number;
   created_at: string;
   finished_at: string | null;
@@ -119,9 +123,12 @@ export type EvaluationDetail = {
   completion_tokens: number;
   ocr_pages: number;
   layout_pages: number;
+  custom_extractor_pages: number | null;
+  usage_complete: boolean;
   metrics: Metrics;
   prompts: PromptConfiguration;
   pipeline_definition: PipelineDefinition | null;
+  has_dataset_snapshot: boolean;
   documents: EvaluationDocumentResult[];
 };
 
@@ -132,6 +139,7 @@ export type EvaluationDocumentResult = {
   elapsed_ms: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
+  custom_extractor_pages: number | null;
   items: EvaluationFieldResult[];
 };
 
@@ -145,6 +153,16 @@ export type EvaluationFieldResult = {
 
 export type EvaluationRequest = {
   dataset: string;
+};
+
+export type ExtractionEngine = {
+  project_id: string | null;
+  location: string | null;
+  processor_id: string;
+  display_name: string | null;
+  version: string | null;
+  base_model: string | null;
+  additional_processors: ExtractorProcessor[];
 };
 
 export type ExtractionResponse = {
@@ -195,6 +213,15 @@ export type ExtractionRunDetail = {
   corrections: Record<string, unknown>;
 };
 
+export type ExtractorProcessor = {
+  project_id: string | null;
+  location: string | null;
+  processor_id: string;
+  display_name: string | null;
+  version: string | null;
+  base_model: string | null;
+};
+
 export type FieldExtraction = {
   value: string | number | null;
   confidence: "low" | "medium" | "high";
@@ -228,6 +255,7 @@ export type GcpSettings = {
   custom_extractor_processor_id: string;
   ocr_per_thousand_pages: number | null;
   layout_per_thousand_pages: number | null;
+  custom_extractor_per_thousand_pages: number | null;
   pricing_checked_on: string;
 };
 

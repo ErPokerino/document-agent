@@ -35,7 +35,7 @@ written.
 npm test
 ```
 
-Type check, linter, 190-odd frontend tests, 680-odd backend tests. It does not
+Type check, linter, 200-plus frontend tests, 700-plus backend tests. It does not
 build, so it is safe to run while the app is up.
 
 ```bash
@@ -95,10 +95,19 @@ model records provider `none` and model `Not used`, not the selection sitting in
 settings. LM Studio/runtime/driver versions are not exposed reliably, so do not
 promise bit-identical output across different inference stacks.
 
-The evaluation snapshot does not freeze a deployed Document AI processor
-revision, Master Data or supplier rules. Do not describe retry as a fully
+New Lab evaluations resolve and pin each Custom Extractor revision when metadata
+is available. Legacy or metadata-denied runs retain unknown versions. The
+evaluation snapshot does not freeze Master Data or supplier rules. Do not describe retry as a fully
 immutable experiment until those mutable inputs gain their own revisions or
 snapshots.
+
+New evaluations freeze their input PDF bytes and labels in a manifest and the
+hash-addressed `backend/data/evaluation-inputs` folder. Retry and historical
+preview read that snapshot, never the current dataset. Legacy runs without a
+manifest cannot be retried. Keep that distinction when changing the API or UI.
+Usage completeness is separate from a successful extraction: historical or
+retried runs can lack billable counters. Do not turn those missing facts into a
+zero or a complete cost estimate.
 
 **Ports do not establish process ownership.** `start.ps1` and `stop.ps1` use
 `scripts/process-safety.ps1` before adopting or stopping a listener. A foreign

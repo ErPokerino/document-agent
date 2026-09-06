@@ -36,7 +36,7 @@ test("no filters keeps everything", () => {
 test("filtering by model keeps only that model", () => {
   const runs = [evaluation({ id: 1, model: "a" }), evaluation({ id: 2, model: "b" })];
 
-  const filtered = filterEvaluations(runs, { ...emptyFilters, model: "b" });
+  const filtered = filterEvaluations(runs, { ...emptyFilters, model: ["b"] });
 
   assert.deepEqual(filtered.map((run) => run.id), [2]);
 });
@@ -93,7 +93,7 @@ test("filters combine", () => {
     evaluation({ id: 3, model: "b", total_documents: 2 }),
   ];
 
-  const filtered = filterEvaluations(runs, { ...emptyFilters, model: "b", minDocuments: "10" });
+  const filtered = filterEvaluations(runs, { ...emptyFilters, model: ["b"], minDocuments: "10" });
 
   assert.deepEqual(filtered.map((run) => run.id), [2]);
 });
@@ -116,7 +116,7 @@ test("runs can be narrowed to one pipeline", () => {
     evaluation({ id: 2, pipeline: "OCR then model" }),
   ];
 
-  const filtered = filterEvaluations(runs, { ...emptyFilters, pipeline: "OCR then model" });
+  const filtered = filterEvaluations(runs, { ...emptyFilters, pipeline: ["OCR then model"] });
 
   assert.deepEqual(filtered.map((run) => run.id), [2]);
 });
@@ -136,7 +136,7 @@ test("runs can be narrowed to the ones that stayed on this machine", () => {
     evaluation({ id: 1, provider: "lm_studio", model: "qwen/qwen3.6-35b-a3b" }),
     evaluation({ id: 2, provider: "gemini", model: "gemini-3.7-flash" }),
   ];
-  const local = filterEvaluations(runs, { ...emptyFilters, runsOn: "lm_studio" });
+  const local = filterEvaluations(runs, { ...emptyFilters, runsOn: ["lm_studio"] });
   assert.deepEqual(local.map((run) => run.id), [1]);
 });
 
@@ -146,7 +146,7 @@ test("runs can be narrowed to the ones that went to an API", () => {
     evaluation({ id: 2, provider: "gemini" }),
     evaluation({ id: 3, provider: "gemini" }),
   ];
-  const hosted = filterEvaluations(runs, { ...emptyFilters, runsOn: "gemini" });
+  const hosted = filterEvaluations(runs, { ...emptyFilters, runsOn: ["gemini"] });
   assert.deepEqual(hosted.map((run) => run.id), [2, 3]);
 });
 
@@ -156,7 +156,7 @@ test("a run whose pipeline called no model has its own filter", () => {
     evaluation({ id: 2, provider: "none", model: "Not used" }),
   ];
 
-  const withoutModel = filterEvaluations(runs, { ...emptyFilters, runsOn: "none" });
+  const withoutModel = filterEvaluations(runs, { ...emptyFilters, runsOn: ["none"] });
 
   assert.deepEqual(withoutModel.map((run) => run.id), [2]);
 });
@@ -164,7 +164,7 @@ test("a run whose pipeline called no model has its own filter", () => {
 test("no choice shows both, and counts as no active filter", () => {
   const runs = [evaluation({ id: 1, provider: "lm_studio" }), evaluation({ id: 2, provider: "gemini" })];
   assert.equal(filterEvaluations(runs, emptyFilters).length, 2);
-  assert.equal(emptyFilters.runsOn, "");
+  assert.deepEqual(emptyFilters.runsOn, []);
 });
 
 test("a run recorded before the provider was stored is treated as local", () => {
@@ -172,8 +172,8 @@ test("a run recorded before the provider was stored is treated as local", () => 
   // still arrive without the field at all.
   const older = evaluation({ id: 9 });
   delete older.provider;
-  assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: "lm_studio" }).length, 1);
-  assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: "gemini" }).length, 0);
+  assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: ["lm_studio"] }).length, 1);
+  assert.equal(filterEvaluations([older], { ...emptyFilters, runsOn: ["gemini"] }).length, 0);
 });
 
 test("runs can be narrowed to one dataset, because scores across datasets do not compare", () => {
@@ -181,7 +181,7 @@ test("runs can be narrowed to one dataset, because scores across datasets do not
     evaluation({ id: 1, dataset: "Invoices" }),
     evaluation({ id: 2, dataset: "Receipts" }),
   ];
-  const only = filterEvaluations(runs, { ...emptyFilters, dataset: "Invoices" });
+  const only = filterEvaluations(runs, { ...emptyFilters, dataset: ["Invoices"] });
   assert.deepEqual(only.map((run) => run.id), [1]);
   assert.equal(filterEvaluations(runs, emptyFilters).length, 2);
 });

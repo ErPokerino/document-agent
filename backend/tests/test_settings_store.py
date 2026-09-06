@@ -7,6 +7,17 @@ from app.services import settings_store as settings_store_module
 from app.services.settings_store import SettingsStore
 
 
+def test_flash_selection_migrates_without_rewriting_custom_prices(tmp_path):
+    """New choices must not erase the historical model's custom tariff."""
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"provider": "gemini", "model": "gemini-3.7-flash", "gemini": {"pricing": {"gemini-3.7-flash": {"input_per_million": 1, "output_per_million": 5}}}}), encoding="utf-8")
+    settings = SettingsStore(path).read()
+    assert settings.model == "gemini-3.8-flash"
+    assert settings.gemini.pricing["gemini-3.7-flash"].input_per_million == 1
+    assert settings.gemini.pricing["gemini-3.8-flash"].input_per_million == 0.75
+    assert settings.gemini.pricing["gemini-3.1-pro-preview"].input_per_million is None
+
+
 def test_corrupted_settings_file_falls_back_to_defaults(tmp_path) -> None:
     path = tmp_path / "settings.json"
     path.write_text('{"model": "half-written', encoding="utf-8")

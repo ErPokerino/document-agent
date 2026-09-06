@@ -478,6 +478,12 @@ export default function Home() {
   // afterwards, so a pipeline with one is not local processing.
   const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds);
   const configuredEntities = settings?.prompts.entities ?? [];
+  const [extractionEngine, setExtractionEngine] = useState<import("../lib/types").ExtractionEngine | null>(null);
+  useEffect(() => {
+    let current = true;
+    if (settings) api.extractionEngine().then(engine => { if (current) setExtractionEngine(engine); }).catch(() => { if (current) setExtractionEngine(null); });
+    return () => { current = false; };
+  }, [settings]);
   const activeModelName = modelDisplayName(settings?.model ?? "", models);
   const isConnected = health?.lm_studio === true;
   const activeModel = models.find((model) => model.id === settings?.model);
@@ -662,7 +668,7 @@ export default function Home() {
             </button>
             <button className="model-chip" onClick={() => setView("llm")} title="Change it in LLM">
               <span className="model-icon"><Cpu size={15} /></span>
-              <div><small>{activeModelStatus}</small><strong>{activeModelName}</strong></div>
+              <div><small>{pipelineKinds.includes("document_ai_extract") ? "Custom Extractor" : activeModelStatus}</small><strong title={extractionEngine?.version || "Version unavailable"}>{pipelineKinds.includes("document_ai_extract") ? extractionEngine?.display_name || "Document AI" : activeModelName}</strong></div>
               <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />
             </button>
           </div>

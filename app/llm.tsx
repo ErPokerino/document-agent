@@ -405,9 +405,10 @@ export function LanguageModels(props: Props) {
         </div>
         <p className="field-help">
           Rates you can edit, checked on {draftSettings.gemini.pricing_checked_on}. They are not
-          read from Google: published prices change, and Gemini 3.7 Flash is already scheduled to
+          read from Google: published prices change, and Gemini 3.8 Flash is already scheduled to
           double on 1 January 2027. Thinking tokens are billed at the output rate.
         </p>
+        <p className="field-help">Gemini 3.1 Pro Preview has context-dependent prices. Its flat-rate estimate is unavailable until you configure the rates appropriate to your workload.</p>
       </div>
 
       <div className="settings-actions sticky-actions">

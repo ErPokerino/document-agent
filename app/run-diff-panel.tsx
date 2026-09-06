@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowRight, GitCompare, LoaderCircle } from "lucide-react";
+import { engineLabel } from "../lib/extraction-engine";
 import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
@@ -18,6 +19,7 @@ const DIRECTION_LABELS: Record<FieldChange["direction"], string> = {
   changed: "still wrong",
   added: "new field",
   removed: "gone",
+  relabeled: "ground truth changed",
 };
 
 /**
@@ -115,7 +117,7 @@ export function RunDiffPanel({ evaluations }: Props) {
             <option value="">Choose a run…</option>
             {scorable.map((evaluation) => (
               <option key={evaluation.id} value={evaluation.id}>
-                #{evaluation.id} · {evaluation.model} · {evaluation.pipeline}
+                #{evaluation.id} · {engineLabel(evaluation)} · {evaluation.pipeline}
               </option>
             ))}
           </select>
@@ -127,7 +129,7 @@ export function RunDiffPanel({ evaluations }: Props) {
             <option value="">Choose a run…</option>
             {scorable.map((evaluation) => (
               <option key={evaluation.id} value={evaluation.id}>
-                #{evaluation.id} · {evaluation.model} · {evaluation.pipeline}
+                #{evaluation.id} · {engineLabel(evaluation)} · {evaluation.pipeline}
               </option>
             ))}
           </select>
@@ -150,6 +152,7 @@ export function RunDiffPanel({ evaluations }: Props) {
             <span className="diff-total broken"><b>{shownDiff.summary.broken}</b> regressed</span>
             <span className="diff-total changed"><b>{shownDiff.summary.changed}</b> still wrong, differently</span>
             <span className="diff-total"><b>{shownDiff.summary.unchanged}</b> unchanged</span>
+            {shownDiff.relabeled.length > 0 && <span className="diff-total"><b>{shownDiff.relabeled.length}</b> ground truth changed · excluded from net</span>}
             <span className={`diff-net ${shownDiff.summary.net > 0 ? "good" : shownDiff.summary.net < 0 ? "poor" : ""}`}>
               {shownDiff.summary.net > 0 ? `+${shownDiff.summary.net}` : shownDiff.summary.net} net
             </span>
@@ -189,7 +192,7 @@ export function RunDiffPanel({ evaluations }: Props) {
                         <td className="compare-row-label"><strong>{change.entity}</strong></td>
                         <td className={change.before?.matched ? "good" : ""}>{describe(change.before?.value)}</td>
                         <td className={change.after?.matched ? "good" : ""}>{describe(change.after?.value)}</td>
-                        <td className="compare-expected">{describe(change.expected)}</td>
+                        <td className="compare-expected">{change.direction === "relabeled" ? `${describe(change.previousExpected)} → ${describe(change.expected)}` : describe(change.expected)}</td>
                         <td><span className={`diff-tag ${change.direction}`}>{DIRECTION_LABELS[change.direction]}</span></td>
                       </tr>
                     )),

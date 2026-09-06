@@ -64,6 +64,8 @@ async def run_evaluation(
     provider: str = "lm_studio",
     execution_profile: ModelExecutionProfile | None = None,
     cancelled: asyncio.Event | None = None,
+    read_document: Callable[[str], bytes] | None = None,
+    resumed: bool = False,
 ) -> None:
     try:
         for name, labels in documents:
@@ -73,7 +75,7 @@ async def run_evaluation(
 
             started = time.perf_counter()
             try:
-                content = datasets.read_document(dataset, name)
+                content = read_document(name) if read_document is not None else datasets.read_document(dataset, name)
                 # The steps hold no per-document state, so one compiled
                 # pipeline serves the whole run.
                 result = await DocumentPipeline(steps).run(make_context(name, content))
@@ -122,6 +124,8 @@ async def run_evaluation(
                 completion_tokens=stats.get("completion_tokens"),
                 ocr_pages=pages.get("document_ai_ocr"),
                 layout_pages=pages.get("document_ai_layout"),
+                custom_extractor_pages=pages.get("document_ai_extract", 0),
+                usage_complete=not resumed and result.artifacts.get("usage_complete", True),
             )
             if run_store is not None:
                 run_store.record_run(

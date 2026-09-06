@@ -51,7 +51,7 @@ from app.domain.models import (
     StepCatalogueEntry,
 )
 from app.evaluation.dataset_archive import ArchiveError, read_archive, write_archive
-from app.evaluation.datasets import DatasetStore, InvalidName
+from app.evaluation.datasets import DatasetStore, DuplicateDocument, InvalidName
 from app.evaluation.export import evaluation_to_csv
 from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
@@ -870,6 +870,9 @@ def _evaluation_model(detail: Any) -> Evaluation:
                 "completion_tokens",
                 "ocr_pages",
                 "layout_pages",
+                "custom_extractor_pages",
+                "usage_complete",
+                "extraction_engine",
             )
         },
         metrics=_metrics_model(detail.metrics),
@@ -1371,6 +1374,8 @@ async def add_dataset_document(name: str, file: UploadFile = File(...)) -> Datas
         raise HTTPException(status_code=413, detail="The PDF exceeds the 20 MB limit")
     try:
         added = dataset_store.add_document(name, file.filename or "document.pdf", content)
+    except DuplicateDocument as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except InvalidName as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1453,6 +1458,7 @@ async def promote_runs_to_dataset(name: str, request: PromoteRunRequest) -> list
     # Resolve everything first: a batch that names a missing run fails before it
     # has half-populated the dataset.
     resolved = []
+    filenames: set[str] = set()
     for run_id in request.run_ids:
         run = run_store.get_run(run_id)
         if run is None:
@@ -1463,6 +1469,15 @@ async def promote_runs_to_dataset(name: str, request: PromoteRunRequest) -> list
                 status_code=410,
                 detail=f"The original PDF for run {run_id} is no longer stored on this device.",
             )
+        try:
+            dataset_store.check_new_document(name, run.filename)
+            if run.filename.casefold() in filenames:
+                raise DuplicateDocument(f"The selected runs contain the same document name: {run.filename!r}")
+        except DuplicateDocument as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except InvalidName as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        filenames.add(run.filename.casefold())
         resolved.append((run, content, run_store.validated_values(run_id) or {}))
 
     added: list[DatasetDocument] = []
@@ -1537,10 +1552,14 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
 # -- recorded runs ----------------------------------------------------------
 
 @app.get("/api/runs", response_model=list[ExtractionRun])
-async def list_runs(limit: int = 50, validated_only: bool = False) -> list[ExtractionRun]:
+async def list_runs(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    validated_only: bool = False,
+    before_id: Annotated[int | None, Query(ge=1)] = None,
+) -> list[ExtractionRun]:
     return [
         ExtractionRun(**asdict(run))
-        for run in run_store.list_runs(limit=min(limit, 200), validated_only=validated_only)
+        for run in run_store.list_runs(limit=limit, validated_only=validated_only, before_id=before_id)
     ]
 
 
@@ -1596,8 +1615,11 @@ async def record_corrections(run_id: int, request: CorrectionsRequest) -> Respon
 # -- Lab: evaluations over a dataset ----------------------------------------
 
 @app.get("/api/evaluations", response_model=list[Evaluation])
-async def list_evaluations() -> list[Evaluation]:
-    return [_evaluation_model(evaluation) for evaluation in evaluation_store.list_evaluations()]
+async def list_evaluations(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    before_id: Annotated[int | None, Query(ge=1)] = None,
+) -> list[Evaluation]:
+    return [_evaluation_model(evaluation) for evaluation in evaluation_store.list_evaluations(limit, before_id)]
 
 
 @app.get("/api/evaluations/{evaluation_id}", response_model=EvaluationDetail)
@@ -1610,6 +1632,7 @@ async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
         **summary.model_dump(),
         prompts=detail.prompts,
         pipeline_definition=detail.pipeline_definition,
+        has_dataset_snapshot=detail.dataset_snapshot is not None,
         documents=[asdict(document) for document in detail.documents],
     )
 
@@ -1627,6 +1650,39 @@ async def export_evaluation(evaluation_id: int) -> Response:
     )
 
 
+@app.get("/api/evaluations/{evaluation_id}/documents/{document}/file", response_class=Response)
+async def read_evaluation_document(evaluation_id: int, document: str) -> Response:
+    detail = evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    snapshot = (detail.dataset_snapshot or {}).get(document)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="This evaluation has no stored input for that document")
+    try:
+        content = evaluation_store.read_snapshot_document(snapshot["sha256"])
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=410, detail="The stored evaluation document is missing or damaged") from exc
+    return Response(content=content, media_type="application/pdf")
+
+
+async def _lab_extractor(settings: AppSettings, definition: PipelineDefinition):
+    from app.services.document_ai import DocumentAiClient
+    from app.services.extraction_engine import resolve_extractor
+    engines = []
+    for step in definition.steps:
+        if step.kind.value == "document_ai_extract":
+            processor = str(step.config.get("processor_id") or settings.gcp.custom_extractor_processor_id)
+            client = DocumentAiClient(GCP_CREDENTIALS_PATH, settings.gcp.project_id, settings.gcp.location)
+            engines.append(await resolve_extractor(client, processor))
+    return {**engines[0], "additional_processors": engines[1:]} if engines else None
+
+
+@app.get("/api/lab/extraction-engine")
+async def lab_extraction_engine():
+    settings = settings_store.read()
+    return await _lab_extractor(settings, _selected_pipeline(settings))
+
+
 @app.post("/api/evaluations", response_model=Evaluation, status_code=202)
 async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     global evaluation_task, evaluation_cancelled
@@ -1635,12 +1691,15 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     settings = settings_store.read()
 
     documents: list[tuple[str, dict[str, Any]]] = []
+    dataset_snapshot: dict[str, Any] = {}
     for document in dataset_store.list_documents(request.dataset):
         if not document.labelled:
             continue
         label_file = dataset_store.read_labels(request.dataset, document.name)
         if label_file is not None:
             documents.append((document.name, label_file.labels))
+            digest = evaluation_store.snapshot_document(dataset_store.read_document(request.dataset, document.name))
+            dataset_snapshot[document.name] = {"sha256": digest, "labels": label_file.labels}
     if not documents:
         raise HTTPException(
             status_code=400,
@@ -1651,6 +1710,18 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     # not leave the backend marked busy.
     pipeline_definition = _selected_pipeline(settings)
     steps = _document_pipeline(settings).steps
+    extraction_engine = await _lab_extractor(settings, pipeline_definition)
+    if extraction_engine:
+        # Pin every extractor independently; a pipeline may contain more than one.
+        identities = [extraction_engine, *extraction_engine["additional_processors"]]
+        definitions = [step for step in pipeline_definition.steps if step.kind.value == "document_ai_extract"]
+        executables = [step for step in steps if type(step).__name__ == "ExtractWithCustomExtractor"]
+        for identity, definition, executable in zip(identities, definitions, executables, strict=True):
+            processor = str(definition.config.get("processor_id") or settings.gcp.custom_extractor_processor_id)
+            if identity["version"]:
+                processor = identity["processor_id"] + "/processorVersions/" + identity["version"]
+            definition.config["processor_id"] = processor
+            executable.processor_id = processor
 
     selected_model = await _ensure_model_ready(settings, pipeline_definition)
     execution_profile = _execution_profile(settings, pipeline_definition, selected_model)
@@ -1668,6 +1739,8 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         steps=[step.kind.value for step in pipeline_definition.steps],
         pipeline_definition=pipeline_definition,
         execution_profile=execution_profile,
+        dataset_snapshot=dataset_snapshot,
+        extraction_engine=extraction_engine,
     )
     evaluation_cancelled = asyncio.Event()
 
@@ -1691,6 +1764,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 execution_profile=execution_profile,
                 make_context=lambda name, content: _pipeline_context(settings, name, content),
                 cancelled=cancelled,
+                read_document=lambda name: evaluation_store.read_snapshot_document(dataset_snapshot[name]["sha256"]),
             )
         except asyncio.CancelledError:
             evaluation_store.finish(evaluation_id, "cancelled")
@@ -1731,9 +1805,13 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
         raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
     if detail.status == "running":
         raise HTTPException(status_code=409, detail="That evaluation is already running.")
-    _require_dataset(detail.dataset)
+    if detail.dataset_snapshot is None:
+        raise HTTPException(status_code=409, detail="This evaluation has no snapshot of its original documents and labels. Its inputs cannot be recovered for a retry.")
 
     settings = settings_store.read()
+    engine = detail.extraction_engine
+    if engine and (engine.get("project_id") != settings.gcp.project_id or engine.get("location") != settings.gcp.location):
+        raise HTTPException(status_code=409, detail="This evaluation used a different Document AI project or location.")
     try:
         # New runs carry the complete definition. Legacy rows fall back to the
         # saved pipeline because the earlier schema retained only its name.
@@ -1797,12 +1875,10 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
 
     attempted = evaluation_store.attempted_documents(evaluation_id)
     documents: list[tuple[str, dict[str, Any]]] = []
-    for document in dataset_store.list_documents(detail.dataset):
-        if not document.labelled or attempted.get(document.name) == "ok":
+    for name, snapshot in detail.dataset_snapshot.items():
+        if attempted.get(name) == "ok":
             continue
-        label_file = dataset_store.read_labels(detail.dataset, document.name)
-        if label_file is not None:
-            documents.append((document.name, label_file.labels))
+        documents.append((name, snapshot["labels"]))
     if not documents:
         raise HTTPException(
             status_code=400,
@@ -1835,6 +1911,8 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                     retry_settings, name, content
                 ),
                 cancelled=cancelled,
+                read_document=lambda name: evaluation_store.read_snapshot_document(detail.dataset_snapshot[name]["sha256"]),
+                resumed=True,
             )
         except asyncio.CancelledError:
             evaluation_store.finish(evaluation_id, "cancelled")

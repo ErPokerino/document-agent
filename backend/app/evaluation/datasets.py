@@ -30,6 +30,10 @@ class InvalidName(ValueError):
     """Raised for a dataset or document name that is not safe to use as a path."""
 
 
+class DuplicateDocument(ValueError):
+    """Replacing a PDF must never silently inherit its old ground truth."""
+
+
 @dataclass(frozen=True)
 class DatasetSummary:
     name: str
@@ -161,14 +165,24 @@ class DatasetStore:
     ) -> DocumentSummary:
         if not filename.lower().endswith(".pdf"):
             raise ValueError("Only PDF documents can be added to a dataset")
-        path = self._document_path(dataset, filename)
+        path = self.check_new_document(dataset, filename)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
+        try:
+            with path.open("xb") as output:
+                output.write(content)
+        except FileExistsError as exc:
+            raise DuplicateDocument(f"A document named {filename!r} already exists") from exc
         if labels is not None:
             self.set_labels(dataset, filename, labels, source=source)
         return next(
             document for document in self.list_documents(dataset) if document.name == filename
         )
+
+    def check_new_document(self, dataset: str, filename: str) -> Path:
+        path = self._document_path(dataset, filename)
+        if path.exists() or self._label_path(dataset, filename).exists():
+            raise DuplicateDocument(f"A document named {filename!r} already exists")
+        return path
 
     def remove_document(self, dataset: str, document: str) -> None:
         self._document_path(dataset, document).unlink(missing_ok=True)

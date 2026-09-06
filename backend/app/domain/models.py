@@ -204,6 +204,9 @@ class ModelPricing(BaseModel):
 def default_gemini_pricing() -> dict[str, ModelPricing]:
     # Paid tier, checked on 2026-08-21. Verify against the pricing page.
     return {
+        "gemini-3.8-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75),
+        # Pro has context-dependent tariffs; a flat rate must be configured explicitly.
+        "gemini-3.1-pro-preview": ModelPricing(),
         "gemini-3.7-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75),
         "gemini-3.5-flash-lite": ModelPricing(input_per_million=0.30, output_per_million=2.50),
     }
@@ -238,6 +241,7 @@ class GcpSettings(BaseModel):
     # USD per 1000 pages, editable for the same reason the Gemini rates are.
     ocr_per_thousand_pages: float | None = 1.5
     layout_per_thousand_pages: float | None = 10.0
+    custom_extractor_per_thousand_pages: Annotated[float | None, Field(ge=0)] = None
     pricing_checked_on: str = "2026-08-22"
 
 
@@ -498,7 +502,21 @@ class EvaluationRequest(BaseModel):
     dataset: Annotated[str, Field(min_length=1, max_length=128)]
 
 
+class ExtractorProcessor(BaseModel):
+    project_id: str | None = None
+    location: str | None = None
+    processor_id: str
+    display_name: str | None = None
+    version: str | None = None
+    base_model: str | None = None
+
+
+class ExtractionEngine(ExtractorProcessor):
+    additional_processors: list[ExtractorProcessor] = Field(default_factory=list)
+
+
 class Evaluation(BaseModel):
+    extraction_engine: ExtractionEngine | None = None
     id: int
     created_at: str
     finished_at: str | None = None
@@ -524,6 +542,8 @@ class Evaluation(BaseModel):
     completion_tokens: int = 0
     ocr_pages: int = 0
     layout_pages: int = 0
+    custom_extractor_pages: int | None = None
+    usage_complete: bool = False
     metrics: Metrics
 
 
@@ -542,12 +562,14 @@ class EvaluationDocumentResult(BaseModel):
     elapsed_ms: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    custom_extractor_pages: int | None = None
     items: list[EvaluationFieldResult]
 
 
 class EvaluationDetail(Evaluation):
     prompts: PromptConfiguration
     pipeline_definition: PipelineDefinition | None = None
+    has_dataset_snapshot: bool = False
     documents: list[EvaluationDocumentResult]
 
 

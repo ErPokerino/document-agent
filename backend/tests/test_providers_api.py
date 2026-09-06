@@ -92,7 +92,7 @@ def test_hosted_models_are_listed_next_to_the_local_ones(api) -> None:
     listed = client.get("/api/models").json()
 
     assert {model["provider"] for model in listed} == {"lm_studio", "gemini"}
-    assert "gemini-3.7-flash" in [model["id"] for model in listed]
+    assert "gemini-3.8-flash" in [model["id"] for model in listed]
 
 
 def test_hosted_models_are_still_listed_when_lm_studio_is_down(api) -> None:
@@ -177,7 +177,7 @@ def test_the_key_can_be_removed_explicitly(api) -> None:
 def test_switching_to_a_hosted_model_does_not_need_lm_studio(api) -> None:
     FakeLMStudio.error = LMStudioError("LM Studio is not reachable")
 
-    assert save(api, provider="gemini", model="gemini-3.7-flash").status_code == 200
+    assert save(api, provider="gemini", model="gemini-3.8-flash").status_code == 200
 
 
 def test_an_unknown_hosted_model_is_rejected(api) -> None:
@@ -187,7 +187,7 @@ def test_an_unknown_hosted_model_is_rejected(api) -> None:
 def test_a_hosted_model_cannot_be_loaded(api) -> None:
     client, _ = api
 
-    response = client.post("/api/models/load", json={"model": "gemini-3.7-flash"})
+    response = client.post("/api/models/load", json={"model": "gemini-3.8-flash"})
 
     assert response.status_code == 400
     assert "does not need loading" in response.json()["detail"]
@@ -195,7 +195,7 @@ def test_a_hosted_model_cannot_be_loaded(api) -> None:
 
 def test_extracting_with_a_hosted_model_needs_a_key_not_a_warm_up(api) -> None:
     client, _ = api
-    save(api, provider="gemini", model="gemini-3.7-flash")
+    save(api, provider="gemini", model="gemini-3.8-flash")
 
     response = client.post(
         "/api/documents/extract",
@@ -218,7 +218,7 @@ class FakeGemini:
 
 def test_a_hosted_extraction_runs_without_any_warm_up(api, monkeypatch) -> None:
     client, store = api
-    save(api, provider="gemini", model="gemini-3.7-flash")
+    save(api, provider="gemini", model="gemini-3.8-flash")
     set_key(store, "k")
     monkeypatch.setattr("app.pipeline.steps.GeminiClient", FakeGemini)
 
@@ -229,13 +229,13 @@ def test_a_hosted_extraction_runs_without_any_warm_up(api, monkeypatch) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["model"] == "gemini-3.7-flash"
+    assert body["model"] == "gemini-3.8-flash"
     assert body["processing"]["prompt_tokens"] == 1000
 
 
 def test_a_run_records_which_provider_produced_it(api, monkeypatch) -> None:
     client, store = api
-    save(api, provider="gemini", model="gemini-3.7-flash")
+    save(api, provider="gemini", model="gemini-3.8-flash")
     set_key(store, "k")
     monkeypatch.setattr("app.pipeline.steps.GeminiClient", FakeGemini)
 
@@ -253,7 +253,7 @@ def test_verifying_the_key_reports_the_models_it_can_see(api, monkeypatch) -> No
             pass
 
         async def list_models(self):
-            return ["gemini-3.7-flash", "gemini-9-ultra"]
+            return ["gemini-3.8-flash", "gemini-9-ultra"]
 
     monkeypatch.setattr(main, "GeminiClient", FakeGeminiClient)
 
@@ -261,7 +261,7 @@ def test_verifying_the_key_reports_the_models_it_can_see(api, monkeypatch) -> No
 
     assert status["configured"] is True
     # Only the models this app is set up for are reported back.
-    assert status["verified_models"] == ["gemini-3.7-flash"]
+    assert status["verified_models"] == ["gemini-3.8-flash"]
 
 
 def test_verifying_without_a_key_is_refused(api) -> None:

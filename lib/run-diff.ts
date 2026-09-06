@@ -18,9 +18,10 @@ export type FieldChange = {
   document: string;
   entity: string;
   expected: EvaluationFieldResult["expected"];
+  previousExpected?: EvaluationFieldResult["expected"];
   before: FieldSide | null;
   after: FieldSide | null;
-  direction: "fixed" | "broken" | "changed" | "added" | "removed";
+  direction: "fixed" | "broken" | "changed" | "added" | "removed" | "relabeled";
 };
 
 export type RunDiff = {
@@ -30,6 +31,7 @@ export type RunDiff = {
   changed: FieldChange[];
   added: FieldChange[];
   removed: FieldChange[];
+  relabeled: FieldChange[];
   byDocument: { document: string; changes: FieldChange[] }[];
   onlyInBefore: string[];
   onlyInAfter: string[];
@@ -72,7 +74,7 @@ export function diffRuns(before: RunLike, after: RunLike): RunDiff {
   const afterDocuments = byName(after);
 
   const diff: RunDiff = {
-    fixed: [], broken: [], changed: [], added: [], removed: [],
+    fixed: [], broken: [], changed: [], added: [], removed: [], relabeled: [],
     byDocument: [],
     onlyInBefore: [], onlyInAfter: [],
     failedBefore: [], failedAfter: [],
@@ -108,6 +110,15 @@ export function diffRuns(before: RunLike, after: RunLike): RunDiff {
           before: side(leftField), after: null, direction: "removed",
         };
         diff.removed.push(change);
+        changes.push(change);
+        continue;
+      }
+      if (leftField.expected !== rightField.expected) {
+        const change: FieldChange = {
+          document: name, entity, expected: rightField.expected, previousExpected: leftField.expected,
+          before: side(leftField), after: side(rightField), direction: "relabeled",
+        };
+        diff.relabeled.push(change);
         changes.push(change);
         continue;
       }

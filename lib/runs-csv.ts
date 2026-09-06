@@ -43,7 +43,14 @@ const COLUMNS = [
   "completion_tokens",
   "ocr_pages",
   "layout_pages",
+  "custom_extractor_pages",
+  "usage_complete",
   "cost_usd",
+  "extractor_name",
+  "extractor_processor",
+  "extractor_version",
+  "extractor_base_model",
+  "additional_extractors",
 ] as const;
 
 type Rates = Pick<AppSettings, "gemini" | "gcp"> | { pricing: AppSettings["gemini"]["pricing"]; gcp: AppSettings["gcp"] } | null;
@@ -81,6 +88,10 @@ export function runsToCsv(
         completionTokens: run.completion_tokens,
         ocrPages: run.ocr_pages,
         layoutPages: run.layout_pages,
+        customExtractorPages: run.custom_extractor_pages,
+        customExtractorUsed: run.steps?.includes("document_ai_extract"),
+        modelBillable: run.provider === undefined ? undefined : run.provider === "gemini",
+        usageComplete: run.usage_complete,
       },
       pricingFor(rates, run.model),
       rates ? ("gemini" in rates ? rates.gcp : rates.gcp) : null,
@@ -119,7 +130,14 @@ export function runsToCsv(
         run.completion_tokens,
         run.ocr_pages,
         run.layout_pages,
+        run.custom_extractor_pages,
+        run.usage_complete === undefined ? null : Number(run.usage_complete),
         cost === null ? null : cost.toFixed(4),
+        run.extraction_engine?.display_name,
+        run.extraction_engine?.processor_id,
+        run.extraction_engine?.version,
+        run.extraction_engine?.base_model,
+        run.extraction_engine?.additional_processors?.length ? JSON.stringify(run.extraction_engine.additional_processors) : null,
       ]
         .map(cell)
         .join(","),

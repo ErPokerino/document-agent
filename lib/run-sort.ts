@@ -1,3 +1,4 @@
+import { engineLabel } from "./extraction-engine.ts";
 import type { Evaluation } from "./types";
 
 export type SortKey =
@@ -24,6 +25,7 @@ function value(
   key: SortKey,
   costOf: CostOf | undefined,
 ): number | string | null {
+  if (key === "model") return engineLabel(evaluation);
   if (key === "accuracy") return evaluation.metrics.accuracy;
   // Cost is not a column on a run: it depends on rates that can be edited, so
   // it is computed where it is shown and passed in here.

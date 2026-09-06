@@ -28,6 +28,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
+import { engineLabel, engineDetail, versionLabel } from "../lib/extraction-engine";
 import { Analytics } from "./analytics";
 import { InfoHint } from "./info-hint";
 import { RunFiltersBar } from "./run-filters-bar";
@@ -80,6 +81,14 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [openEvaluation, setOpenEvaluation] = useState<EvaluationDetail | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [engine, setEngine] = useState<import("../lib/types").ExtractionEngine | null>(null);
+  useEffect(() => {
+    let current = true;
+    api.extractionEngine().then(value => { if (current) setEngine(value); }).catch(() => { if (current) setEngine(null); });
+    return () => { current = false; };
+  }, [settings]);
   const [filters, setFilters] = useState<EvaluationFilters>(emptyFilters);
   // Two ways of reading the same runs. Both were on one page and it grew
   // taller than anything anyone would scroll.
@@ -107,6 +116,10 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
     runCost,
   );
 
+  const pageCount = Math.max(1, Math.ceil(visibleEvaluations.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = visibleEvaluations.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   function runCost(evaluation: Evaluation): number | null {
     return totalCost(
       {
@@ -114,6 +127,10 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         completionTokens: evaluation.completion_tokens,
         ocrPages: evaluation.ocr_pages,
         layoutPages: evaluation.layout_pages,
+        customExtractorPages: evaluation.custom_extractor_pages,
+        customExtractorUsed: evaluation.steps.includes("document_ai_extract"),
+        modelBillable: evaluation.provider === "gemini",
+        usageComplete: evaluation.usage_complete,
       },
       settings.gemini.pricing[evaluation.model],
       settings.gcp,
@@ -235,7 +252,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
 
         <div className="run-target">
           <span><Workflow size={13} /> Pipeline <strong>{runTarget.pipeline}</strong></span>
-          <span><Cpu size={13} /> Model <strong>{runTarget.modelName}</strong></span>
+          <span><Cpu size={13} /> Extraction engine <strong title={engine?.version ? `Version: ${engine.version}${engine.base_model ? ` · Base model: ${engine.base_model}` : ""}` : undefined}>{pipelineKinds.includes("document_ai_extract") ? engine?.display_name || "Custom Extractor" : runTarget.modelName}</strong>{pipelineKinds.includes("document_ai_extract") && <small>{engine?.version ? versionLabel(engine.version) : "Version unavailable"}{usesModel(pipelineKinds) ? ` · Additional LLM: ${runTarget.modelName}` : ""}</small>}</span>
           <InfoHint text="A run records the pipeline and its execution profile. The selected model is recorded only when the pipeline can call it." />
         </div>
 
@@ -294,7 +311,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       </div>
         </div>
 
-        <RunFiltersBar evaluations={evaluations} filters={filters} setFilters={setFilters}>
+        <RunFiltersBar evaluations={evaluations} filters={filters} setFilters={value => { setFilters(value); setPage(1); }}>
           {view === "runs" && <button
             type="button"
             className="secondary-button small"
@@ -347,7 +364,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                 ["status", "Status", false],
                 ["id", "Run", false],
                 ["created_at", "Date", false],
-                ["model", "Model", false],
+                ["model", "Extraction engine", false],
                 ["total_documents", "Docs", true],
                 ["total_elapsed_ms", "Total time", true],
                 ["max_pages", "Max pages", true],
@@ -355,7 +372,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                 ["cost", "Cost", true],
               ] as [SortKey, string, boolean][]).map(([key, label, numeric]) => (
                 <th key={key} className={numeric ? "numeric" : ""} aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-                  <button className="sort-button" onClick={() => setSort(nextSort(sort, key))}>
+                  <button className="sort-button" onClick={() => { setSort(nextSort(sort, key)); setPage(1); }}>
                     {label}
                     {sort.key === key && (sort.direction === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
                   </button>
@@ -365,7 +382,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
             </tr>
           </thead>
           <tbody>
-            {visibleEvaluations.map((evaluation) => (
+            {pageRows.map((evaluation) => (
               <tr
                 key={evaluation.id}
                 className={`${openEvaluation?.id === evaluation.id ? "selected" : ""} ${confirmingRun === evaluation.id ? "confirming" : ""}`}
@@ -380,7 +397,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                 <td><span className={`status-tag ${evaluation.status}`}>{evaluation.status}</span></td>
                 <td className="run-id">#{evaluation.id}<small>{evaluation.dataset}</small></td>
                 <td className="run-date">{evaluation.created_at.replace("T", " ").slice(0, 16)}</td>
-                <td><span className="model-tag">{evaluation.model}</span><small className="run-pipeline">{evaluation.pipeline}</small></td>
+                <td><span className="model-tag engine-tag" title={engineDetail(evaluation)}>{engineLabel(evaluation)}</span><small className="run-pipeline">{evaluation.pipeline}</small></td>
                 <td className="numeric">
                   {evaluation.succeeded_documents}/{evaluation.total_documents}
                   {evaluation.failed_documents > 0 && <small className="poor">{evaluation.failed_documents} failed</small>}
@@ -394,7 +411,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                     {scoreWithout(evaluation.metrics, excluded).total}
                   </small>
                 </td>
-                <td className="numeric cost-cell">{formatUsd(runCost(evaluation))}</td>
+                <td className="numeric cost-cell" title={runCost(evaluation) === null ? "A complete estimate is unavailable: usage or configured rates are missing." : "Estimated API cost at the configured rates"}>{formatUsd(runCost(evaluation))}</td>
                 <td className="row-actions" onClick={(event) => event.stopPropagation()}>
                   {confirmingRun === evaluation.id ? (
                     <span className="row-confirm compact">
@@ -429,6 +446,13 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
           </tbody>
         </table>
       </div>
+      <nav className="run-pagination" aria-label="Past runs pages">
+        <span>{(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, visibleEvaluations.length)} of {visibleEvaluations.length} runs</span>
+        <label>Rows <select aria-label="Runs per page" value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPage(1); }}>{[10, 25, 50].map(size => <option key={size}>{size}</option>)}</select></label>
+        <button className="secondary-button small" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
+        <label>Page <select aria-label="Past runs page" value={currentPage} onChange={event => setPage(Number(event.target.value))}>{Array.from({ length: pageCount }, (_, i) => <option key={i + 1}>{i + 1}</option>)}</select> of {pageCount}</label>
+        <button className="secondary-button small" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
+      </nav>
       </>
         )}
         </>) : (
@@ -451,7 +475,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       </div>
 
       <div className="run-tags">
-        <span className="model-tag">{openEvaluation.model}</span>
+        <span className="model-tag engine-tag">{engineLabel(openEvaluation)}</span><span className="engine-detail">{engineDetail(openEvaluation)}</span>
         <span className="pipeline-tag">
           <Workflow size={11} /> {openEvaluation.pipeline}
         </span>
@@ -479,6 +503,12 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
             {openEvaluation.layout_pages > 0 && `${openEvaluation.layout_pages} layout`} pages
           </span>
         )}
+        {(openEvaluation.custom_extractor_pages ?? 0) > 0 && (
+          <span className="pages-tag">{openEvaluation.custom_extractor_pages} Custom Extractor pages</span>
+        )}
+        {runCost(openEvaluation) === null && (
+          <span className="pages-tag">Cost unavailable · usage or rates incomplete</span>
+        )}
         {runCost(openEvaluation) !== null && (
           <span className="cost-tag" title="Derived from the token and page counts and the rates configured in LLM, not from what Google billed">
             {formatUsd(runCost(openEvaluation))}
@@ -499,12 +529,14 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
               .
             </strong>{" "}
             The accuracy above covers only the {openEvaluation.succeeded_documents} documents that were scored.
-            A retry reuses this run&apos;s prompts, pipeline, model profile and page limit, so the result stays one experiment.
+            {openEvaluation.has_dataset_snapshot
+              ? " A retry uses the original PDFs, labels, prompts, pipeline, model profile and page limit. External processors and registers may have changed."
+              : " This older run has no input snapshot and cannot be retried."}
           </span>
           <button
             className="secondary-button"
-            disabled={busy || !!running || modelBlocks}
-            title={running ? "Another run is in progress" : modelBlocks ? "Load and warm up the model in LLM first" : "Process the documents this run did not score"}
+            disabled={busy || !!running || !openEvaluation.has_dataset_snapshot || (usesModel(openEvaluation.steps) && !isModelReady)}
+            title={!openEvaluation.has_dataset_snapshot ? "The original documents and labels were not snapshotted" : running ? "Another run is in progress" : "Process the documents this run did not score"}
             onClick={() => guard(async () => {
               await api.retryEvaluation(openEvaluation.id);
               await refreshEvaluations();
@@ -562,7 +594,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                   className="icon-button"
                   aria-label={`Preview ${document.name}`}
                   title="Open the document"
-                  onClick={() => setPreview({ dataset: openEvaluation.dataset, document: document.name })}
+                  onClick={() => setPreview({ dataset: openEvaluation.dataset, document: document.name, evaluationId: openEvaluation.has_dataset_snapshot ? openEvaluation.id : undefined })}
                 >
                   <Eye size={15} />
                 </button>

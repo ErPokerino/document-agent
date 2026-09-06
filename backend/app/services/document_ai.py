@@ -216,6 +216,22 @@ class DocumentAiClient:
         self._token, self._token_expires_at = await self._exchange_assertion()
         return self._token
 
+    async def metadata(self, resource: str) -> dict[str, Any]:
+        prefix = f"projects/{self.project_id}/locations/{self.location}/processors/"
+        if not resource.startswith(prefix) or any(c in resource for c in "?#"):
+            raise DocumentAiError("Invalid processor resource")
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(
+                    f"{self.host}/v1beta3/{resource}",
+                    headers={"Authorization": f"Bearer {await self._access_token()}"},
+                )
+        except httpx.HTTPError as exc:
+            raise DocumentAiError("Document AI metadata is not reachable") from exc
+        if response.status_code != 200:
+            raise DocumentAiError(f"Document AI metadata returned {response.status_code}")
+        return response.json()
+
     async def process(
         self,
         processor_id: str,

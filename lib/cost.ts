@@ -1,5 +1,8 @@
 import type { GcpSettings, ModelPricing } from "./types";
 
+type PageRates = Pick<GcpSettings, "ocr_per_thousand_pages" | "layout_per_thousand_pages"> &
+  Partial<Pick<GcpSettings, "custom_extractor_per_thousand_pages">>;
+
 /**
  * Cost derived from token counts and a configured rate.
  *
@@ -30,25 +33,38 @@ export function estimateCost(
 export function documentAiCost(
   ocrPages: number,
   layoutPages: number,
-  gcp: Pick<GcpSettings, "ocr_per_thousand_pages" | "layout_per_thousand_pages"> | undefined | null,
+  gcp: PageRates | undefined | null,
+  customExtractorPages = 0,
 ): number | null {
   if (!gcp) return null;
-  if (!ocrPages && !layoutPages) return null;
+  if (!ocrPages && !layoutPages && !customExtractorPages) return null;
   const ocrRate = gcp.ocr_per_thousand_pages;
   const layoutRate = gcp.layout_per_thousand_pages;
+  const customRate = gcp.custom_extractor_per_thousand_pages;
   if (ocrPages && (ocrRate === null || ocrRate === undefined)) return null;
   if (layoutPages && (layoutRate === null || layoutRate === undefined)) return null;
-  return (ocrPages * (ocrRate ?? 0) + layoutPages * (layoutRate ?? 0)) / 1000;
+  if (customExtractorPages && customRate == null) return null;
+  return (ocrPages * (ocrRate ?? 0) + layoutPages * (layoutRate ?? 0) + customExtractorPages * (customRate ?? 0)) / 1000;
 }
 
 /** What a run cost in total: the model call plus every page a processor read. */
 export function totalCost(
-  usage: { promptTokens: number; completionTokens: number; ocrPages: number; layoutPages: number },
+  usage: {
+    promptTokens: number; completionTokens: number; ocrPages: number; layoutPages: number;
+    customExtractorPages?: number | null; customExtractorUsed?: boolean;
+    modelBillable?: boolean; usageComplete?: boolean;
+  },
   pricing: ModelPricing | undefined | null,
-  gcp: Pick<GcpSettings, "ocr_per_thousand_pages" | "layout_per_thousand_pages"> | undefined | null,
+  gcp: PageRates | undefined | null,
 ): number | null {
-  const model = estimateCost(usage.promptTokens, usage.completionTokens, pricing);
-  const pages = documentAiCost(usage.ocrPages, usage.layoutPages, gcp);
+  if (usage.usageComplete === false) return null;
+  if (usage.customExtractorUsed && usage.customExtractorPages == null) return null;
+  const needsModel = usage.modelBillable !== false && (usage.promptTokens > 0 || usage.completionTokens > 0);
+  const model = needsModel ? estimateCost(usage.promptTokens, usage.completionTokens, pricing) : null;
+  const customPages = usage.customExtractorPages ?? 0;
+  const pages = documentAiCost(usage.ocrPages, usage.layoutPages, gcp, customPages);
+  if (needsModel && model === null) return null;
+  if ((usage.ocrPages || usage.layoutPages || customPages) && pages === null) return null;
   if (model === null && pages === null) return null;
   return (model ?? 0) + (pages ?? 0);
 }
