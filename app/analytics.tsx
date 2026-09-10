@@ -117,17 +117,18 @@ function ParetoChart({
         <div>
           <h3>
             Accuracy against {axis === "secondsPerDocument" ? "time" : axis === "tokensPerDocument" ? "tokens" : "cost"}
-            <InfoHint text="Numbered points match the comparison table. One point per extraction engine, version, dataset and pipeline, averaged over every run of it in the current selection. The line joins the approaches nothing else beats outright: to leave it, something has to be both more accurate and cheaper on this axis." />
+            <InfoHint text="Numbers identify rows in Compare. Each point groups an engine, version, dataset and pipeline across the selected runs. A frontier point has no alternative with at least equal accuracy and no greater resource use, with a strict improvement in either measure." />
           </h3>
-          <p>Up is better, left is cheaper. The line is the Pareto frontier — everything below and to the right of it is beaten by something on it.</p>
+          <p>Higher means more accurate; further left means {axis === "secondsPerDocument" ? "faster" : axis === "tokensPerDocument" ? "fewer tokens" : "lower estimated cost"}. Highlighted points form the Pareto frontier.</p>
         </div>
         <select className="compare-metric" value={axis} onChange={(event) => onAxis(event.target.value as Axis)} aria-label="What to plot accuracy against">
           {AXES.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}
         </select>
       </div>
 
+      {placeable.length > 0 && placeable.length < points.length && <p className="field-help">{placeable.length} of {points.length} approaches shown. Others have no recorded value for {meta.label.toLowerCase()}.</p>}
       {placeable.length === 0 ? (
-        <div className="models-empty"><BarChart3 size={18} /><span>No approach in view has a {meta.label.toLowerCase()} to plot.</span></div>
+        <div className="models-empty"><BarChart3 size={18} /><span>No values recorded for {meta.label.toLowerCase()} in this selection.</span></div>
       ) : (
         <div className="chart-wrap">
           <svg

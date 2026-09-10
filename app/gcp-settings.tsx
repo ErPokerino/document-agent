@@ -90,7 +90,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           />
         </label>
         <label>
-          <span>Region<InfoHint text="The processor's location, shown next to it in the console: eu, us, or another region. It is part of the endpoint, so a wrong one fails with a 404." /></span>
+          <span>Region<InfoHint text="Must match the processor location in Google Cloud, such as eu or us. This location determines the service endpoint." /></span>
           <input
             className="text-input"
             value={draftSettings.gcp.location}
@@ -117,7 +117,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           />
         </label>
         <label>
-          <span>Custom Extractor processor id<InfoHint text="The id of a Custom Extractor. Unlike the other two it does not feed a model — it reads the fields configured in Extraction itself, and answers with its own confidence and the position of each value. The fields are sent with every request, so nothing has to be configured on Google's side to match them." /></span>
+          <span>Custom Extractor processor id<InfoHint text="Processor ID from Google Cloud, not its display name. The Custom Extractor reads the fields configured in Extraction directly and returns confidence and value locations." /></span>
           <input
             className="text-input"
             value={draftSettings.gcp.custom_extractor_processor_id}

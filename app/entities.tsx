@@ -21,8 +21,8 @@ const groups: { source: Source; title: string; blurb: string; hint: string; icon
   {
     source: "model",
     title: "Extracted",
-    blurb: "Read off the page: asked of the model, constrained by the generated JSON schema.",
-    hint: "These are the fields the model is shown and asked to fill. Their names, formats and descriptions build the prompt and the schema.",
+    blurb: "Read from the document by the configured model or Custom Extractor.",
+    hint: "Names, formats and descriptions define the fields requested from the extraction engine.",
     icon: Sparkles,
   },
   {
@@ -77,7 +77,7 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
         <Braces size={19} />
         <div>
           <h2>Extraction</h2>
-          <p>What a document produces, and the words used to ask the model for it.</p>
+          <p>Fields to extract or derive, and the instructions used to produce them.</p>
         </div>
       </div>
 

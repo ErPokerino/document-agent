@@ -152,7 +152,7 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
         <Library size={19} />
         <div>
           <h2>Master Data</h2>
-          <p>Reference tables the pipeline looks values up in, for fields no document carries.</p>
+          <p>Reference tables used to match extracted values and fill derived fields.</p>
         </div>
       </div>
 

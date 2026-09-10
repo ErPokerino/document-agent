@@ -47,7 +47,7 @@ export function Settings({ draftSettings, setDraftSettings, onSave, settingsStat
 
         <p className="input-label">
           Theme
-          <InfoHint text="System follows what this computer asks for, and changes with it during the day." />
+          <InfoHint text="System follows the light or dark appearance selected in your operating system." />
         </p>
         <div className="choice-row">
           {themes.map((theme) => {

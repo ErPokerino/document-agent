@@ -93,7 +93,7 @@ export function SupplierRules({ idSubject, supplierName, entities, onError, onCo
       <div className="supplier-rules-head">
         <span>
           Rules for {supplierName}
-          <InfoHint text="Applied after this supplier has been identified, to its documents only. A rule that sets a value or reads one with a pattern costs nothing. Asking the model again is one extra call per document, and only the fields named are asked about — the rest of the extraction is left alone." />
+          <InfoHint text="Applied only to documents matched to this supplier. Fixed-value and pattern rules make no model calls. Model rules add a call per document for the selected fields." />
         </span>
         <button
           type="button"

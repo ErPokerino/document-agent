@@ -2,6 +2,14 @@
 
 POC for extracting structured data from invoice PDFs, through composable pipelines: page rendering or Google Document AI, a local model in LM Studio or the Gemini API, then deterministic steps over the result.
 
+## Interface conventions
+
+Help buttons open on hover, keyboard focus or tap. Escape or an outside click
+closes them. Help is rendered outside scrolling cards and kept inside the viewport.
+Descriptions refer to the extraction engine when both LLMs and Custom Extractors
+are supported. Pareto explanations follow the selected resource axis; missing
+resource measurements are disclosed rather than silently treated as zero.
+
 ## Included features
 
 - PDF upload up to 20 MB;

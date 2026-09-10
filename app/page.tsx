@@ -570,9 +570,9 @@ export default function Home() {
                       onChange={(event) => updateReviewValue(entity, event.target.value)}
                     />
                     <div className="value-controls">
-                      <span className={`confidence-pill ${field.confidence}`} title={field.score === null || field.score === undefined ? "Original model confidence" : `Match quality: ${field.score.toFixed(2)} similarity to the register`}><i /> {confidenceLabels[field.confidence]}{field.score !== null && field.score !== undefined && <em>{field.score.toFixed(2)}</em>}</span>
+                      <span className={`confidence-pill ${field.confidence}`} title={field.score === null || field.score === undefined ? "Original extraction confidence" : `Match quality: ${field.score.toFixed(2)} similarity to the register`}><i /> {confidenceLabels[field.confidence]}{field.score !== null && field.score !== undefined && <em>{field.score.toFixed(2)}</em>}</span>
                       {edited && <span className="manual-pill"><Pencil size={9} /> Edited</span>}
-                      {edited && <button className="revert-value" onClick={() => revertReviewValue(entity.name)} aria-label={`Revert ${prettyName(entity.name)}`} title="Restore model value"><RotateCcw size={11} /></button>}
+                      {edited && <button className="revert-value" onClick={() => revertReviewValue(entity.name)} aria-label={`Revert ${prettyName(entity.name)}`} title="Restore extracted value"><RotateCcw size={11} /></button>}
                     </div>
                     {field.warning && !edited && <span className="field-warning"><AlertCircle size={11} /> {field.warning}</span>}
                   </div>
@@ -666,9 +666,9 @@ export default function Home() {
               <span className="model-icon"><Workflow size={15} /></span>
               <div><small>Pipeline</small><strong>{settings?.pipeline ?? "—"}</strong></div>
             </button>
-            <button className="model-chip" onClick={() => setView("llm")} title="Change it in LLM">
+            <button className="model-chip" onClick={() => setView(pipelineKinds.includes("document_ai_extract") ? "pipelines" : "llm")} title={pipelineKinds.includes("document_ai_extract") ? "Configure Custom Extractor in Pipelines" : "Change model in LLM"}>
               <span className="model-icon"><Cpu size={15} /></span>
-              <div><small>{pipelineKinds.includes("document_ai_extract") ? "Custom Extractor" : activeModelStatus}</small><strong title={extractionEngine?.version || "Version unavailable"}>{pipelineKinds.includes("document_ai_extract") ? extractionEngine?.display_name || "Document AI" : activeModelName}</strong></div>
+              <div><small>{pipelineKinds.includes("document_ai_extract") ? "Custom Extractor" : activeModelStatus}</small><strong title={pipelineKinds.includes("document_ai_extract") ? extractionEngine?.version || "Version unavailable" : undefined}>{pipelineKinds.includes("document_ai_extract") ? extractionEngine?.display_name || "Document AI" : activeModelName}</strong></div>
               <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />
             </button>
           </div>
@@ -787,7 +787,7 @@ export default function Home() {
               <span>{settings?.pipeline ?? "Current pipeline"}</span>
               {callsModel && (
                 <>
-                  <div className={`pipeline-step ${isModelReady ? "done" : "active"}`}><b>{isModelReady ? <Check size={10} /> : "1"}</b> Model ready</div>
+                  <div className={`pipeline-step ${isModelReady ? "done" : "active"}`}><b>{isModelReady ? <Check size={10} /> : "1"}</b> {isModelReady ? "Model ready" : "Model not ready"}</div>
                   <ChevronRight size={13} />
                 </>
               )}
@@ -845,7 +845,7 @@ export default function Home() {
             settingsError={settingsError}
           />
         ) : view === "datasets" ? (
-          <Datasets savedEntities={configuredEntities} isModelReady={isModelReady} />
+          <Datasets savedEntities={configuredEntities} isModelReady={!callsModel || isModelReady} />
         ) : view === "lab" ? (
           <Lab
             settings={settings}

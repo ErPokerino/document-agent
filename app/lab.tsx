@@ -288,7 +288,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         <span className="run-progress-bar"><i style={{ width: `${(running.completed_documents / Math.max(running.total_documents, 1)) * 100}%` }} /></span>
       </div>
         )}
-        <p className="field-help">While a Lab test runs, document processing in Workspace is refused so the two pipelines cannot overlap.</p>
+        <p className="field-help">Workspace processing is unavailable while a Lab run is active.</p>
       </div>
 
       <div className="settings-tabs lab-tabs">
@@ -327,7 +327,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       <div className="score-without">
           <span>
             Score without
-            <InfoHint text="Leaves these fields out of every accuracy on this page. Nothing stored changes: it answers how a run did on the rest, which is the fair question when one pipeline fills a field another does not." />
+            <InfoHint text="Exclude selected fields from the scores displayed in Past runs and its export. Stored scores, accuracy filters and Analytics are unchanged." />
           </span>
           {entitiesIn(evaluations).map((entity) => {
             const off = excluded.includes(entity);
@@ -536,7 +536,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
           <button
             className="secondary-button"
             disabled={busy || !!running || !openEvaluation.has_dataset_snapshot || (usesModel(openEvaluation.steps) && !isModelReady)}
-            title={!openEvaluation.has_dataset_snapshot ? "The original documents and labels were not snapshotted" : running ? "Another run is in progress" : "Process the documents this run did not score"}
+            title={!openEvaluation.has_dataset_snapshot ? "Original PDFs and labels are unavailable for this run" : running ? "Another run is in progress" : "Process the documents this run did not score"}
             onClick={() => guard(async () => {
               await api.retryEvaluation(openEvaluation.id);
               await refreshEvaluations();

@@ -204,7 +204,7 @@ export function LanguageModels(props: Props) {
       <div className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Cpu size={18} /></span>
-          <div><h3>Extraction model<InfoHint text="A pipeline that renders page images needs a model that can see. One that reads OCR text does not, and a text-only model is usually faster and cheaper." /></h3><p>Local models come from LM Studio, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
+          <div><h3>Extraction model<InfoHint text="Image-based model extraction needs a vision model. OCR text can be sent to a text or vision model. A Custom Extractor pipeline may not call an LLM." /></h3><p>Local models come from LM Studio, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
           <span className="connection-badge"><RefreshCw className={modelsRefreshing ? "spin" : ""} size={12} /> Auto refresh</span>
         </div>
 
@@ -374,9 +374,8 @@ export function LanguageModels(props: Props) {
           <option value="high">High</option>
         </select>
         <p className="field-help">
-          Gemini 3 defaults to <code>high</code>, which an extraction rarely needs and always pays for.
-          Thinking tokens are billed at the output rate. Ignored by models without thinking, such as
-          Flash Lite.
+          Higher thinking levels can increase latency and output-token usage.
+          Thinking tokens count toward output usage. Ignored by models without thinking.
         </p>
 
         <p className="input-label prompt-label">Price per million tokens (USD)</p>

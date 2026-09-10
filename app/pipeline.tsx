@@ -431,7 +431,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
             <div>
               <label className="input-label" htmlFor="pipeline-pages">
                 <Scissors size={12} /> Pages
-                <InfoHint text="How many of the first pages this pipeline looks at. Pages 1–N go out in one call; the app never merges separate page extractions." />
+                <InfoHint text="Process at most the first N pages of each document. The number of service calls depends on the pipeline steps." />
               </label>
               <input
                 id="pipeline-pages"
@@ -477,7 +477,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                   {step.kind === "render_pages" && (
                     <div className="flow-step-body">
                       <label className="flow-field">
-                        <span>Zoom<InfoHint text="How large the page is drawn before it is sent. 1.35 is about 130 DPI." /></span>
+                        <span>Zoom<InfoHint text="Scale used to render PDF pages as images. 1.35 is about 97 DPI. Larger values produce more pixels and increase image size." /></span>
                         <input
                           type="number"
                           min={0.5}
@@ -502,7 +502,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                     return (
                     <div className="flow-step-body">
                       <label className="flow-field">
-                        <span>What this reading is for<InfoHint text="OCR reads the page and leaves two things behind: the text, and the position of every word. A multimodal model reads the picture itself and does not need the text — but the positions are what put a box round an extracted value on the page. Reading for positions only lets you have that highlighting without changing what the model is shown." /></span>
+                        <span>What this reading is for<InfoHint text="OCR returns text and word positions. Choose positions only to enable document highlighting while keeping page images as the model input." /></span>
                         <select
                           value={feedsModel ? "text_and_positions" : "positions_only"}
                           onChange={(event) =>
@@ -531,8 +531,8 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                       <p className="field-help">
                         Reads the fields configured in <strong>Extraction</strong> itself, so it
                         replaces the model call rather than feeding it — a pipeline built on this
-                        needs no LLM extraction step. The fields are sent with every request, so
-                        nothing has to be set up on Google&apos;s side to match them.
+                        needs no LLM extraction step. Field definitions are sent with each request
+                        to the configured Google Cloud processor.
                       </p>
                       <p className="field-help">
                         Confidence comes from the processor rather than from a model being asked how
@@ -624,7 +624,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                           </label>
                           <label className="flow-threshold">
                             <span>Accept from
-                              <InfoHint text="Below this the field is left empty and the run says which score it reached, because an identifier that is wrong but looks like data is worse than a gap." align="end" />
+                              <InfoHint text="Matches below this score leave the derived field empty. Similarity scores range from 0 to 1." align="end" />
                             </span>
                             <input
                               type="range"

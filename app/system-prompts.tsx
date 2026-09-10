@@ -58,7 +58,7 @@ export function SystemPrompts({ draftSettings, setDraftSettings }: Props) {
             <label className="input-label" htmlFor="user-prompt">Extraction instructions</label>
             <small className={draftSettings.prompts.user_prompt.length > 4000 ? "over" : ""}>{draftSettings.prompts.user_prompt.length} / 4000</small>
           </div>
-          <p className="field-help">Sent with the page images. <code>{"{page_range}"}</code> is replaced with the pages in the call.</p>
+          <p className="field-help">Sent with the document text or images produced by the pipeline. <code>{"{page_range}"}</code> is replaced with the pages in the call.</p>
           <textarea id="user-prompt" className="prompt-textarea" value={draftSettings.prompts.user_prompt} onChange={(event) => setPrompt("user_prompt", event.target.value)} />
         </div>
 

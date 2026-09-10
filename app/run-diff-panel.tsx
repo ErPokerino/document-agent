@@ -104,7 +104,7 @@ export function RunDiffPanel({ evaluations }: Props) {
         <div>
           <h3>
             Compare two runs
-            <InfoHint text="Field by field, over the documents both runs reached. The aggregates above answer which approach is better; this answers whether one change helped, which is a different question — a prompt edit that fixes two documents and breaks two others reads as no change at all." />
+            <InfoHint text="Compare field results for documents reached by both runs. See improvements and regressions that can cancel each other out in an overall accuracy score." />
           </h3>
           <p>Pick a run and something to compare it against.</p>
         </div>
