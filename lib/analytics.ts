@@ -66,10 +66,15 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
     // run that failed, and plotting it as a point would libel the approach.
     if (accuracy === null || accuracy === undefined) continue;
 
-    const key = `${engineKey(evaluation)}\u0000${evaluation.pipeline}\u0000${evaluation.dataset}`;
+    const processors = evaluation.processor_bindings ?? [];
+    const processorKey = JSON.stringify(processors.map(step => [step.kind, step.config.project_id, step.config.location, step.config.processor_id]));
+    const readings = processors.filter(step => step.kind !== "document_ai_extract").map(step => `${step.kind === "document_ai_ocr" ? "OCR" : "Layout Parser"}: ${String(step.config.processor_id).replace("/processorVersions/", " · ")} (${step.config.project_id} / ${step.config.location})`);
+    const baseDetail = engineDetail(evaluation);
+    const detail = readings.length ? [baseDetail !== engineLabel(evaluation) ? baseDetail : "", ...readings].filter(Boolean).join("; ") : baseDetail;
+    const key = `${processorKey}\u0000${engineKey(evaluation)}\u0000${evaluation.pipeline}\u0000${evaluation.dataset}`;
     const group =
       grouped.get(key) ??
-      { model: engineLabel(evaluation), pipeline: evaluation.pipeline, dataset: evaluation.dataset, detail: engineDetail(evaluation), accuracy: [], seconds: [], cost: [], tokens: [] };
+      { model: engineLabel(evaluation), pipeline: evaluation.pipeline, dataset: evaluation.dataset, detail, accuracy: [], seconds: [], cost: [], tokens: [] };
 
     group.accuracy.push(accuracy);
     if (evaluation.average_elapsed_ms) group.seconds.push(evaluation.average_elapsed_ms / 1000);

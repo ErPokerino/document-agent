@@ -19,6 +19,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
+import { ProcessorPicker } from "./processor-picker";
 import { InfoHint } from "./info-hint";
 import {
   MAX_PAGES,
@@ -32,6 +33,7 @@ import {
   removeStep,
   rulesOf,
   setStepConfig,
+  patchStepConfig,
   summarizeStep,
   type RegexRule,
 } from "../lib/pipeline-editor";
@@ -49,6 +51,7 @@ type Props = {
   draftSettings: AppSettings;
   entities: EntityDefinition[];
   onUse: (name: string) => Promise<void>;
+  onProcessors: () => void;
 };
 
 const whenLabels: Record<RegexRule["when"], string> = {
@@ -109,7 +112,8 @@ function algorithmFor(value: string | undefined) {
 }
 
 /** Compose the steps a document goes through, and save that as a pipeline. */
-export function Pipelines({ draftSettings, entities, onUse }: Props) {
+export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Props) {
+  const [processors, setProcessors] = useState<import("../lib/types").ProcessorRecord[]>([]);
   const [pipelines, setPipelines] = useState<SavedPipeline[]>([]);
   const [catalogue, setCatalogue] = useState<StepCatalogueEntry[]>([]);
   const [draft, setDraft] = useState<PipelineDefinition | null>(null);
@@ -139,13 +143,15 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     let active = true;
     async function load() {
       try {
-        const [saved, steps, found] = await Promise.all([
+        const [saved, steps, found, resources] = await Promise.all([
           api.pipelines(),
           api.pipelineSteps(),
           api.masterDataTables(),
+          api.processors(),
         ]);
         if (!active) return;
         setPipelines(saved);
+        setProcessors(resources);
         setCatalogue(steps);
         setTables(found);
       } catch (cause) {
@@ -211,6 +217,12 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
     setPageLimitInput("10");
     setOpenedAs(null);
     setError(null);
+  }
+
+  function manageProcessors() {
+    const saved = pipelines.find(p => p.name === openedAs);
+    const changed = draft && (!saved || draft.name !== saved.name || draft.description !== saved.description || draft.page_limit !== saved.page_limit || JSON.stringify(draft.steps) !== JSON.stringify(saved.steps));
+    if (!changed || window.confirm("Leave the pipeline editor and discard unsaved changes?")) onProcessors();
   }
 
   function setSteps(steps: PipelineStep[]) {
@@ -491,6 +503,8 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                     </div>
                   )}
 
+                  {step.kind.startsWith("document_ai_") && <ProcessorPicker step={step} processors={processors} gcp={draftSettings.gcp} onChange={config => setSteps(patchStepConfig(draft.steps, index, config))} onManage={manageProcessors}/>}
+
                   {step.kind === "llm_extract" && (
                     <div className="flow-step-body">
                       <p className="field-help">Uses the model selected in LLM and the prompts written in Extraction. One call per document.</p>
@@ -506,7 +520,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                         <select
                           value={feedsModel ? "text_and_positions" : "positions_only"}
                           onChange={(event) =>
-                            setSteps(setStepConfig(draft.steps, index, {
+                            setSteps(patchStepConfig(draft.steps, index, {
                               feeds_model: event.target.value === "text_and_positions",
                             }))
                           }
@@ -519,7 +533,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                         {feedsModel
                           ? "The model is shown the OCR text, and every value it returns is looked for on the page."
                           : "The model is not shown this text — it reads the page some other way — and the reading is used only to find where each value sits."}
-                        {" "}Uses the OCR processor configured in Settings. Billed by Google per page, so
+                        {" "}Uses the processor selected above. Billed by Google per page, so
                         only the pages this pipeline allows are sent.
                       </p>
                     </div>
@@ -537,7 +551,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                       <p className="field-help">
                         Confidence comes from the processor rather than from a model being asked how
                         sure it is, and every value arrives with the box it sits in, so highlighting
-                        works without a separate OCR step. Uses the processor configured in Settings
+                        works without a separate OCR step. Uses the processor selected above
                         and is billed by Google per page.
                       </p>
                     </div>
@@ -546,7 +560,7 @@ export function Pipelines({ draftSettings, entities, onUse }: Props) {
                   {step.kind === "document_ai_layout" && (
                     <div className="flow-step-body">
                       <p className="field-help">
-                        Uses the Layout Parser configured in Settings. Costs more per page than OCR
+                        Uses the Layout Parser selected above. Costs more per page than OCR
                         and keeps the headings, tables and lists around the text.
                       </p>
                     </div>

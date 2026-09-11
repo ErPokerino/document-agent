@@ -222,6 +222,34 @@ class GeminiSettings(BaseModel):
     pricing_checked_on: str = "2026-08-21"
 
 
+class DocumentProcessor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
+    name: str = Field(min_length=1, max_length=100)
+    kind: Literal["document_ai_ocr", "document_ai_layout", "document_ai_extract"]
+    project_id: str = Field(pattern=r"^[A-Za-z0-9-]+$")
+    location: str = Field(pattern=r"^[a-z0-9-]+$")
+    processor_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ProcessorRecord(DocumentProcessor):
+    used_by: list[str] = Field(default_factory=list)
+
+
+class ProcessorVersion(BaseModel):
+    id: str
+    name: str
+    state: str
+
+
+class ProcessorInspection(BaseModel):
+    display_name: str
+    state: str
+    default_version: str | None = None
+    versions: list[ProcessorVersion] = Field(default_factory=list)
+    checked_at: str
+
+
 class GcpSettings(BaseModel):
     """Where Document AI lives and which processors to call.
 
@@ -231,6 +259,7 @@ class GcpSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    processors: list[DocumentProcessor] = Field(default_factory=list)
     project_id: str = ""
     location: str = "eu"
     ocr_processor_id: str = ""
@@ -516,6 +545,7 @@ class ExtractionEngine(ExtractorProcessor):
 
 
 class Evaluation(BaseModel):
+    processor_bindings: list[PipelineStep] = Field(default_factory=list)
     extraction_engine: ExtractionEngine | None = None
     id: int
     created_at: str

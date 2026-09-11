@@ -83,6 +83,10 @@ export const apiUrls = {
 };
 
 export const api = {
+  processors: () => request<import("./types").ProcessorRecord[]>("/api/processors"),
+  saveProcessor: (entry: import("./types").DocumentProcessor) => request<import("./types").DocumentProcessor>(`/api/processors/${segment(entry.id)}`, json("PUT", entry)),
+  deleteProcessor: (id: string) => request<void>(`/api/processors/${segment(id)}`, { method: "DELETE" }),
+  inspectProcessor: (id: string) => request<import("./types").ProcessorInspection>(`/api/processors/${segment(id)}/inspect`),
   extractionEngine: () => request<import("./types").ExtractionEngine | null>("/api/lab/extraction-engine"),
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),

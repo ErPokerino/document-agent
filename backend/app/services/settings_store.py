@@ -61,6 +61,10 @@ class SettingsStore:
         if isinstance(gemini, dict) and isinstance(gemini.get("pricing"), dict):
             for model, pricing in default_gemini_pricing().items():
                 gemini["pricing"].setdefault(model, pricing.model_dump())
+        gcp = data.get("gcp")
+        if isinstance(gcp, dict) and "processors" not in gcp:
+            from app.services.processors import legacy_catalog
+            gcp["processors"] = legacy_catalog(gcp)
         prompts = data.get("prompts")
         if not isinstance(prompts, dict):
             return data

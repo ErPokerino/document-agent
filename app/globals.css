@@ -988,3 +988,48 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .compare-table .pareto-row { background: var(--accent-soft); }
 .compare-table .pareto-row td:first-child { border-left: 3px solid var(--accent); }
 .pareto-badge { display: inline-block; margin: 4px 0 4px 8px; padding: 2px 6px; font-size: 10px; color: #126556; background: #d8efe6; border-radius: 5px; }
+
+/* Resource catalogs share navigation, but keep provider-specific controls together. */
+.resource-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+.resource-tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font-size: 12px; }
+.resource-tabs button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.resource-tabs small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.resource-selection { margin: 0 0 18px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.resource-selection strong { color: var(--ink); }
+.settings-card[hidden], .model-filters label[hidden] { display: none; }
+.processor-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 14px; }
+.processor-fields label { display: block; color: var(--muted); font-size: 11px; min-width: 0; }
+.processor-fields input, .processor-fields select { display: block; width: 100%; min-width: 0; margin-top: 7px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); font-size: 12px; }
+.processor-list { display: grid; gap: 12px; margin-top: 18px; }
+.processor-item, .processor-editor { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.processor-editor { margin-top: 18px; }
+.processor-editor h3 { margin: 0 0 16px; font-size: 14px; }
+.processor-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.processor-summary > div { min-width: 0; overflow-wrap: anywhere; }
+.processor-summary strong { color: var(--ink); font-size: 14px; margin-right: 10px; }
+.processor-summary p { margin: 7px 0; }
+.processor-summary code { font-size: 11px; }
+.processor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; font-size: 12px; }
+.processor-details { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
+.processor-details .table-scroll { max-width: 100%; overflow-x: auto; margin-top: 12px; }
+.processor-details td { overflow-wrap: anywhere; }
+.processor-details td small { display: block; margin-top: 4px; }
+.processor-connection > summary { cursor: pointer; color: var(--ink); font-size: 13px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.processor-connection[open] > summary { margin-bottom: 12px; }
+.processor-picker { padding: 14px; margin: 0 16px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.processor-picker .link-button { margin-top: 10px; }
+.resource-tabs button:focus-visible, .processor-connection > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.processors-page .settings-card-heading { flex-wrap: wrap; }
+.processors-page .settings-card-heading > div { flex: 1 1 250px; }
+@media (max-width: 980px) {
+  .nav-item { font-size: 0; gap: 0; }
+}
+@media (max-width: 680px) {
+  .sidebar { flex-wrap: wrap; }
+  .nav-list { width: 100%; min-width: 0; overflow-x: auto; margin: 10px 0 0; padding-bottom: 4px; }
+  .nav-list .nav-item { flex: 0 0 auto; width: auto; font-size: 11px; gap: 6px; padding: 9px; }
+}
+
+.processor-actions .link-button { margin-left: 0; display: inline-flex; align-items: center; gap: 5px; }
+.processor-details p .link-button { margin-left: 8px; }

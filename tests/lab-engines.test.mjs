@@ -28,3 +28,14 @@ test("hover describes a model once and leaves the dataset to the table", () => {
   assert.equal(approachDescription({ model: "Gemma", pipeline: "OCR", dataset: "Invoices", detail: "Gemma" }), "Gemma\nPipeline: OCR");
   assert.equal(approachDescription({ model: "Custom Extractor", pipeline: "Custom Extractor", dataset: "Invoices", detail: "Document AI Custom Extractor · Version not recorded" }), "Custom Extractor\nVersion not recorded");
 });
+
+
+import { compactExtractorVersion } from "../lib/extraction-engine.ts";
+
+test("the extractor header shortens known versions without inventing unknown metadata", () => {
+  assert.equal(compactExtractorVersion("pretrained-foundation-model-v3.1-lite-2026-07-15"), "Foundation 3.1 Lite");
+  assert.equal(compactExtractorVersion("pretrained-foundation-model-v1.5.1-2025-08-07"), "Foundation 1.5.1");
+  assert.equal(compactExtractorVersion("pretrained-foundation-model-v1.6-pro-2025-12-01"), "Foundation 1.6 Pro");
+  assert.equal(compactExtractorVersion("custom-version-123"), "Version custom-version-123");
+  assert.equal(compactExtractorVersion(null), "Version unavailable");
+});

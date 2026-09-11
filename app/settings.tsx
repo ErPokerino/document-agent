@@ -2,7 +2,6 @@
 
 import { CheckCircle2, LoaderCircle, Monitor, Moon, Save, SlidersHorizontal, Sun } from "lucide-react";
 
-import { GcpSettingsCard } from "./gcp-settings";
 import { InfoHint } from "./info-hint";
 import type { AppSettings } from "../lib/types";
 
@@ -30,7 +29,7 @@ export function Settings({ draftSettings, setDraftSettings, onSave, settingsStat
         <SlidersHorizontal size={19} />
         <div>
           <h2>Settings</h2>
-          <p>How the app looks, and the credentials it uses on this machine.</p>
+          <p>Appearance and preferences for this app.</p>
         </div>
       </div>
 
@@ -69,10 +68,10 @@ export function Settings({ draftSettings, setDraftSettings, onSave, settingsStat
         </div>
       </div>
 
-      <GcpSettingsCard draftSettings={draftSettings} setDraftSettings={setDraftSettings} />
+
 
       <div className="settings-actions sticky-actions">
-        <p><SlidersHorizontal size={14} /> Verify uses the settings already saved, so save first.</p>
+        <p><SlidersHorizontal size={14} /> Save your app preferences.</p>
         <button className="primary-button save-button" disabled={settingsState === "saving"} onClick={onSave}>
           {settingsState === "saving" ? <LoaderCircle className="spin" size={15} /> : settingsState === "saved" ? <CheckCircle2 size={15} /> : <Save size={15} />}
           {settingsState === "saving" ? "Saving…" : settingsState === "saved" ? "Saved" : "Save settings"}

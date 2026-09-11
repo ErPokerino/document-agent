@@ -188,3 +188,15 @@ test("a step kind that no longer exists is shown as itself", () => {
   // A run recorded months ago must stay readable.
   assert.equal(stepLabel("some_retired_step"), "some_retired_step");
 });
+
+import { patchStepConfig } from "../lib/pipeline-editor.ts";
+
+test("changing a processor version preserves its reference and OCR options", () => {
+  const steps = [{kind: "document_ai_ocr", config: {processor_ref: "ocr", processor_version: "", feeds_model: false}}];
+  const versioned = patchStepConfig(steps, 0, {processor_version: "v2"});
+  assert.deepEqual(versioned[0].config, {processor_ref: "ocr", processor_version: "v2", feeds_model: false});
+  const text = patchStepConfig(versioned, 0, {feeds_model: true});
+  assert.equal(text[0].config.processor_version, "v2");
+  assert.equal(text[0].config.processor_ref, "ocr");
+  assert.equal(steps[0].config.processor_version, "");
+});

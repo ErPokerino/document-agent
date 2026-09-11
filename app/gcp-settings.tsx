@@ -2,12 +2,9 @@
 
 import {
   AlertCircle,
-  Check,
   CircleDot,
   Cloud,
   FileKey,
-  LoaderCircle,
-  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -23,7 +20,6 @@ type Props = {
 /** Where the Document AI key goes, and proof that it works. */
 export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
   const [status, setStatus] = useState<GcpKeyStatus | null>(null);
-  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     void api.gcpKeyStatus().then(setStatus).catch(() => setStatus(null));
@@ -33,14 +29,13 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
     setDraftSettings({ ...draftSettings, gcp: { ...draftSettings.gcp, ...update } });
   }
 
-  const verified = status?.verified_processors ?? [];
 
   return (
     <div className="settings-card">
       <div className="settings-card-heading">
         <span className="settings-card-icon"><Cloud size={18} /></span>
         <div>
-          <h3>Google Document AI</h3>
+          <h3>Connection and pricing</h3>
           <p>Used by the OCR, Layout Parser and Custom Extractor steps. Billed by Google per page.</p>
         </div>
         <span className={`connection-badge ${status?.configured ? "online" : ""}`}>
@@ -64,7 +59,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           The name matters. Nothing is uploaded: the backend reads it from disk and the browser
           never sees it.
         </li>
-        <li>Fill in the project and the processor ids you use, save, then press Verify.</li>
+        <li>Register processors in the catalog, then check their metadata and versions.</li>
       </ol>
 
       {status && !status.configured && status.problem && (
@@ -81,7 +76,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
 
       <div className="gcp-grid">
         <label>
-          <span>Project id<InfoHint text="The Google Cloud project the processors live in, as shown in the console." /></span>
+          <span>Default project ID<InfoHint text="The Google Cloud project the processors live in, as shown in the console." /></span>
           <input
             className="text-input"
             value={draftSettings.gcp.project_id}
@@ -90,7 +85,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           />
         </label>
         <label>
-          <span>Region<InfoHint text="Must match the processor location in Google Cloud, such as eu or us. This location determines the service endpoint." /></span>
+          <span>Default region<InfoHint text="Must match the processor location in Google Cloud, such as eu or us. This location determines the service endpoint." /></span>
           <input
             className="text-input"
             value={draftSettings.gcp.location}
@@ -98,67 +93,8 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
             onChange={(event) => setGcp({ location: event.target.value.trim() })}
           />
         </label>
-        <label>
-          <span>OCR processor id<InfoHint text="The id of a Document OCR processor, from the processor's detail page. Not its display name." /></span>
-          <input
-            className="text-input"
-            value={draftSettings.gcp.ocr_processor_id}
-            placeholder="262c0e092e95a1d"
-            onChange={(event) => setGcp({ ocr_processor_id: event.target.value.trim() })}
-          />
-        </label>
-        <label>
-          <span>Layout Parser processor id<InfoHint text="The id of a Layout Parser processor. It reads the same page but keeps headings, tables and lists." /></span>
-          <input
-            className="text-input"
-            value={draftSettings.gcp.layout_processor_id}
-            placeholder="7638d53e4d6176f0"
-            onChange={(event) => setGcp({ layout_processor_id: event.target.value.trim() })}
-          />
-        </label>
-        <label>
-          <span>Custom Extractor processor id<InfoHint text="Processor ID from Google Cloud, not its display name. The Custom Extractor reads the fields configured in Extraction directly and returns confidence and value locations." /></span>
-          <input
-            className="text-input"
-            value={draftSettings.gcp.custom_extractor_processor_id}
-            placeholder="3ebb8a177d412f8e"
-            onChange={(event) => setGcp({ custom_extractor_processor_id: event.target.value.trim() })}
-          />
-        </label>
       </div>
-
-      <div className="key-row">
-        <button
-          className="secondary-button"
-          disabled={verifying}
-          onClick={() => {
-            setVerifying(true);
-            void api
-              .verifyGcpKey()
-              .then(setStatus)
-              .catch(() => undefined)
-              .finally(() => setVerifying(false));
-          }}
-        >
-          {verifying ? <LoaderCircle className="spin" size={14} /> : <ShieldCheck size={14} />} Verify connection
-        </button>
-        <p className="field-help">
-          Sends one blank page to each configured processor, using the settings already saved.
-          That is a real call, so it costs one page each.
-        </p>
-      </div>
-
-      {verified.length > 0 && (
-        <p className="field-help good-note">
-          <Check size={12} /> Answered: {verified.map((id) => <code key={id}>{id}</code>).reduce((all, item) => <>{all}, {item}</>)}
-        </p>
-      )}
-      {status?.configured && status.problem && (
-        <div className="alert error-alert" role="status">
-          <AlertCircle size={17} />
-          <span>{status.problem}</span>
-        </div>
-      )}
+      <p className="field-help">Defaults for registering new processors. Existing catalog entries keep their own project and region. Check metadata and versions from each processor in the catalog.</p>
 
       <p className="input-label prompt-label">Price per 1000 pages (USD)</p>
       <div className="pricing-grid">

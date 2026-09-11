@@ -185,3 +185,11 @@ test("each axis still formats a real value in its own units", () => {
   assert.match(by.costPerDocument.format(0.0022), /^\$0\.0022$/);
   assert.equal(by.tokensPerDocument.format(1288), (1288).toLocaleString());
 });
+
+test("different recorded OCR versions remain distinct approaches", () => {
+  const bindings = (version) => [{kind: "document_ai_ocr", config: {project_id: "project", location: "eu", processor_id: `processor/processorVersions/${version}`}}];
+  const points = approachPoints([run({processor_bindings: bindings("v1")}), run({id: 2, processor_bindings: bindings("v2")}), run({id: 3, processor_bindings: bindings("v1")})], free);
+  assert.equal(points.length, 2);
+  assert.deepEqual(points.map(p => p.runs).sort(), [1, 2]);
+  assert.ok(points.every(p => p.detail.includes("OCR:")));
+});

@@ -30,3 +30,13 @@ export function engineKey(run: Evaluation): string {
     ? JSON.stringify([run.extraction_engine?.project_id, run.extraction_engine?.location, run.extraction_engine?.processor_id, run.extraction_engine?.version, run.extraction_engine?.additional_processors?.map(other => [other.project_id, other.location, other.processor_id, other.version]), run.model, run.provider])
     : run.model;
 }
+
+
+/** Keep dates and full resource IDs in details; only shorten known Google names. */
+export function compactExtractorVersion(version: string | null | undefined): string {
+  if (!version) return "Version unavailable";
+  const foundation = /^pretrained-foundation-model-v(.+?)(?:-\d{4}-\d{2}-\d{2})?$/.exec(version);
+  return foundation
+    ? `Foundation ${foundation[1].replace(/-lite$/, " Lite").replace(/-pro$/, " Pro")}`
+    : `Version ${version}`;
+}

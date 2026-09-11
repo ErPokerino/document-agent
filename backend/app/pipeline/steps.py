@@ -197,9 +197,11 @@ class ReadWithDocumentAi:
     keeps the headings and tables, plus the raw structure for anything later.
     """
 
-    def __init__(self, kind: str, processor_id: str, feeds_model: bool = True) -> None:
+    def __init__(self, kind: str, processor_id: str, feeds_model: bool = True, project_id: str | None = None, location: str | None = None) -> None:
         self.kind = kind
         self.processor_id = processor_id
+        self.project_id = project_id
+        self.location = location
         # An OCR step can be in a pipeline purely to supply the boxes that
         # highlight a value on the page, while a multimodal model reads the
         # picture and never sees this text. Handing the model text it was not
@@ -208,14 +210,14 @@ class ReadWithDocumentAi:
 
     def _client(self, context: PipelineContext) -> DocumentAiClient:
         return DocumentAiClient(
-            context.gcp_credentials_path, context.gcp_project_id, context.gcp_location
+            context.gcp_credentials_path, self.project_id or context.gcp_project_id, self.location or context.gcp_location
         )
 
     async def run(self, context: PipelineContext) -> None:
         if not self.processor_id.strip():
             raise DocumentAiError(
                 f"No processor id is configured for {self.kind.replace('_', ' ')}. "
-                "Add it in Settings."
+                "Select it in Pipelines from the Processors catalog."
             )
         processed_pages: int = context.artifacts["processed_pages"]
         # Document AI charges per page, so the pipeline's page limit has to be
@@ -487,19 +489,21 @@ class ExtractWithCustomExtractor:
     match it.
     """
 
-    def __init__(self, processor_id: str, entities: list[EntityDefinition]) -> None:
+    def __init__(self, processor_id: str, entities: list[EntityDefinition], project_id: str | None = None, location: str | None = None) -> None:
         self.processor_id = processor_id
+        self.project_id = project_id
+        self.location = location
         self.entities = entities
 
     async def run(self, context: PipelineContext) -> None:
         if not self.processor_id.strip():
             raise DocumentAiError(
-                "No Custom Extractor processor id is configured. Add it in Settings."
+                "No Custom Extractor processor id is configured. Select it in Pipelines from the Processors catalog."
             )
         processed_pages: int = context.artifacts["processed_pages"]
 
         client = DocumentAiClient(
-            context.gcp_credentials_path, context.gcp_project_id, context.gcp_location
+            context.gcp_credentials_path, self.project_id or context.gcp_project_id, self.location or context.gcp_location
         )
         answer = await client.process(
             self.processor_id,

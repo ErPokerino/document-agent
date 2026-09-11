@@ -36,8 +36,7 @@ export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
       minimum_similarity: DEFAULT_MINIMUM_SIMILARITY,
     };
   }
-  // A Document AI step takes its processor from Settings unless it is told
-  // otherwise, so it starts with nothing of its own.
+  if (kind.startsWith("document_ai_")) return { processor_ref: "", processor_version: "" };
   return {};
 }
 
@@ -65,6 +64,11 @@ export function setStepConfig(
   return steps.map((step, position) => (position === index ? { ...step, config } : step));
 }
 
+/** Reader options and processor selection share the same step configuration. */
+export function patchStepConfig(steps: PipelineStep[], index: number, patch: Record<string, unknown>): PipelineStep[] {
+  return steps.map((step, position) => position === index ? { ...step, config: { ...step.config, ...patch } } : step);
+}
+
 export function rulesOf(step: PipelineStep): RegexRule[] {
   if (step.kind !== "regex_refine") return [];
   const rules = (step.config as { rules?: RegexRule[] }).rules;
@@ -82,6 +86,8 @@ export function summarizeStep(step: PipelineStep): string {
   }
   if (step.kind === "document_ai_ocr") return "OCR text from Document AI";
   if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
+  if (step.kind === "document_ai_extract") return "Fields from Custom Extractor";
+  if (step.kind === "supplier_rules") return "Supplier-specific rules";
   if (step.kind === "llm_extract") return "One call to the configured model";
   if (step.kind === "master_data_lookup") {
     const config = step.config as { source_entity?: string; target_entity?: string };

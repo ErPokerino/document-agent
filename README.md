@@ -10,6 +10,35 @@ Descriptions refer to the extraction engine when both LLMs and Custom Extractors
 are supported. Pareto explanations follow the selected resource axis; missing
 resource measurements are disclosed rather than silently treated as zero.
 
+## Processors and models
+
+**Processors** is the local catalog of existing Google Document AI resources,
+with All, OCR, Layout Parser and Custom Extractor views and a search field.
+Each entry has its own project and region; credentials are shared through the
+local service-account file. Registration does not create or deploy a Google
+resource. Metadata checks list versions without processing a document and do
+not establish permission to process documents. Names can change; resource
+identities cannot. A processor used by a saved pipeline cannot be removed.
+
+**Pipelines** selects a compatible processor and either an explicit version or
+the processor's Google Cloud default for each Document AI step. New steps require
+a choice. Existing defaults and step overrides are migrated into the catalog
+without changing the target or version. Original settings and pipeline files
+are retained as `.pre-processors.bak` files inside ignored `backend/data`.
+
+New Lab runs save concrete project, region and processor bindings independently
+of the catalog and pin resolved versions when metadata is available. OCR and
+Layout versions are included in Analytics grouping, alongside extractor identity.
+Missing historical bindings remain unknown. A default whose version cannot be
+resolved remains mutable; use explicit versions for controlled comparisons.
+
+**LLM** separates Local and API resources. The location tabs replace the former
+Runs filter; capability filters remain, and disk-size filtering applies only to
+Local. Switching tabs does not change the selected model, and the selection
+remains visible. The active LLM is still shared by model-calling pipeline steps.
+**Settings** contains app appearance; Document AI connection and pricing live
+with the processors that use them.
+
 ## Included features
 
 - PDF upload up to 20 MB;
@@ -79,9 +108,9 @@ on the machine. Open **LLM**, pick one from the list LM Studio reports, and use
 in `backend/data/settings.json` on that machine and is never sent back to the
 browser.
 
-**A Document AI service account**, only for the OCR and Layout Parser pipelines.
+**A Document AI service account**, for OCR, Layout Parser and Custom Extractor steps.
 Save the JSON key as `backend/data/gcp-service-account.json`, then fill in the
-project id, region and processor ids under **Settings**.
+project and region defaults under **Processors → Connection and pricing**. Register each processor in **Processors**, then choose it and its version in the relevant pipeline step.
 
 The application configuration is portable, but the inference runtime is still
 machine-specific. DocuFlow reads the accelerator from LM Studio and derives its

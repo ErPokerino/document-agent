@@ -118,7 +118,7 @@ export function LanguageModels(props: Props) {
     processState,
   } = props;
 
-  const [runsFilter, setRunsFilter] = useState<RunsFilter>("any");
+  const [runsFilter, setRunsFilter] = useState<RunsFilter>(draftSettings.provider === "gemini" ? "api" : "local");
   const [visionFilter, setVisionFilter] = useState<VisionFilter>("any");
   const [sizeFilter, setSizeFilter] = useState<SizeFilter>("any");
   // Which llama.cpp build LM Studio has selected. A machine-wide setting
@@ -144,9 +144,10 @@ export function LanguageModels(props: Props) {
   const visibleModels = filterModels(models, {
     runs: runsFilter,
     vision: visionFilter,
-    size: sizeFilter,
+    size: runsFilter === "local" ? sizeFilter : "any",
   });
-  const filtered = visibleModels.length !== models.length;
+  const scopedModels = filterModels(models, { runs: runsFilter });
+  const filtered = visionFilter !== "any" || (runsFilter === "local" && sizeFilter !== "any");
 
   const selectedDraftModel = models.find((model) => model.id === draftSettings.model);
   const selectedRuntimeState = selectedDraftModel?.runtime_state ?? "not_loaded";
@@ -174,9 +175,15 @@ export function LanguageModels(props: Props) {
         <div><h2>LLM</h2><p>Which language model answers, and where it runs: LM Studio on this machine, or the Gemini API.</p></div>
       </div>
 
+      <div className="resource-tabs" aria-label="Model location">
+        <button aria-pressed={runsFilter === "local"} onClick={() => setRunsFilter("local")}>Local <small>{filterModels(models, { runs: "local" }).length}</small></button>
+        <button aria-pressed={runsFilter === "api"} onClick={() => setRunsFilter("api")}>API <small>{filterModels(models, { runs: "api" }).length}</small></button>
+      </div>
+      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {draftSettings.provider === "gemini" ? "API" : "Local"}. Model changes apply when saved.</p>
+
       {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}
 
-      <div className="settings-card">
+      <div className="settings-card" hidden={runsFilter !== "local"}>
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Server size={18} /></span>
           <div><h3>LM Studio connection</h3><p>OpenAI-compatible endpoint used by the backend.</p></div>
@@ -210,14 +217,6 @@ export function LanguageModels(props: Props) {
 
         <div className="model-filters">
           <label>
-            <span>Runs</span>
-            <select value={runsFilter} onChange={(event) => setRunsFilter(event.target.value as RunsFilter)}>
-              <option value="any">Anywhere</option>
-              <option value="local">On this machine</option>
-              <option value="api">Through an API</option>
-            </select>
-          </label>
-          <label>
             <span>Reads</span>
             <select value={visionFilter} onChange={(event) => setVisionFilter(event.target.value as VisionFilter)}>
               <option value="any">Images or text</option>
@@ -225,7 +224,7 @@ export function LanguageModels(props: Props) {
               <option value="text">Text only</option>
             </select>
           </label>
-          <label>
+          <label hidden={runsFilter !== "local"}>
             <span>On disk</span>
             <select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value as SizeFilter)}>
               {sizeBuckets.map((bucket) => (
@@ -234,15 +233,15 @@ export function LanguageModels(props: Props) {
             </select>
           </label>
           {filtered && (
-            <button className="link-button" onClick={() => { setRunsFilter("any"); setVisionFilter("any"); setSizeFilter("any"); }}>
-              <FilterX size={13} /> Clear · {visibleModels.length} of {models.length}
+            <button className="link-button" onClick={() => { setVisionFilter("any"); setSizeFilter("any"); }}>
+              <FilterX size={13} /> Clear · {visibleModels.length} of {scopedModels.length}
             </button>
           )}
         </div>
 
         <div className="model-list">
-          {models.length === 0 ? (
-            <div className="models-empty"><AlertCircle size={18} /><span>{connectionError ?? "LM Studio answered, and has no models installed."}</span></div>
+          {scopedModels.length === 0 ? (
+            <div className="models-empty"><AlertCircle size={18} /><span>{runsFilter === "local" ? connectionError ?? "LM Studio answered, and has no models installed." : "No API models are available."}</span></div>
           ) : visibleModels.length === 0 ? (
             <div className="models-empty"><FilterX size={18} /><span>No model matches these filters.</span></div>
           ) : visibleModels.map((model) => {
@@ -263,7 +262,7 @@ export function LanguageModels(props: Props) {
             );
           })}
         </div>
-        {selectedDraftModel && selectedDraftModel.provider === "gemini" && (
+        {runsFilter === "api" && selectedDraftModel && selectedDraftModel.provider === "gemini" && (
           <div className="model-loader ready hosted">
             <span className="model-loader-icon"><KeyRound size={17} /></span>
             <div className="model-loader-copy">
@@ -273,7 +272,7 @@ export function LanguageModels(props: Props) {
           </div>
         )}
 
-        {selectedDraftModel && selectedDraftModel.provider !== "gemini" && (
+        {runsFilter === "local" && selectedDraftModel && selectedDraftModel.provider !== "gemini" && (
           <div className={`model-loader ${selectedRuntimeState}`}>
             <span className="model-loader-icon"><Power size={17} /></span>
             <div className="model-loader-copy">
@@ -303,7 +302,7 @@ export function LanguageModels(props: Props) {
         <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends a schema built from your entities with every request, in the shape each provider accepts. Nothing has to be configured in LM Studio or in Google AI Studio.</span></div></div>
       </div>
 
-      <div className="settings-card">
+      <div className="settings-card" hidden={runsFilter !== "api"}>
         <div className="settings-card-heading">
           <span className="settings-card-icon"><KeyRound size={18} /></span>
           <div><h3>Google Gemini</h3><p>Create a key in Google AI Studio. It is stored on this machine and never sent back to the browser.</p></div>

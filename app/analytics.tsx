@@ -117,7 +117,7 @@ function ParetoChart({
         <div>
           <h3>
             Accuracy against {axis === "secondsPerDocument" ? "time" : axis === "tokensPerDocument" ? "tokens" : "cost"}
-            <InfoHint text="Numbers identify rows in Compare. Each point groups an engine, version, dataset and pipeline across the selected runs. A frontier point has no alternative with at least equal accuracy and no greater resource use, with a strict improvement in either measure." />
+            <InfoHint text="Numbers identify rows in Compare. Each point groups an engine, recorded processor versions, dataset and pipeline across the selected runs. A frontier point has no alternative with at least equal accuracy and no greater resource use, with a strict improvement in either measure." />
           </h3>
           <p>Higher means more accurate; further left means {axis === "secondsPerDocument" ? "faster" : axis === "tokensPerDocument" ? "fewer tokens" : "lower estimated cost"}. Highlighted points form the Pareto frontier.</p>
         </div>
@@ -231,7 +231,7 @@ function ApproachTable({
     <div className="settings-card">
       <div className="settings-card-heading">
         <div>
-          <h3>Compare<InfoHint text="One row per extraction engine, version, dataset and pipeline. Every column sorts. The figures are per document and averaged over each run of that approach in the current selection." /></h3>
+          <h3>Compare<InfoHint text="One row per extraction engine, recorded processor versions, dataset and pipeline. Every column sorts. The figures are per document and averaged over each run of that approach in the current selection." /></h3>
           <p>{points.length} approaches. Highlighted rows are on the Pareto frontier for the selected axis.</p>
         </div>
       </div>

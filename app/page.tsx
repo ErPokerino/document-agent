@@ -33,6 +33,7 @@ import {
 import { ChangeEvent, DragEvent, Fragment, useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
+import { compactExtractorVersion, engineDetail } from "../lib/extraction-engine";
 import { resolveBootstrap } from "../lib/bootstrap";
 import { describeDataFlow } from "../lib/data-flow";
 import { usesModel } from "../lib/pipeline-steps";
@@ -44,6 +45,7 @@ import { formatBytes, modelDisplayName, modelStatusLabel } from "../lib/format";
 import { LanguageModels } from "./llm";
 import { PageHighlight } from "./page-highlight";
 import { Pipelines } from "./pipeline";
+import { Processors } from "./processors";
 import { Settings } from "./settings";
 import { stepLabels } from "../lib/pipeline-editor";
 import { buildReviewedExport } from "../lib/review";
@@ -68,6 +70,7 @@ type View =
   | "datasets"
   | "lab"
   | "llm"
+  | "processors"
   | "settings";
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
@@ -77,6 +80,7 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
   lab: { eyebrow: "Extraction quality", title: "Lab" },
   llm: { eyebrow: "Where extraction runs", title: "LLM" },
+  processors: { eyebrow: "Document AI resources", title: "Processors" },
   settings: { eyebrow: "Preferences", title: "Settings" },
 };
 
@@ -478,10 +482,11 @@ export default function Home() {
   // afterwards, so a pipeline with one is not local processing.
   const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds);
   const configuredEntities = settings?.prompts.entities ?? [];
-  const [extractionEngine, setExtractionEngine] = useState<import("../lib/types").ExtractionEngine | null>(null);
+  const [engineResult, setEngineResult] = useState<{ settings: AppSettings; engine: import("../lib/types").ExtractionEngine | null } | null>(null);
+  const extractionEngine = engineResult?.settings === settings ? engineResult?.engine : null;
   useEffect(() => {
     let current = true;
-    if (settings) api.extractionEngine().then(engine => { if (current) setExtractionEngine(engine); }).catch(() => { if (current) setExtractionEngine(null); });
+    if (settings) api.extractionEngine().then(engine => { if (current) setEngineResult({ settings, engine }); }).catch(() => { if (current) setEngineResult({ settings, engine: null }); });
     return () => { current = false; };
   }, [settings]);
   const activeModelName = modelDisplayName(settings?.model ?? "", models);
@@ -612,28 +617,29 @@ export default function Home() {
         </div>
 
         <nav className="nav-list" aria-label="Main navigation">
-          <button className={`nav-item ${view === "workspace" ? "active" : ""}`} onClick={() => setView("workspace")}>
+          <button className={`nav-item ${view === "workspace" ? "active" : ""}`} onClick={() => setView("workspace")} title={sectionCopy["workspace"].title}>
             <LayoutDashboard size={17} /> Workspace
           </button>
-          <button className={`nav-item ${view === "extraction" ? "active" : ""}`} onClick={() => setView("extraction")}>
+          <button className={`nav-item ${view === "extraction" ? "active" : ""}`} onClick={() => setView("extraction")} title={sectionCopy["extraction"].title}>
             <Braces size={17} /> Extraction
           </button>
-          <button className={`nav-item ${view === "pipelines" ? "active" : ""}`} onClick={() => setView("pipelines")}>
+          <button className={`nav-item ${view === "pipelines" ? "active" : ""}`} onClick={() => setView("pipelines")} title={sectionCopy["pipelines"].title}>
             <Workflow size={17} /> Pipelines
           </button>
-          <button className={`nav-item ${view === "master-data" ? "active" : ""}`} onClick={() => setView("master-data")}>
+          <button className={`nav-item ${view === "master-data" ? "active" : ""}`} onClick={() => setView("master-data")} title={sectionCopy["master-data"].title}>
             <Library size={17} /> Master Data
           </button>
-          <button className={`nav-item ${view === "datasets" ? "active" : ""}`} onClick={() => setView("datasets")}>
+          <button className={`nav-item ${view === "datasets" ? "active" : ""}`} onClick={() => setView("datasets")} title={sectionCopy["datasets"].title}>
             <Database size={17} /> Datasets
           </button>
-          <button className={`nav-item ${view === "lab" ? "active" : ""}`} onClick={() => setView("lab")}>
+          <button className={`nav-item ${view === "lab" ? "active" : ""}`} onClick={() => setView("lab")} title={sectionCopy["lab"].title}>
             <FlaskConical size={17} /> Lab
           </button>
-          <button className={`nav-item ${view === "llm" ? "active" : ""}`} onClick={() => setView("llm")}>
+          <button className={`nav-item ${view === "llm" ? "active" : ""}`} onClick={() => setView("llm")} title={sectionCopy["llm"].title}>
             <Cpu size={17} /> LLM
           </button>
-          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
+          <button className={`nav-item ${view === "processors" ? "active" : ""}`} onClick={() => setView("processors")} title={sectionCopy["processors"].title}><Cloud size={17}/> Processors</button>
+          <button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")} title={sectionCopy["settings"].title}>
             <SlidersHorizontal size={17} /> Settings
           </button>
         </nav>
@@ -666,10 +672,10 @@ export default function Home() {
               <span className="model-icon"><Workflow size={15} /></span>
               <div><small>Pipeline</small><strong>{settings?.pipeline ?? "—"}</strong></div>
             </button>
-            <button className="model-chip" onClick={() => setView(pipelineKinds.includes("document_ai_extract") ? "pipelines" : "llm")} title={pipelineKinds.includes("document_ai_extract") ? "Configure Custom Extractor in Pipelines" : "Change model in LLM"}>
+            <button className="model-chip" onClick={() => setView(pipelineKinds.includes("document_ai_extract") ? "pipelines" : "llm")} title={pipelineKinds.includes("document_ai_extract") ? [extractionEngine?.display_name, engineDetail({ model: pipelineKinds.some(kind => kind === "llm_extract" || kind === "supplier_rules") ? settings?.model || "Not used" : "Not used", steps: pipelineKinds, extraction_engine: extractionEngine ?? null }), "Choose the processor and version in Pipelines."].filter(Boolean).join("\n") : "Change model in LLM"}>
               <span className="model-icon"><Cpu size={15} /></span>
-              <div><small>{pipelineKinds.includes("document_ai_extract") ? "Custom Extractor" : activeModelStatus}</small><strong title={pipelineKinds.includes("document_ai_extract") ? extractionEngine?.version || "Version unavailable" : undefined}>{pipelineKinds.includes("document_ai_extract") ? extractionEngine?.display_name || "Document AI" : activeModelName}</strong></div>
-              <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />
+              <div><small>{pipelineKinds.includes("document_ai_extract") ? `Document AI · CE${extractionEngine?.additional_processors?.length ? ` +${extractionEngine.additional_processors.length}` : ""}` : activeModelStatus}</small><strong>{pipelineKinds.includes("document_ai_extract") ? engineResult?.settings !== settings ? "Reading version…" : compactExtractorVersion(extractionEngine?.version) : activeModelName}</strong></div>
+              {!pipelineKinds.includes("document_ai_extract") && <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />}
             </button>
           </div>
         </header>
@@ -835,7 +841,10 @@ export default function Home() {
             draftSettings={draftSettings}
             entities={configuredEntities}
             onUse={usePipeline}
+            onProcessors={() => setView("processors")}
           />
+        ) : view === "processors" ? (
+          <Processors draftSettings={draftSettings} setDraftSettings={setDraftSettings} onSave={saveSettings} settingsState={settingsState} settingsError={settingsError} onPipelines={() => setView("pipelines")}/>
         ) : view === "settings" ? (
           <Settings
             draftSettings={draftSettings}

@@ -129,6 +129,8 @@ pipeline_store = PipelineStore(PIPELINES_PATH)
 adopt_legacy_page_limit(SETTINGS_PATH, pipeline_store)
 clear_inherited_model_default(SETTINGS_PATH)
 pipeline_store.seed_default()
+from app.services.processors import migrate_processor_catalog
+migrate_processor_catalog(settings_store, pipeline_store)
 model_runtime_states: dict[str, str] = {}
 model_warmup_modes: dict[str, str] = {}
 model_runtime_profiles: dict[str, str] = {}
@@ -589,6 +591,8 @@ async def clear_gemini_key() -> Response:
 @app.put("/api/settings", response_model=AppSettings)
 async def update_settings(settings: AppSettings) -> AppSettings:
     previous_settings = settings_store.read()
+    # Catalog mutations have their own validation and must survive stale settings forms.
+    settings.gcp.processors = previous_settings.gcp.processors
     try:
         chosen_pipeline = pipeline_store.read(settings.pipeline)
     except (UnknownPipeline, InvalidPipelineName) as exc:
@@ -670,8 +674,9 @@ async def update_settings(settings: AppSettings) -> AppSettings:
 
 def _selected_pipeline(settings: AppSettings) -> PipelineDefinition:
     try:
-        return pipeline_store.read(settings.pipeline)
-    except (UnknownPipeline, InvalidPipelineName) as exc:
+        from app.services.processors import resolved_pipeline
+        return resolved_pipeline(pipeline_store.read(settings.pipeline), settings.gcp)
+    except (UnknownPipeline, InvalidPipelineName, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -843,7 +848,9 @@ def _metrics_model(metrics: Any) -> Metrics:
 
 
 def _evaluation_model(detail: Any) -> Evaluation:
+    definition = getattr(detail, "pipeline_definition", None)
     return Evaluation(
+        processor_bindings=[step for step in definition.steps if step.kind.value.startswith("document_ai_") and step.config.get("project_id") and step.config.get("processor_id")] if definition else [],
         **{
             key: getattr(detail, key)
             for key in (
@@ -886,12 +893,21 @@ def _require_dataset(name: str) -> None:
 
 
 def _saved_pipeline(definition: PipelineDefinition) -> SavedPipeline:
+    from app.services.processors import binding, KINDS
+    settings = settings_store.read()
+    problems = describe_problems(definition)
+    for index, step in enumerate(definition.steps, start=1):
+        if step.kind.value in KINDS:
+            try:
+                binding(step, settings.gcp)
+            except ValueError as exc:
+                problems.append(f"Step {index}: {exc}")
     return SavedPipeline(
         name=definition.name,
         description=definition.description,
         page_limit=definition.page_limit,
         steps=definition.steps,
-        problems=describe_problems(definition),
+        problems=problems,
         warnings=describe_warnings(definition, settings_store.read().prompts.entities),
     )
 
@@ -1672,7 +1688,7 @@ async def _lab_extractor(settings: AppSettings, definition: PipelineDefinition):
     for step in definition.steps:
         if step.kind.value == "document_ai_extract":
             processor = str(step.config.get("processor_id") or settings.gcp.custom_extractor_processor_id)
-            client = DocumentAiClient(GCP_CREDENTIALS_PATH, settings.gcp.project_id, settings.gcp.location)
+            client = DocumentAiClient(GCP_CREDENTIALS_PATH, step.config.get("project_id") or settings.gcp.project_id, step.config.get("location") or settings.gcp.location)
             engines.append(await resolve_extractor(client, processor))
     return {**engines[0], "additional_processors": engines[1:]} if engines else None
 
@@ -1709,7 +1725,19 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     # Compiled before anything is claimed: a pipeline that cannot run must
     # not leave the backend marked busy.
     pipeline_definition = _selected_pipeline(settings)
-    steps = _document_pipeline(settings).steps
+    from app.services.extraction_engine import resolve_extractor
+    from app.services.document_ai import DocumentAiClient
+    for step in pipeline_definition.steps:
+        if step.kind.value in ("document_ai_ocr", "document_ai_layout"):
+            config = step.config
+            client = DocumentAiClient(GCP_CREDENTIALS_PATH, config["project_id"], config["location"])
+            identity = await resolve_extractor(client, config["processor_id"])
+            if identity["version"]:
+                config["processor_id"] = identity["processor_id"] + "/processorVersions/" + identity["version"]
+    try:
+        steps = build_steps(pipeline_definition, prompts=settings.prompts, entities=settings.prompts.entities, gcp=settings.gcp, master_data=master_data_store, supplier_rules=supplier_rule_store)
+    except PipelineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     extraction_engine = await _lab_extractor(settings, pipeline_definition)
     if extraction_engine:
         # Pin every extractor independently; a pipeline may contain more than one.
@@ -1810,7 +1838,8 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
 
     settings = settings_store.read()
     engine = detail.extraction_engine
-    if engine and (engine.get("project_id") != settings.gcp.project_id or engine.get("location") != settings.gcp.location):
+    explicit_locations = detail.pipeline_definition is not None and all("project_id" in step.config and "location" in step.config for step in detail.pipeline_definition.steps if step.kind.value.startswith("document_ai_"))
+    if engine and not explicit_locations and (engine.get("project_id") != settings.gcp.project_id or engine.get("location") != settings.gcp.location):
         raise HTTPException(status_code=409, detail="This evaluation used a different Document AI project or location.")
     try:
         # New runs carry the complete definition. Legacy rows fall back to the
@@ -1942,3 +1971,83 @@ async def cancel_evaluation(evaluation_id: int) -> Evaluation:
     if evaluation_task is not None and not evaluation_task.done():
         evaluation_task.cancel()
     return _evaluation_model(evaluation_store.get_evaluation(evaluation_id))
+
+# -- Document AI resource catalog ---------------------------------------------
+from app.domain.models import DocumentProcessor, ProcessorRecord, ProcessorInspection, ProcessorVersion
+from app.services.processors import used_by as processor_used_by
+
+
+@app.get("/api/processors", response_model=list[ProcessorRecord])
+async def list_processors():
+    settings = settings_store.read()
+    pipelines = pipeline_store.list()
+    return [ProcessorRecord(**entry.model_dump(), used_by=processor_used_by(entry, pipelines, settings.gcp)) for entry in settings.gcp.processors]
+
+
+@app.put("/api/processors/{processor_ref}", response_model=DocumentProcessor)
+async def save_processor(processor_ref: str, entry: DocumentProcessor):
+    if processor_ref != entry.id:
+        raise HTTPException(status_code=400, detail="The processor reference does not match its id")
+    settings = settings_store.read()
+    existing = next((p for p in settings.gcp.processors if p.id == entry.id), None)
+    identity_fields = ("kind", "project_id", "location", "processor_id")
+    if existing and any(getattr(existing, f) != getattr(entry, f) for f in identity_fields):
+        raise HTTPException(status_code=409, detail="A registered processor's identity cannot change. Register another processor to use a different resource.")
+    if any(p.id != entry.id and all(getattr(p, f) == getattr(entry, f) for f in identity_fields) for p in settings.gcp.processors):
+        raise HTTPException(status_code=409, detail="This processor is already registered")
+    entry.name = entry.name.strip()
+    if not entry.name:
+        raise HTTPException(status_code=400, detail="A processor name is required")
+    settings.gcp.processors = [p for p in settings.gcp.processors if p.id != entry.id] + [entry]
+    settings_store.write(settings)
+    return entry
+
+
+@app.delete("/api/processors/{processor_ref}", status_code=204, response_class=Response)
+async def delete_processor(processor_ref: str):
+    settings = settings_store.read()
+    entry = next((p for p in settings.gcp.processors if p.id == processor_ref), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Processor not found")
+    names = processor_used_by(entry, pipeline_store.list(), settings.gcp)
+    if names:
+        raise HTTPException(status_code=409, detail="Processor used by: " + ", ".join(names))
+    settings.gcp.processors = [p for p in settings.gcp.processors if p.id != processor_ref]
+    from app.services.processors import KINDS
+    field = KINDS[entry.kind]
+    if (settings.gcp.project_id, settings.gcp.location, getattr(settings.gcp, field).split("/processorVersions/")[0]) == (entry.project_id, entry.location, entry.processor_id):
+        setattr(settings.gcp, field, "")
+    settings_store.write(settings)
+    return Response(status_code=204)
+
+
+@app.get("/api/processors/{processor_ref}/inspect", response_model=ProcessorInspection)
+async def inspect_processor(processor_ref: str):
+    from datetime import datetime, timezone
+    from app.services.document_ai import DocumentAiClient, DocumentAiError
+    settings = settings_store.read()
+    entry = next((p for p in settings.gcp.processors if p.id == processor_ref), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Processor not found")
+    client = DocumentAiClient(GCP_CREDENTIALS_PATH, entry.project_id, entry.location)
+    resource = f"projects/{entry.project_id}/locations/{entry.location}/processors/{entry.processor_id}"
+    expected = {"document_ai_ocr": "OCR_PROCESSOR", "document_ai_layout": "LAYOUT_PARSER_PROCESSOR", "document_ai_extract": "CUSTOM_EXTRACTION_PROCESSOR"}
+    try:
+        metadata = await client.metadata(resource)
+        if metadata.get("type") != expected[entry.kind]:
+            raise HTTPException(status_code=409, detail="Google reports a different processor type from the registered type")
+        versions = []
+        token = None
+        seen = set()
+        while True:
+            page = await client.metadata(resource + "/processorVersions", page_token=token)
+            versions.extend(ProcessorVersion(id=v["name"].rsplit("/", 1)[-1], name=v.get("displayName") or v["name"].rsplit("/", 1)[-1], state=v.get("state") or "UNKNOWN") for v in page.get("processorVersions", []))
+            token = page.get("nextPageToken")
+            if not token:
+                break
+            if token in seen:
+                raise DocumentAiError("The processor version cursor did not advance")
+            seen.add(token)
+        return ProcessorInspection(display_name=metadata.get("displayName") or entry.name, state=metadata.get("state") or "UNKNOWN", default_version=(metadata.get("defaultProcessorVersion") or "").rsplit("/", 1)[-1] or None, versions=versions, checked_at=datetime.now(timezone.utc).isoformat())
+    except DocumentAiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

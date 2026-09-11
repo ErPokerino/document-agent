@@ -162,7 +162,7 @@ and Pareto presentation are documented in README. Remaining work:
   not expose the exclusion control available in Runs.
 - Identify a configuration by dataset/input hashes, prompt/schema, complete
   pipeline and model profile. Current chart grouping separates dataset names
-  and extractor versions, but not all input or configuration revisions.
+  and recorded Document AI bindings/versions, but not all input or configuration revisions.
 - Prefer paired comparisons on shared document hashes; show sample size,
   completion coverage and label changes. Avoid treating changes in the scored
   field set as evidence of better extraction.
@@ -170,3 +170,13 @@ and Pareto presentation are documented in README. Remaining work:
   cost measurements directly in the chart.
 - Add per-request context-tier accounting before enabling automatic Gemini
   3.1 Pro Preview rates. Summed run token counts cannot select a request's tier.
+
+### Resource catalog boundaries
+
+Processors registers existing Google resources; creating, training, deploying and
+changing Google's default version remain in Google Cloud. Connection and pricing
+are grouped with the catalog; metadata access is distinct from process access.
+LLM keeps its capability and size filters inside Local/API views. Per-step LLM
+selection and multiple credential profiles are separate future changes, not
+implied by a processor catalog. Document AI pricing currently remains per type;
+version-specific pricing would require matching usage attribution.

@@ -83,7 +83,8 @@ def _build_one(
     master_data: MasterDataStore | None,
     supplier_rules: SupplierRuleStore | None,
 ) -> Any:
-    config = step.config
+    from app.services.processors import binding, KINDS
+    config = binding(step, gcp) if step.kind.value in KINDS else step.config
     if step.kind is StepKind.render_pages:
         return RenderPages(scale=float(config.get("scale", DEFAULT_RENDER_SCALE)))
     if step.kind in (StepKind.document_ai_ocr, StepKind.document_ai_layout):
@@ -100,6 +101,7 @@ def _build_one(
             # Default on: an OCR step that was added before this flag
             # existed was added to give the model text.
             feeds_model=bool(config.get("feeds_model", True)),
+            project_id=config.get("project_id"), location=config.get("location"),
         )
     if step.kind is StepKind.llm_extract:
         return ExtractEntities(prompts)
@@ -109,6 +111,7 @@ def _build_one(
         return ExtractWithCustomExtractor(
             str(config.get("processor_id") or gcp.custom_extractor_processor_id),
             entities,
+            project_id=config.get("project_id"), location=config.get("location"),
         )
     if step.kind is StepKind.supplier_rules:
         if supplier_rules is None:

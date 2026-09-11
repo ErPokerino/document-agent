@@ -216,7 +216,7 @@ class DocumentAiClient:
         self._token, self._token_expires_at = await self._exchange_assertion()
         return self._token
 
-    async def metadata(self, resource: str) -> dict[str, Any]:
+    async def metadata(self, resource: str, page_token: str | None = None) -> dict[str, Any]:
         prefix = f"projects/{self.project_id}/locations/{self.location}/processors/"
         if not resource.startswith(prefix) or any(c in resource for c in "?#"):
             raise DocumentAiError("Invalid processor resource")
@@ -224,6 +224,7 @@ class DocumentAiClient:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(
                     f"{self.host}/v1beta3/{resource}",
+                    params={"pageToken": page_token} if page_token else None,
                     headers={"Authorization": f"Bearer {await self._access_token()}"},
                 )
         except httpx.HTTPError as exc:

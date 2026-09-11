@@ -54,6 +54,15 @@ export type DocumentLabels = {
   updated_at: string | null;
 };
 
+export type DocumentProcessor = {
+  id: string;
+  name: string;
+  kind: "document_ai_ocr" | "document_ai_layout" | "document_ai_extract";
+  project_id: string;
+  location: string;
+  processor_id: string;
+};
+
 export type DraftLabels = {
   document: string;
   labels: Record<string, unknown>;
@@ -69,6 +78,7 @@ export type EntityDefinition = {
 };
 
 export type Evaluation = {
+  processor_bindings: PipelineStep[];
   extraction_engine: ExtractionEngine | null;
   id: number;
   created_at: string;
@@ -99,6 +109,7 @@ export type Evaluation = {
 };
 
 export type EvaluationDetail = {
+  processor_bindings: PipelineStep[];
   extraction_engine: ExtractionEngine | null;
   id: number;
   created_at: string;
@@ -248,6 +259,7 @@ export type GcpKeyStatus = {
 };
 
 export type GcpSettings = {
+  processors: DocumentProcessor[];
   project_id: string;
   location: string;
   ocr_processor_id: string;
@@ -413,6 +425,30 @@ export type ProcessingInfo = {
   tokens_per_second: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
+};
+
+export type ProcessorInspection = {
+  display_name: string;
+  state: string;
+  default_version: string | null;
+  versions: ProcessorVersion[];
+  checked_at: string;
+};
+
+export type ProcessorRecord = {
+  id: string;
+  name: string;
+  kind: "document_ai_ocr" | "document_ai_layout" | "document_ai_extract";
+  project_id: string;
+  location: string;
+  processor_id: string;
+  used_by: string[];
+};
+
+export type ProcessorVersion = {
+  id: string;
+  name: string;
+  state: string;
 };
 
 export type PromoteRunRequest = {
