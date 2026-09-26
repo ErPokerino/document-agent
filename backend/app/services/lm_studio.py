@@ -65,6 +65,12 @@ MODEL_PROFILE_SEED = 0
 # same model fails one field instantly and the run carries on. Set well above
 # any real invoice field, so it never truncates an answer that was going well.
 VALUE_CHARACTER_CEILING = 200
+# Characters per token in a value that has gone wrong. Measured on this bench:
+# the runaway that the ceiling above was written against ran to 1,289
+# characters in 600 tokens, and it was CJK fragments rather than prose, which
+# would have run three to four. Two is the pessimistic end, which is where a
+# ceiling belongs.
+VALUE_CHARACTERS_PER_TOKEN = 2
 # A large model on CPU often fails the first image and succeeds on the next:
 # qwen3.6-35b-a3b takes 95 seconds over a blank warm-up page and needed two
 # goes. Each attempt reloads the model, so they are not cheap — but reporting a
@@ -1114,13 +1120,48 @@ Return only JSON that conforms to the supplied schema.
         }
 
     @staticmethod
+    def _value_token_ceiling(entity_format: EntityFormat) -> int:
+        """The most tokens one value of this format may legally take.
+
+        A date and a currency code are pinned by their own pattern and a number
+        by what a number looks like; free text is the only value that can run
+        all the way to VALUE_CHARACTER_CEILING.
+        """
+        if entity_format is EntityFormat.date:
+            return 8
+        if entity_format is EntityFormat.currency:
+            return 4
+        if entity_format in (EntityFormat.decimal, EntityFormat.integer):
+            return 16
+        return VALUE_CHARACTER_CEILING // VALUE_CHARACTERS_PER_TOKEN
+
+    @staticmethod
     def _output_token_budget(entities: list[EntityDefinition]) -> int:
-        # The property names are part of the generated output, so a schema with
-        # long names needs a larger budget than one with short names. Roughly
-        # one token per three characters of key, plus room for the value and the
-        # JSON punctuation around each property.
+        """Room for the longest answer the schema still permits.
+
+        The property names are part of the generated output, so a schema with
+        long names needs a larger budget than one with short names: roughly one
+        token per three characters of key, plus the value and the JSON
+        punctuation around each property.
+
+        The value allowance is derived from VALUE_CHARACTER_CEILING rather than
+        picked, because the two have to agree. A flat 32 tokens a property was
+        written before the ceiling existed and is a third of what one bounded
+        free-text value can cost, so a schema with six or more text fields
+        could be cut off mid-value with nothing wrong in what it was writing —
+        the very failure the ceiling was added to remove. The grammar stops a
+        runaway now; this number only has to stop truncating good answers.
+
+        Derived entities are excluded because `_generation_schema` excludes
+        them: the model is never asked for a value it will not write.
+        """
+        entities = model_entities(entities)
         key_tokens = sum(max(1, len(entity.name) // 3) for entity in entities)
-        return 128 + key_tokens + len(entities) * 32
+        value_tokens = sum(
+            LMStudioClient._value_token_ceiling(entity.format) for entity in entities
+        )
+        # Four a property for the quotes, the colon and the comma.
+        return 128 + key_tokens + value_tokens + len(entities) * 4
 
     @staticmethod
     def _named_response_shape_is_valid(
