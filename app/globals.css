@@ -850,6 +850,11 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 /* --- Lab analytics --- */
 .lab-tabs { margin-top: 4px; }
 .chart-wrap { padding: 6px 2px 0; }
+/* The heading's child rule is flex: 1, which would stretch the buttons across
+   the card. none keeps them beside the title, and they drop below it when the
+   card is narrow. */
+.settings-card-heading:has(> .chart-exports) { flex-wrap: wrap; align-items: flex-start; }
+.settings-card-heading > .chart-exports { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; margin-left: auto; }
 .pareto-chart { width: 100%; height: auto; display: block; overflow: visible; }
 .chart-grid { stroke: var(--line); stroke-width: 1; }
 .chart-axis { stroke: var(--line); stroke-width: 1.5; }

@@ -434,7 +434,9 @@ are resolved and pinned independently. CSV includes the recorded identities.
 
 Analytics groups runs that share a configuration fingerprint. Runs recorded
 before a fingerprint existed still group by engine, pipeline and dataset.
-Charts use compact numbers linked to comparison rows and a
+Each chart can be saved as a PNG, and its values as a CSV: the comparison keeps
+every resource column, with the Pareto flag for the axis on screen, and field
+accuracy keeps the pooled counts. Charts use compact numbers linked to comparison rows and a
 detail panel, with collision avoidance for labels. Tooltips omit dataset names
 and duplicate reader names. Pareto rows have a subtle background and a badge,
 recomputed for the selected axis; this is a trade-off frontier, not a universal

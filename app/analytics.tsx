@@ -1,7 +1,10 @@
 "use client";
 
-import { ArrowDown, ArrowUp, BarChart3 } from "lucide-react";
-import { useState } from "react";
+import { ArrowDown, ArrowUp, BarChart3, Download } from "lucide-react";
+import { useRef, useState } from "react";
+
+import { approachesToCsv, fieldChartSvg, fieldsToCsv } from "../lib/analytics-export";
+import { chartPaint, downloadSvgAsPng, downloadSvgMarkup, downloadText } from "../lib/chart-image";
 
 import {
   AXES,
@@ -27,6 +30,10 @@ type Column = "model" | "pipeline" | "runs" | "accuracy" | Axis;
 type Sort = { key: Column; descending: boolean };
 
 const PLOT = { width: 760, height: 340, left: 54, right: 128, top: 18, bottom: 40 };
+
+function axisFile(axis: Axis): string {
+  return axis.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
 
 /**
  * The bench read as a picture, on its own page.
@@ -82,6 +89,8 @@ function ParetoChart({
   onAxis: (axis: Axis) => void;
 }) {
   const [inspected, setInspected] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const chartRef = useRef<SVGSVGElement>(null);
   const placeable = points.filter((point) => {
     const value = point[axis];
     return value !== null && value !== undefined && Number.isFinite(value);
@@ -121,10 +130,35 @@ function ParetoChart({
           </h3>
           <p>Higher means more accurate; further left means {axis === "secondsPerDocument" ? "faster" : axis === "tokensPerDocument" ? "fewer tokens" : "lower estimated cost"}. Highlighted points form the Pareto frontier.</p>
         </div>
-        <select className="compare-metric" value={axis} onChange={(event) => onAxis(event.target.value as Axis)} aria-label="What to plot accuracy against">
-          {AXES.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}
-        </select>
+        <div className="chart-exports">
+          <select className="compare-metric" value={axis} onChange={(event) => onAxis(event.target.value as Axis)} aria-label="What to plot accuracy against">
+            {AXES.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}
+          </select>
+          <button
+            type="button"
+            className="secondary-button small"
+            disabled={placeable.length === 0}
+            onClick={() => {
+              const chart = chartRef.current;
+              if (!chart) return;
+              setImageError(null);
+              void downloadSvgAsPng(chart, `accuracy-against-${axisFile(axis)}.png`, chartPaint().paper).catch((cause) => {
+                setImageError(cause instanceof Error ? cause.message : String(cause));
+              });
+            }}
+          >
+            <Download size={13} /> PNG
+          </button>
+          <button
+            type="button"
+            className="secondary-button small"
+            onClick={() => downloadText(`approaches-${axisFile(axis)}.csv`, approachesToCsv(points, frontier, axis))}
+          >
+            <Download size={13} /> CSV
+          </button>
+        </div>
       </div>
+      {imageError && <p className="field-help">{imageError}</p>}
 
       {placeable.length > 0 && placeable.length < points.length && <p className="field-help">{placeable.length} of {points.length} approaches shown. Others have no recorded value for {meta.label.toLowerCase()}.</p>}
       {placeable.length === 0 ? (
@@ -132,6 +166,7 @@ function ParetoChart({
       ) : (
         <div className="chart-wrap">
           <svg
+            ref={chartRef}
             viewBox={`0 0 ${PLOT.width} ${PLOT.height}`}
             className="pareto-chart"
             role="group"
@@ -287,6 +322,7 @@ function FieldChart({
   fields: ReturnType<typeof fieldAccuracy>;
   approaches: number;
 }) {
+  const [imageError, setImageError] = useState<string | null>(null);
   if (fields.length === 0) return null;
   return (
     <div className="settings-card">
@@ -295,7 +331,25 @@ function FieldChart({
           <h3>Accuracy by field<InfoHint text="Every field scored across the runs in view, pooled rather than averaged per run. Narrow the filters above to one model or one pipeline to see that approach on its own." /></h3>
           <p>Worst first, over {approaches === 1 ? "one approach" : `${approaches} approaches`} in view.</p>
         </div>
+        <div className="chart-exports">
+          <button
+            type="button"
+            className="secondary-button small"
+            onClick={() => {
+              setImageError(null);
+              void downloadSvgMarkup(fieldChartSvg(fields, chartPaint()), "accuracy-by-field.png", chartPaint().paper).catch((cause) => {
+                setImageError(cause instanceof Error ? cause.message : String(cause));
+              });
+            }}
+          >
+            <Download size={13} /> PNG
+          </button>
+          <button type="button" className="secondary-button small" onClick={() => downloadText("accuracy-by-field.csv", fieldsToCsv(fields))}>
+            <Download size={13} /> CSV
+          </button>
+        </div>
       </div>
+      {imageError && <p className="field-help">{imageError}</p>}
       <ul className="field-bars">
         {fields.map((field) => (
           <li key={field.entity}>
