@@ -36,7 +36,7 @@ import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import { labRunTarget } from "../lib/lab-target";
-import { latestOnly } from "../lib/latest";
+import { useLatest } from "../lib/latest";
 import { usesModel } from "../lib/pipeline-steps";
 import {
   emptyFilters,
@@ -104,8 +104,8 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [listRequests] = useState(latestOnly);
-  const [detailRequests] = useState(latestOnly);
+  const listRequests = useLatest();
+  const detailRequests = useLatest();
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
   // Reads this machine's own history rather than assuming a cost, so it

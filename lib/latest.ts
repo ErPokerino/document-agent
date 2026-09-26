@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 /**
  * Only the answer to the most recent request may reach the screen.
  *
@@ -11,6 +13,11 @@ export type Latest = {
   /** Discard whatever is in flight, for a slot that was just cleared. */
   invalidate(): void;
 };
+
+/** One sequence per component, kept for its whole life. */
+export function useLatest(): Latest {
+  return useState(latestOnly)[0];
+}
 
 export function latestOnly(): Latest {
   let current = 0;

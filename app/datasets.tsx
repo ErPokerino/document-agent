@@ -24,7 +24,7 @@ import { api, apiUrls } from "../lib/api";
 import { filterByName } from "../lib/document-filter";
 import { formatLabels, labelModes } from "../lib/format";
 import { draftFromModel, draftToLabels, labelsToDraft, type LabelDraft, type LabelMode } from "../lib/labels";
-import { latestOnly } from "../lib/latest";
+import { useLatest } from "../lib/latest";
 import type { Dataset, DatasetDocument, EntityDefinition, ExtractionRun } from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
 
@@ -57,7 +57,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [labelRequests] = useState(latestOnly);
+  const labelRequests = useLatest();
   const uploadInput = useRef<HTMLInputElement>(null);
   const archiveInput = useRef<HTMLInputElement>(null);
 

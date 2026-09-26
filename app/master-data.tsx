@@ -23,7 +23,7 @@ import {
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
-import { latestOnly } from "../lib/latest";
+import { useLatest } from "../lib/latest";
 import { InfoHint } from "./info-hint";
 import type { EntityDefinition, MasterDataImport, MasterDataTable } from "../lib/types";
 import { SupplierRules } from "./supplier-rules";
@@ -85,7 +85,7 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
   }, []);
 
   // A slower answer to an earlier search must not replace the newer one.
-  const [rowRequests] = useState(latestOnly);
+  const rowRequests = useLatest();
   const refresh = useCallback(async () => {
     if (!tableKey) return;
     const isCurrent = rowRequests.begin();
