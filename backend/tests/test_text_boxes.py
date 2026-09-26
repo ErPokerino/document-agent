@@ -188,7 +188,7 @@ def test_a_box_is_the_union_and_stays_inside_the_page() -> None:
 
 def test_only_the_fields_the_page_showed_get_a_location() -> None:
     from app.domain.models import FieldExtraction
-    from app.main import _field_locations
+    from app.api.deps import field_locations as _field_locations
 
     artifacts = {
         "ocr_tokens": tokens_from_ocr(sample()),
@@ -207,7 +207,7 @@ def test_only_the_fields_the_page_showed_get_a_location() -> None:
 
 def test_a_pipeline_that_never_read_the_page_locates_nothing() -> None:
     from app.domain.models import FieldExtraction
-    from app.main import _field_locations
+    from app.api.deps import field_locations as _field_locations
 
     artifacts = {"extraction": {"supplier_name": FieldExtraction(value="ACME", confidence="high")}}
     assert _field_locations(artifacts) == []

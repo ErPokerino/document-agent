@@ -2,7 +2,8 @@
 from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
-from app import main
+from app.api import deps
+from app.api.routes import processors as processors_routes
 from app.domain.models import AppSettings, DocumentProcessor, GcpSettings, PromptConfiguration
 from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.pipeline.compiler import build_steps
@@ -71,16 +72,16 @@ def test_migration_preserves_overrides_versions_and_is_idempotent(tmp_path):
 def catalog(tmp_path, monkeypatch):
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(gcp=GcpSettings(processors=[resource()])))
-    monkeypatch.setattr(main, "settings_store", settings)
+    monkeypatch.setattr(deps, "settings_store", settings)
     return settings
 
 
 @pytest.mark.asyncio
 async def test_a_processor_used_in_a_saved_pipeline_cannot_be_removed(catalog):
     """Catalog deletion must not leave dangling pipeline references."""
-    main.pipeline_store.save(pipeline({"processor_ref": "ocr"}))
+    deps.pipeline_store.save(pipeline({"processor_ref": "ocr"}))
     with pytest.raises(HTTPException) as exc:
-        await main.delete_processor("ocr")
+        await processors_routes.delete_processor("ocr")
     assert exc.value.status_code == 409
     assert len(catalog.read().gcp.processors) == 1
 
@@ -88,10 +89,10 @@ async def test_a_processor_used_in_a_saved_pipeline_cannot_be_removed(catalog):
 @pytest.mark.asyncio
 async def test_renaming_keeps_identity_and_changing_identity_is_refused(catalog):
     """Editing a catalog label must not silently retarget every pipeline using it."""
-    await main.save_processor("ocr", resource(name="Better name"))
+    await processors_routes.save_processor("ocr", resource(name="Better name"))
     assert catalog.read().gcp.processors[0].name == "Better name"
     with pytest.raises(HTTPException) as exc:
-        await main.save_processor("ocr", resource(processor_id="changed"))
+        await processors_routes.save_processor("ocr", resource(processor_id="changed"))
     assert exc.value.status_code == 409
 
 
@@ -99,7 +100,7 @@ async def test_renaming_keeps_identity_and_changing_identity_is_refused(catalog)
 async def test_duplicate_resources_are_rejected(catalog):
     """Multiple labels for the same resource make version selection ambiguous."""
     with pytest.raises(HTTPException) as exc:
-        await main.save_processor("another", resource(id="another"))
+        await processors_routes.save_processor("another", resource(id="another"))
     assert exc.value.status_code == 409
 
 
@@ -110,7 +111,7 @@ async def test_inspection_reads_all_version_pages_without_processing_documents(c
     monkeypatch.setattr(DocumentAiClient, "metadata", mock)
     process = AsyncMock(side_effect=AssertionError("must not process"))
     monkeypatch.setattr(DocumentAiClient, "process", process)
-    result = await main.inspect_processor("ocr")
+    result = await processors_routes.inspect_processor("ocr")
     assert [v.id for v in result.versions] == ["v1", "v2"]
     assert result.default_version == "v2"
     process.assert_not_called()
@@ -121,7 +122,7 @@ async def test_inspection_rejects_a_mismatched_google_type(catalog, monkeypatch)
     """A mistyped registration must be reported before it is trusted."""
     monkeypatch.setattr(DocumentAiClient, "metadata", AsyncMock(return_value={"type": "CUSTOM_EXTRACTION_PROCESSOR"}))
     with pytest.raises(HTTPException) as exc:
-        await main.inspect_processor("ocr")
+        await processors_routes.inspect_processor("ocr")
     assert exc.value.status_code == 409
 
 

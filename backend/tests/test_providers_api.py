@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, FieldExtraction, ModelInfo
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.store import EvaluationStore
@@ -46,7 +47,7 @@ def test_a_pipeline_that_calls_no_model_records_no_selected_model() -> None:
         steps=[PipelineStep(kind=StepKind.document_ai_extract)],
     )
 
-    assert main._recorded_model(AppSettings(model="vision-model"), pipeline) == (
+    assert deps.recorded_model(AppSettings(model="vision-model"), pipeline) == (
         "Not used",
         "none",
     )
@@ -56,18 +57,18 @@ def test_a_pipeline_that_calls_no_model_records_no_selected_model() -> None:
 def api(tmp_path, monkeypatch):
     store = SettingsStore(tmp_path / "settings.json")
     store.write(AppSettings(model="vision-model"))
-    monkeypatch.setattr(main, "settings_store", store)
-    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
-    monkeypatch.setattr(main, "evaluation_store", EvaluationStore(tmp_path / "docuflow.db"))
-    monkeypatch.setattr(main, "dataset_store", DatasetStore(tmp_path / "datasets"))
-    monkeypatch.setattr(main, "LMStudioClient", FakeLMStudio)
+    monkeypatch.setattr(deps, "settings_store", store)
+    monkeypatch.setattr(deps, "run_store", RunStore(tmp_path / "docuflow.db"))
+    monkeypatch.setattr(deps, "evaluation_store", EvaluationStore(tmp_path / "docuflow.db"))
+    monkeypatch.setattr(deps, "dataset_store", DatasetStore(tmp_path / "datasets"))
+    monkeypatch.setattr(deps, "LMStudioClient", FakeLMStudio)
     FakeLMStudio.error = None
-    main.model_runtime_states.clear()
-    main.release_model_operation()
+    deps.model_runtime_states.clear()
+    deps.release_model_operation()
     with TestClient(main.app) as client:
         yield client, store
-    main.model_runtime_states.clear()
-    main.release_model_operation()
+    deps.model_runtime_states.clear()
+    deps.release_model_operation()
 
 
 def set_key(store: SettingsStore, key: str) -> None:
@@ -241,7 +242,7 @@ def test_a_run_records_which_provider_produced_it(api, monkeypatch) -> None:
 
     client.post("/api/documents/extract", files={"file": ("a.pdf", pdf_bytes(), "application/pdf")})
 
-    assert main.run_store.list_runs()[0].provider == "gemini"
+    assert deps.run_store.list_runs()[0].provider == "gemini"
 
 
 def test_verifying_the_key_reports_the_models_it_can_see(api, monkeypatch) -> None:
@@ -255,7 +256,7 @@ def test_verifying_the_key_reports_the_models_it_can_see(api, monkeypatch) -> No
         async def list_models(self):
             return ["gemini-3.8-flash", "gemini-9-ultra"]
 
-    monkeypatch.setattr(main, "GeminiClient", FakeGeminiClient)
+    monkeypatch.setattr(deps, "GeminiClient", FakeGeminiClient)
 
     status = client.post("/api/settings/gemini/verify").json()
 
@@ -293,8 +294,8 @@ def test_a_model_loaded_with_the_wrong_profile_is_refused_and_told_why(api, monk
         async def list_vision_models(self, excluded_model_ids=None):
             return [MISMATCHED_MODEL]
 
-    monkeypatch.setattr(main, "LMStudioClient", WrongProfile)
-    main.model_runtime_states["vision-model"] = "ready"
+    monkeypatch.setattr(deps, "LMStudioClient", WrongProfile)
+    deps.model_runtime_states["vision-model"] = "ready"
 
     response = client.post(
         "/api/documents/extract",
@@ -323,9 +324,9 @@ def test_a_mismatched_model_is_never_reported_as_ready(api, monkeypatch) -> None
         async def list_vision_models(self, excluded_model_ids=None):
             return [MISMATCHED_MODEL]
 
-    monkeypatch.setattr(main, "LMStudioClient", WrongProfile)
+    monkeypatch.setattr(deps, "LMStudioClient", WrongProfile)
     # Even with our own state saying "ready", the live instance overrules it.
-    main.model_runtime_states["vision-model"] = "ready"
+    deps.model_runtime_states["vision-model"] = "ready"
 
     listed = client.get("/api/models").json()
     local = next(model for model in listed if model["id"] == "vision-model")

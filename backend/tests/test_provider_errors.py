@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.services.document_ai import DocumentAiError
 from app.services.run_store import RunStore
@@ -28,12 +29,12 @@ async def test_a_document_ai_failure_is_a_bad_gateway_with_its_message(tmp_path,
     """`DocumentAiError` was not caught, so OCR failures reached the UI as a bare 500."""
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="vision-model"))
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
-    monkeypatch.setattr(main, "LMStudioClient", ReadyClient)
-    monkeypatch.setattr(main, "_document_pipeline", lambda settings: FailingPipeline())
-    main.model_runtime_states["vision-model"] = "ready"
-    main.release_model_operation()
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "run_store", RunStore(tmp_path / "docuflow.db"))
+    monkeypatch.setattr(deps, "LMStudioClient", ReadyClient)
+    monkeypatch.setattr(deps, "document_pipeline", lambda settings: FailingPipeline())
+    deps.model_runtime_states["vision-model"] = "ready"
+    deps.release_model_operation()
 
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -44,8 +45,8 @@ async def test_a_document_ai_failure_is_a_bad_gateway_with_its_message(tmp_path,
 
     assert response.status_code == 502
     assert "permission denied" in response.json()["detail"]
-    assert main.active_model_operation is None
-    main.model_runtime_states.clear()
+    assert deps.active_model_operation is None
+    deps.model_runtime_states.clear()
 
 
 @pytest.mark.asyncio
@@ -60,12 +61,12 @@ async def test_only_a_lost_runtime_takes_the_model_out_of_ready(tmp_path, monkey
 
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="vision-model"))
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
-    monkeypatch.setattr(main, "LMStudioClient", ReadyClient)
-    monkeypatch.setattr(main, "_document_pipeline", lambda settings: LosesTheRuntime())
-    main.model_runtime_states["vision-model"] = "ready"
-    main.release_model_operation()
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "run_store", RunStore(tmp_path / "docuflow.db"))
+    monkeypatch.setattr(deps, "LMStudioClient", ReadyClient)
+    monkeypatch.setattr(deps, "document_pipeline", lambda settings: LosesTheRuntime())
+    deps.model_runtime_states["vision-model"] = "ready"
+    deps.release_model_operation()
 
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -75,8 +76,8 @@ async def test_only_a_lost_runtime_takes_the_model_out_of_ready(tmp_path, monkey
         )
 
     assert response.status_code == 502
-    assert main.model_runtime_states["vision-model"] == ("error" if lost else "ready")
-    main.model_runtime_states.clear()
+    assert deps.model_runtime_states["vision-model"] == ("error" if lost else "ready")
+    deps.model_runtime_states.clear()
 
 
 def test_lm_studio_says_when_its_runtime_is_gone() -> None:

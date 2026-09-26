@@ -208,9 +208,10 @@ def test_export_and_import_over_the_api(monkeypatch, tmp_path) -> None:
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
 
     store = seeded(tmp_path)
-    monkeypatch.setattr(main, "dataset_store", store)
+    monkeypatch.setattr(deps, "dataset_store", store)
 
     with TestClient(main.app) as client:
         exported = client.get("/api/datasets/Invoices/export.zip")
@@ -233,9 +234,10 @@ def test_importing_a_name_already_taken_is_refused_with_a_reason(monkeypatch, tm
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
 
     store = seeded(tmp_path)
-    monkeypatch.setattr(main, "dataset_store", store)
+    monkeypatch.setattr(deps, "dataset_store", store)
 
     with TestClient(main.app) as client:
         exported = client.get("/api/datasets/Invoices/export.zip").content
@@ -254,11 +256,12 @@ def test_a_dataset_named_outside_latin_1_can_be_downloaded(monkeypatch, tmp_path
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
 
     store = DatasetStore(tmp_path / "datasets")
     store.create("Łódź")
     store.add_document("Łódź", "a.pdf", b"%PDF-1.4 a")
-    monkeypatch.setattr(main, "dataset_store", store)
+    monkeypatch.setattr(deps, "dataset_store", store)
 
     with TestClient(main.app) as client:
         exported = client.get("/api/datasets/Łódź/export.zip")
@@ -271,8 +274,9 @@ def test_exporting_a_dataset_that_is_not_there_is_a_404(monkeypatch, tmp_path) -
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
 
-    monkeypatch.setattr(main, "dataset_store", DatasetStore(tmp_path / "datasets"))
+    monkeypatch.setattr(deps, "dataset_store", DatasetStore(tmp_path / "datasets"))
     with TestClient(main.app) as client:
         assert client.get("/api/datasets/Missing/export.zip").status_code == 404
 
@@ -281,8 +285,9 @@ def test_a_file_that_is_not_an_archive_is_refused_over_the_api(monkeypatch, tmp_
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
 
-    monkeypatch.setattr(main, "dataset_store", DatasetStore(tmp_path / "datasets"))
+    monkeypatch.setattr(deps, "dataset_store", DatasetStore(tmp_path / "datasets"))
     with TestClient(main.app) as client:
         response = client.post(
             "/api/datasets/import",

@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.pipeline.store import PipelineStore
@@ -31,9 +32,9 @@ def api(tmp_path, monkeypatch):
     settings.write(AppSettings(model="sees"))
     pipelines = PipelineStore(tmp_path / "pipelines")
     pipelines.seed_default()
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "pipeline_store", pipelines)
-    monkeypatch.setattr(main, "LMStudioClient", FakeLMStudio)
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "pipeline_store", pipelines)
+    monkeypatch.setattr(deps, "LMStudioClient", FakeLMStudio)
     with TestClient(main.app) as client:
         yield client, pipelines
 
@@ -65,7 +66,7 @@ def test_a_text_only_model_is_offered_in_the_list(api) -> None:
 def test_a_unique_publisher_prefix_migrates_the_selected_model(tmp_path, monkeypatch) -> None:
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="qwen3.5-0.8b"))
-    monkeypatch.setattr(main, "settings_store", settings)
+    monkeypatch.setattr(deps, "settings_store", settings)
 
     prefixed = ModelInfo(
         id="lmstudio-community/qwen3.5-0.8b",
@@ -76,7 +77,7 @@ def test_a_unique_publisher_prefix_migrates_the_selected_model(tmp_path, monkeyp
         async def list_models(self, excluded_model_ids=None):
             return [prefixed]
 
-    monkeypatch.setattr(main, "LMStudioClient", PrefixedLMStudio)
+    monkeypatch.setattr(deps, "LMStudioClient", PrefixedLMStudio)
     with TestClient(main.app) as client:
         assert client.get("/api/models").status_code == 200
 
@@ -86,7 +87,7 @@ def test_a_unique_publisher_prefix_migrates_the_selected_model(tmp_path, monkeyp
 def test_an_ambiguous_basename_is_not_silently_migrated(tmp_path, monkeypatch) -> None:
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="shared"))
-    monkeypatch.setattr(main, "settings_store", settings)
+    monkeypatch.setattr(deps, "settings_store", settings)
 
     class AmbiguousLMStudio(FakeLMStudio):
         async def list_models(self, excluded_model_ids=None):
@@ -95,7 +96,7 @@ def test_an_ambiguous_basename_is_not_silently_migrated(tmp_path, monkeypatch) -
                 ModelInfo(id="two/shared", name="Two"),
             ]
 
-    monkeypatch.setattr(main, "LMStudioClient", AmbiguousLMStudio)
+    monkeypatch.setattr(deps, "LMStudioClient", AmbiguousLMStudio)
     with TestClient(main.app) as client:
         assert client.get("/api/models").status_code == 200
 
@@ -159,8 +160,8 @@ def test_a_text_only_model_that_is_ready_is_allowed_to_run(api, monkeypatch, tmp
     monkeypatch.setattr(
         step_module.ReadWithDocumentAi, "_client", lambda self, context: FakeDocumentAi()
     )
-    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
-    main.model_runtime_states["reads"] = "ready"
+    monkeypatch.setattr(deps, "run_store", RunStore(tmp_path / "docuflow.db"))
+    deps.model_runtime_states["reads"] = "ready"
 
     document = pymupdf.open()
     document.new_page()

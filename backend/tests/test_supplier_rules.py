@@ -229,9 +229,10 @@ def test_a_rule_can_be_written_read_changed_and_removed_over_the_api(monkeypatch
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
     from app.services.supplier_rules import SupplierRuleStore
 
-    monkeypatch.setattr(main, "supplier_rule_store", SupplierRuleStore(tmp_path / "rules.db"))
+    monkeypatch.setattr(deps, "supplier_rule_store", SupplierRuleStore(tmp_path / "rules.db"))
     with TestClient(main.app) as client:
         created = client.post(
             "/api/supplier-rules",
@@ -254,9 +255,10 @@ def test_changing_a_rule_that_is_not_there_is_a_404(monkeypatch, tmp_path) -> No
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.api import deps
     from app.services.supplier_rules import SupplierRuleStore
 
-    monkeypatch.setattr(main, "supplier_rule_store", SupplierRuleStore(tmp_path / "rules.db"))
+    monkeypatch.setattr(deps, "supplier_rule_store", SupplierRuleStore(tmp_path / "rules.db"))
     with TestClient(main.app) as client:
         assert client.patch("/api/supplier-rules/999", json={"value": "x"}).status_code == 404
 

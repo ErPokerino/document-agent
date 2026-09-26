@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.services.document_ai import DocumentAiError
 from app.services.settings_store import SettingsStore
@@ -30,9 +31,9 @@ def api(tmp_path, monkeypatch):
     saved.gcp.ocr_processor_id = "ocr-id"
     saved.gcp.layout_processor_id = "layout-id"
     settings.write(saved)
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "LMStudioClient", FakeLMStudio)
-    monkeypatch.setattr(main, "GCP_CREDENTIALS_PATH", tmp_path / "gcp-service-account.json")
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "LMStudioClient", FakeLMStudio)
+    monkeypatch.setattr(deps, "GCP_CREDENTIALS_PATH", tmp_path / "gcp-service-account.json")
     with TestClient(main.app) as client:
         yield client, tmp_path
 

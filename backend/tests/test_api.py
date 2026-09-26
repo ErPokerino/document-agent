@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.services.lm_studio import LMStudioError
 from app.services.settings_store import SettingsStore
@@ -57,17 +58,17 @@ class FakeClient:
 def isolated_api(tmp_path, monkeypatch):
     store = SettingsStore(tmp_path / "settings.json")
     store.write(AppSettings(model="vision-model"))
-    monkeypatch.setattr(main, "settings_store", store)
-    monkeypatch.setattr(main, "LMStudioClient", FakeClient)
-    main.model_runtime_states.clear()
-    main.model_warmup_modes.clear()
+    monkeypatch.setattr(deps, "settings_store", store)
+    monkeypatch.setattr(deps, "LMStudioClient", FakeClient)
+    deps.model_runtime_states.clear()
+    deps.model_warmup_modes.clear()
     FakeClient.models = [READY_MODEL]
     FakeClient.list_error = None
     FakeClient.load_error = None
     FakeClient.load_gate = None
     yield store
-    main.model_runtime_states.clear()
-    main.model_warmup_modes.clear()
+    deps.model_runtime_states.clear()
+    deps.model_warmup_modes.clear()
 
 
 def runtime_state(client: TestClient, model_id: str) -> str:

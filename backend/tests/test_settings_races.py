@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.pipeline.store import PipelineStore
@@ -64,15 +65,15 @@ def api(tmp_path, monkeypatch):
             settings.write(settings.read().model_copy(update={"pipeline": "OCR then model"}))
             return READY
 
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "pipeline_store", pipelines)
-    monkeypatch.setattr(main, "LMStudioClient", DuringTheLoad)
-    main.model_runtime_states.clear()
-    main.release_model_operation()
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "pipeline_store", pipelines)
+    monkeypatch.setattr(deps, "LMStudioClient", DuringTheLoad)
+    deps.model_runtime_states.clear()
+    deps.release_model_operation()
     with TestClient(main.app) as client:
         yield client, settings
-    main.model_runtime_states.clear()
-    main.release_model_operation()
+    deps.model_runtime_states.clear()
+    deps.release_model_operation()
 
 
 def test_a_pipeline_chosen_during_a_load_survives_the_load(api) -> None:
@@ -88,14 +89,14 @@ def test_a_pipeline_chosen_during_a_load_survives_the_load(api) -> None:
 def test_switching_from_ocr_to_images_requires_a_vision_warmup(api) -> None:
     client, settings = api
     settings.write(settings.read().model_copy(update={"pipeline": "OCR then model"}))
-    main.model_runtime_states["first"] = "ready"
-    main.model_warmup_modes["first"] = "schema"
+    deps.model_runtime_states["first"] = "ready"
+    deps.model_warmup_modes["first"] = "schema"
     payload = client.get("/api/settings").json()
     payload["pipeline"] = "Vision extraction"
 
     assert client.put("/api/settings", json=payload).status_code == 200
 
-    assert main.model_runtime_states["first"] == "loaded"
+    assert deps.model_runtime_states["first"] == "loaded"
 
 
 def test_a_processor_registered_while_settings_are_saved_survives_the_save(tmp_path, monkeypatch) -> None:
@@ -120,9 +121,9 @@ def test_a_processor_registered_while_settings_are_saved_survives_the_save(tmp_p
             settings.write(current)
             return [ModelInfo(id="first", name="First", vision=True), ModelInfo(id="second", name="Second", vision=True)]
 
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "pipeline_store", pipelines)
-    monkeypatch.setattr(main, "LMStudioClient", RegistersDuringTheCheck)
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "pipeline_store", pipelines)
+    monkeypatch.setattr(deps, "LMStudioClient", RegistersDuringTheCheck)
     with TestClient(main.app) as client:
         payload = client.get("/api/settings").json()
         payload["model"] = "second"

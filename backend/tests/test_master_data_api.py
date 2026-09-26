@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.services.master_data import MasterDataStore
 from app.services.settings_store import SettingsStore
@@ -25,9 +26,9 @@ def api(tmp_path, monkeypatch):
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="vision-model"))
     master_data = MasterDataStore(tmp_path / "master.db")
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "master_data_store", master_data)
-    monkeypatch.setattr(main, "LMStudioClient", FakeLMStudio)
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "master_data_store", master_data)
+    monkeypatch.setattr(deps, "LMStudioClient", FakeLMStudio)
     with TestClient(main.app) as client:
         yield client, master_data
 
@@ -137,7 +138,7 @@ def test_the_table_can_be_filled_from_the_labelled_documents(api, tmp_path, monk
     client, _ = api
     datasets = DatasetStore(tmp_path / "datasets")
     datasets.create("invoices")
-    monkeypatch.setattr(main, "dataset_store", datasets)
+    monkeypatch.setattr(deps, "dataset_store", datasets)
     for name, supplier in (("a.pdf", "ACME S.r.l."), ("b.pdf", "Zeta Trasporti"), ("c.pdf", "acme srl")):
         datasets.add_document("invoices", name, b"%PDF-1.4 fake", labels={"supplier_name": supplier})
 

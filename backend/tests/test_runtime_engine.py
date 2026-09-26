@@ -10,6 +10,7 @@ has to be able to say which engine is in use rather than assume.
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.services.lm_studio import parse_selected_runtime, runtime_uses_gpu
 
 
@@ -58,7 +59,7 @@ def test_the_engine_is_reported_over_the_api(monkeypatch) -> None:
     async def fake_selected_runtime(self: object) -> str | None:
         return "llama.cpp-win-x86_64-vulkan-avx2@2.29.1"
 
-    monkeypatch.setattr(main.LMStudioClient, "selected_runtime", fake_selected_runtime)
+    monkeypatch.setattr(deps.LMStudioClient, "selected_runtime", fake_selected_runtime)
     with TestClient(main.app) as client:
         body = client.get("/api/runtime-engine").json()
     assert body["engine"] == "llama.cpp-win-x86_64-vulkan-avx2@2.29.1"
@@ -70,7 +71,7 @@ def test_an_unreadable_engine_is_reported_as_unknown(monkeypatch) -> None:
     async def fake_selected_runtime(self: object) -> str | None:
         return None
 
-    monkeypatch.setattr(main.LMStudioClient, "selected_runtime", fake_selected_runtime)
+    monkeypatch.setattr(deps.LMStudioClient, "selected_runtime", fake_selected_runtime)
     with TestClient(main.app) as client:
         body = client.get("/api/runtime-engine").json()
     assert body["engine"] is None

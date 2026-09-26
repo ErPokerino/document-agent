@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings
 from app.pipeline.definition import PipelineDefinition, PipelineStep, StepKind
 from app.pipeline.store import PipelineStore
@@ -43,7 +44,7 @@ def test_a_pipeline_exists_to_run_before_anyone_creates_one(tmp_path) -> None:
 async def test_extraction_asks_for_a_model_rather_than_failing_obscurely() -> None:
     """With nothing selected the answer has to name what is missing."""
     with pytest.raises(Exception) as raised:
-        await main._ensure_model_ready(AppSettings(model=""))
+        await deps.ensure_model_ready(AppSettings(model=""))
     assert "model" in str(raised.value).lower()
 
 
@@ -60,7 +61,7 @@ async def test_a_pipeline_that_calls_no_model_does_not_wait_for_one() -> None:
         steps=[PipelineStep(kind=StepKind.document_ai_extract, config={"processor_id": "abc"})],
     )
 
-    await main._ensure_model_ready(AppSettings(model=""), custom_extractor)
+    await deps.ensure_model_ready(AppSettings(model=""), custom_extractor)
 
 
 @pytest.mark.anyio
@@ -74,7 +75,7 @@ async def test_a_pipeline_that_does_call_a_model_still_waits_for_one() -> None:
     )
 
     with pytest.raises(Exception) as raised:
-        await main._ensure_model_ready(AppSettings(model=""), with_model)
+        await deps.ensure_model_ready(AppSettings(model=""), with_model)
     assert "model" in str(raised.value).lower()
 
 

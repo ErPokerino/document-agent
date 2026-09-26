@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo, PromptConfiguration
 from app.evaluation.store import EvaluationStore
 from app.services.run_store import RunStore
@@ -31,12 +32,12 @@ class ReadyClient:
 async def test_workspace_cancel_cancels_the_pipeline_task(tmp_path, monkeypatch) -> None:
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="vision-model"))
-    monkeypatch.setattr(main, "settings_store", settings)
-    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
-    monkeypatch.setattr(main, "LMStudioClient", ReadyClient)
-    main.model_runtime_states["vision-model"] = "ready"
-    main.release_model_operation()
-    main.active_document_task = None
+    monkeypatch.setattr(deps, "settings_store", settings)
+    monkeypatch.setattr(deps, "run_store", RunStore(tmp_path / "docuflow.db"))
+    monkeypatch.setattr(deps, "LMStudioClient", ReadyClient)
+    deps.model_runtime_states["vision-model"] = "ready"
+    deps.release_model_operation()
+    deps.active_document_task = None
 
     entered = asyncio.Event()
     interrupted = asyncio.Event()
@@ -50,7 +51,7 @@ async def test_workspace_cancel_cancels_the_pipeline_task(tmp_path, monkeypatch)
                 interrupted.set()
                 raise
 
-    monkeypatch.setattr(main, "_document_pipeline", lambda settings: SlowPipeline())
+    monkeypatch.setattr(deps, "document_pipeline", lambda settings: SlowPipeline())
 
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -69,22 +70,22 @@ async def test_workspace_cancel_cancels_the_pipeline_task(tmp_path, monkeypatch)
     assert cancelled.json() == {"status": "cancelling"}
     assert response.status_code == 499
     assert interrupted.is_set()
-    assert main.active_model_operation is None
-    assert main.active_document_task is None
-    main.model_runtime_states.clear()
+    assert deps.active_model_operation is None
+    assert deps.active_document_task is None
+    deps.model_runtime_states.clear()
 
 
 @pytest.mark.asyncio
 async def test_lab_cancel_cancels_the_current_evaluation_task(tmp_path, monkeypatch) -> None:
     store = EvaluationStore(tmp_path / "docuflow.db")
-    monkeypatch.setattr(main, "evaluation_store", store)
+    monkeypatch.setattr(deps, "evaluation_store", store)
     evaluation_id = store.start(
         dataset="invoices",
         model="vision-model",
         prompts=PromptConfiguration(),
         total_documents=1,
     )
-    main.evaluation_cancelled = asyncio.Event()
+    deps.evaluation_cancelled = asyncio.Event()
     interrupted = asyncio.Event()
 
     async def slow_evaluation() -> None:
@@ -94,7 +95,7 @@ async def test_lab_cancel_cancels_the_current_evaluation_task(tmp_path, monkeypa
             interrupted.set()
             raise
 
-    main.evaluation_task = asyncio.create_task(slow_evaluation())
+    deps.evaluation_task = asyncio.create_task(slow_evaluation())
     await asyncio.sleep(0)
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -103,8 +104,8 @@ async def test_lab_cancel_cancels_the_current_evaluation_task(tmp_path, monkeypa
 
     assert response.status_code == 202
     assert response.json()["status"] == "cancelled"
-    assert main.evaluation_cancelled.is_set()
+    assert deps.evaluation_cancelled.is_set()
     assert interrupted.is_set()
-    assert main.evaluation_task.cancelled()
-    main.evaluation_task = None
-    main.evaluation_cancelled = None
+    assert deps.evaluation_task.cancelled()
+    deps.evaluation_task = None
+    deps.evaluation_cancelled = None

@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app.api import deps
 from app.domain.models import AppSettings, ModelInfo
 from app.pipeline.definition import PipelineDefinition
 from app.pipeline.store import PipelineStore
@@ -27,12 +28,12 @@ class FakeClient:
 def api(tmp_path, monkeypatch):
     settings = SettingsStore(tmp_path / "settings.json")
     settings.write(AppSettings(model="vision-model"))
-    monkeypatch.setattr(main, "settings_store", settings)
+    monkeypatch.setattr(deps, "settings_store", settings)
     pipelines = PipelineStore(tmp_path / "pipelines")
     # The app writes the starting point out at startup; so does this.
     pipelines.seed_default()
-    monkeypatch.setattr(main, "pipeline_store", pipelines)
-    monkeypatch.setattr(main, "LMStudioClient", FakeClient)
+    monkeypatch.setattr(deps, "pipeline_store", pipelines)
+    monkeypatch.setattr(deps, "LMStudioClient", FakeClient)
     with TestClient(main.app) as client:
         yield client
 
@@ -155,8 +156,8 @@ def test_the_selected_pipeline_is_what_actually_runs(api, monkeypatch, tmp_path)
             return {"document_number": FieldExtraction(value="FE02 - 28569", confidence="high")}
 
     monkeypatch.setattr(step_module, "LMStudioClient", FakeExtraction)
-    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
-    main.model_runtime_states["vision-model"] = "ready"
+    monkeypatch.setattr(deps, "run_store", RunStore(tmp_path / "docuflow.db"))
+    deps.model_runtime_states["vision-model"] = "ready"
 
     api.put(
         "/api/pipelines/tidy",
@@ -189,7 +190,7 @@ def test_the_selected_pipeline_is_what_actually_runs(api, monkeypatch, tmp_path)
 
     assert response.status_code == 200, response.text
     assert response.json()["data"]["document_number"]["value"] == "FE02-28569"
-    assert main.run_store.get_run(response.json()["run_id"]).pipeline == "tidy"
+    assert deps.run_store.get_run(response.json()["run_id"]).pipeline == "tidy"
 
 
 def test_a_pipeline_can_be_renamed(api) -> None:
