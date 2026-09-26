@@ -20,7 +20,7 @@ class ReadyClient:
 
 
 class FailingPipeline:
-    async def run(self, context):
+    async def run(self, context, on_step=None):
         raise DocumentAiError("Document AI returned 403: permission denied")
 
 
@@ -56,7 +56,7 @@ async def test_only_a_lost_runtime_takes_the_model_out_of_ready(tmp_path, monkey
     from app.services.lm_studio import LMStudioError
 
     class LosesTheRuntime:
-        async def run(self, context):
+        async def run(self, context, on_step=None):
             raise LMStudioError("LM Studio rejected the request", runtime_lost=lost)
 
     settings = SettingsStore(tmp_path / "settings.json")

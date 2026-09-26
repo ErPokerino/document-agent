@@ -13,13 +13,14 @@ import {
   SlidersHorizontal,
   Workflow,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import { compactExtractorVersion, engineDetail } from "../lib/extraction-engine";
 import { resolveBootstrap } from "../lib/bootstrap";
 import { describeDataFlow } from "../lib/data-flow";
 import { usesModel } from "../lib/pipeline-steps";
+import { formatHash, parseHash, type AppRoute, type AppView } from "../lib/route";
 import { Datasets } from "./datasets";
 import { Entities } from "./entities";
 import { MasterData } from "./master-data";
@@ -40,16 +41,7 @@ import type {
   GeminiKeyStatus,
 } from "../lib/types";
 
-type View =
-  | "workspace"
-  | "extraction"
-  | "pipelines"
-  | "master-data"
-  | "datasets"
-  | "lab"
-  | "llm"
-  | "processors"
-  | "settings";
+type View = AppView;
 const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   workspace: { eyebrow: "Invoice extraction", title: "Document workspace" },
   extraction: { eyebrow: "What comes out of a document", title: "Extraction" },
@@ -63,7 +55,40 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
 };
 
 export default function Home() {
-  const [view, setView] = useState<View>("workspace");
+  const [route, setRoute] = useState<AppRoute>(() =>
+    typeof window === "undefined" ? parseHash("") : parseHash(window.location.hash),
+  );
+  const routeRef = useRef(route);
+  const view = route.view;
+
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+
+  function navigate(next: AppRoute) {
+    const hash = formatHash(next);
+    if (typeof window !== "undefined" && window.location.hash !== hash) window.location.hash = hash;
+    setRoute(next);
+  }
+
+  function setView(nextView: View) {
+    navigate({ ...routeRef.current, view: nextView });
+  }
+
+  useEffect(() => {
+    function onHash() {
+      const parsed = parseHash(window.location.hash);
+      setRoute((current) => ({
+        view: parsed.view,
+        dataset: parsed.view === "datasets" ? parsed.dataset : current.dataset,
+        evaluationId: parsed.view === "lab" ? parsed.evaluationId : current.evaluationId,
+        filters: parsed.view === "lab" ? parsed.filters : current.filters,
+      }));
+    }
+    window.addEventListener("hashchange", onHash);
+    if (!window.location.hash) history.replaceState(null, "", "#/workspace");
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   // Null until the backend answers. There is deliberately no local default:
@@ -360,6 +385,7 @@ export default function Home() {
             lmStudioBlocks={lmStudioBlocks}
             dataFlow={dataFlow}
             pipelineShape={pipelineShape}
+            pipelineKinds={pipelineKinds}
             onOpenLlm={() => setView("llm")}
           />
         ) : !settings || !draftSettings ? (
@@ -406,13 +432,20 @@ export default function Home() {
             settingsError={settingsError}
           />
         ) : view === "datasets" ? (
-          <Datasets savedEntities={configuredEntities} isModelReady={!callsModel || isModelReady} />
+          <Datasets
+            savedEntities={configuredEntities}
+            isModelReady={!callsModel || isModelReady}
+            dataset={route.dataset}
+            onDataset={(name) => navigate({ ...routeRef.current, view: "datasets", dataset: name })}
+          />
         ) : view === "lab" ? (
           <Lab
             settings={settings}
             isModelReady={isModelReady}
             activeModel={activeModel}
             pipelineKinds={pipelineKinds}
+            route={{ evaluationId: route.evaluationId, filters: route.filters }}
+            onRoute={(next) => navigate({ ...routeRef.current, view: "lab", ...next })}
           />
         ) : (
           <LanguageModels

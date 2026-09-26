@@ -25,6 +25,7 @@ COLUMNS = (
     "additional_extractors",
     "provider",
     "pipeline",
+    "fingerprint",
     "steps",
     "execution_profile",
     "parameters",
@@ -82,6 +83,7 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
         "additional_extractors": json.dumps(detail.extraction_engine["additional_processors"]) if (detail.extraction_engine or {}).get("additional_processors") else None,
         "provider": detail.provider,
         "pipeline": detail.pipeline,
+        "fingerprint": detail.fingerprint,
         "steps": " > ".join(detail.steps),
         "execution_profile": (
             detail.execution_profile.profile if detail.execution_profile is not None else None

@@ -579,6 +579,11 @@ class Evaluation(BaseModel):
     layout_pages: int = 0
     custom_extractor_pages: int | None = None
     usage_complete: bool = False
+    # Null when the run was recorded before a fingerprint was computed.
+    fingerprint: str | None = None
+    # The pipeline step in flight while status is running. Empty once the
+    # document that was being scored has finished.
+    current_step: str | None = None
     metrics: Metrics
 
 
@@ -604,10 +609,19 @@ class EvaluationDocumentResult(BaseModel):
     items: list[EvaluationFieldResult]
 
 
+class PipelineActivity(BaseModel):
+    """The step a document request is inside, while that request is open."""
+
+    step: str | None = None
+
+
 class EvaluationDetail(Evaluation):
     prompts: PromptConfiguration
     pipeline_definition: PipelineDefinition | None = None
     has_dataset_snapshot: bool = False
+    # False on a run that did not record the register and the supplier rules.
+    # A retry of that run uses whatever those tables hold today.
+    has_register_snapshot: bool = False
     documents: list[EvaluationDocumentResult]
 
 

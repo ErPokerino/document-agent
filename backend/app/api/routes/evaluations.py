@@ -8,6 +8,7 @@ from fastapi import HTTPException, Query, Response, APIRouter
 
 from app.api import deps
 from app.domain.models import Evaluation, EvaluationDetail, EvaluationRequest
+from app.evaluation.fingerprint import configuration_fingerprint, rule_record, rules_from_records
 from app.evaluation.export import evaluation_to_csv
 from app.pipeline.compiler import PipelineError, build_steps
 from app.pipeline.definition import uses_model
@@ -37,6 +38,7 @@ async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
         prompts=detail.prompts,
         pipeline_definition=detail.pipeline_definition,
         has_dataset_snapshot=detail.dataset_snapshot is not None,
+        has_register_snapshot=detail.register_snapshot is not None,
         documents=[asdict(document) for document in detail.documents],
     )
 
@@ -108,8 +110,18 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
             identity = await resolve_extractor(client, config["processor_id"])
             if identity["version"]:
                 config["processor_id"] = identity["processor_id"] + "/processorVersions/" + identity["version"]
+    register_rows = deps.master_data_store.rows("suppliers")
+    rule_list = deps.supplier_rule_store.all()
+    rule_records = [rule_record(rule) for rule in rule_list]
     try:
-        steps = build_steps(pipeline_definition, prompts=settings.prompts, entities=settings.prompts.entities, gcp=settings.gcp, master_data=deps.master_data_store, supplier_rules=deps.supplier_rule_store)
+        steps = build_steps(
+            pipeline_definition,
+            prompts=settings.prompts,
+            entities=settings.prompts.entities,
+            gcp=settings.gcp,
+            register_rows=register_rows,
+            frozen_rules=rule_list,
+        )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     extraction_engine = await deps.lab_extractor(settings, pipeline_definition)
@@ -128,6 +140,14 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     selected_model = await deps.ensure_model_ready(settings, pipeline_definition)
     execution_profile = deps.execution_profile(settings, pipeline_definition, selected_model)
     recorded_model, recorded_provider = deps.recorded_model(settings, pipeline_definition)
+    fingerprint = configuration_fingerprint(
+        dataset_snapshot=dataset_snapshot,
+        prompts=settings.prompts,
+        pipeline=pipeline_definition,
+        execution_profile=execution_profile,
+        register_rows=register_rows,
+        rules=rule_records,
+    )
 
     deps.claim_model_operation("evaluating")
     evaluation_id = deps.evaluation_store.start(
@@ -143,6 +163,9 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         execution_profile=execution_profile,
         dataset_snapshot=dataset_snapshot,
         extraction_engine=extraction_engine,
+        fingerprint=fingerprint,
+        register_snapshot=register_rows,
+        rules_snapshot=rule_records,
     )
     deps.evaluation_cancelled = asyncio.Event()
 
@@ -223,14 +246,27 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
         )
         page_limit = detail.max_pages or definition.page_limit
         definition.page_limit = page_limit
-        steps = build_steps(
-            definition,
-            prompts=detail.prompts,
-            entities=detail.prompts.entities,
-            gcp=settings.gcp,
-            master_data=deps.master_data_store,
-            supplier_rules=deps.supplier_rule_store,
-        )
+        # A run that recorded the register replays that copy. A run from
+        # before the snapshot existed has nothing to replay, so it uses the
+        # tables as they are now.
+        if detail.register_snapshot is not None and detail.rules_snapshot is not None:
+            steps = build_steps(
+                definition,
+                prompts=detail.prompts,
+                entities=detail.prompts.entities,
+                gcp=settings.gcp,
+                register_rows=detail.register_snapshot,
+                frozen_rules=rules_from_records(detail.rules_snapshot),
+            )
+        else:
+            steps = build_steps(
+                definition,
+                prompts=detail.prompts,
+                entities=detail.prompts.entities,
+                gcp=settings.gcp,
+                master_data=deps.master_data_store,
+                supplier_rules=deps.supplier_rule_store,
+            )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(
             status_code=409,

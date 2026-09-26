@@ -114,15 +114,8 @@ backend.
 
 ### Splitting main.py into routers
 
-Fifty-eight endpoints in one 1,750-line module. They are grouped by subject and
-the groups are now marked, so the file is navigable, but changing one endpoint
-still means loading all of it — which costs an agent its context and makes two
-people working in different areas collide in the same file.
-
-`APIRouter` per section, along the boundaries the markers already draw. Deferred
-rather than dismissed: it touches every endpoint at once, and this repository
-has more than one agent working in it, so it wants a moment when nothing else is
-in flight.
+Done. `main.py` mounts one router per section under `backend/app/api/routes`,
+and the shared stores and helpers live in `backend/app/api/deps.py`.
 
 ### Pipeline graph in the UI
 
@@ -136,19 +129,11 @@ These are proposals awaiting prioritisation, not implemented features.
 
 ### Native PDF text as a pipeline reader
 
-Make this an explicit `read_pdf_text` step in the same first layer as rendering,
-OCR and Layout. It consumes the PDF within the pipeline page limit and produces
-page-delimited text, optionally normalized word boxes, plus per-page coverage
-signals. It does not extract entities itself. An LLM or deterministic reader can
-consume its text through the existing artifact contract.
-
-Start with a standalone reader to measure native PDFs separately. Empty or
-unusable text must be visible, not passed off as a successful reading. Handling
-mixed scanned/native files needs an explicit fallback policy and per-page
-provenance, not an implicit Google call. Native text is not automatically correct:
-reading order, stale embedded OCR, tables and missing fonts need evaluation.
-Measure field accuracy, runtime and API usage on matched dataset snapshots before
-making it a default. This is deliberately left for a later development cycle.
+Done as the `read_pdf_text` step. A document with no embedded text on any page
+it may read is refused, and a page without text is named in the text the model
+is given. It is a reader to measure against OCR, not a default: reading order,
+stale embedded OCR and tables can all differ from what the page shows. Mixed
+scanned and native files still have no automatic fallback.
 
 ### Further Lab comparison work
 
@@ -160,9 +145,10 @@ and Pareto presentation are documented in README. Remaining work:
 - Apply field exclusions consistently to thresholds, Runs and Analytics.
   Accuracy thresholds currently use the unadjusted score, and Analytics does
   not expose the exclusion control available in Runs.
-- Identify a configuration by dataset/input hashes, prompt/schema, complete
-  pipeline and model profile. Current chart grouping separates dataset names
-  and recorded Document AI bindings/versions, but not all input or configuration revisions.
+- Done: a configuration fingerprint of dataset hashes and labels, prompts,
+  the complete pipeline, the model profile, the supplier register and supplier
+  rules. Analytics groups on it. Runs from before the column existed stay on
+  the coarser grouping.
 - Prefer paired comparisons on shared document hashes; show sample size,
   completion coverage and label changes. Avoid treating changes in the scored
   field set as evidence of better extraction.

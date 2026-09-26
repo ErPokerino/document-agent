@@ -31,6 +31,19 @@ const free = () => null;
 
 // -- one point per approach ---------------------------------------------------
 
+test("runs that share a fingerprint are one approach", () => {
+  const points = approachPoints(
+    [
+      run({ fingerprint: "abc", pipeline: "Vision" }),
+      run({ id: 2, fingerprint: "abc", pipeline: "Renamed" }),
+      run({ id: 3, fingerprint: "def", pipeline: "Vision" }),
+    ],
+    free,
+  );
+  assert.equal(points.length, 2);
+  assert.equal(points.find((point) => point.key === "abc").runs, 2);
+});
+
 test("each model and pipeline pair becomes one point", () => {
   const points = approachPoints(
     [run({ model: "A", pipeline: "Vision" }), run({ model: "A", pipeline: "OCR" })],

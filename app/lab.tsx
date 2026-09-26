@@ -39,12 +39,11 @@ import { labRunTarget } from "../lib/lab-target";
 import { useLatest } from "../lib/latest";
 import { usesModel } from "../lib/pipeline-steps";
 import {
-  emptyFilters,
   filterEvaluations,
   type EvaluationFilters,
 } from "../lib/run-filters";
 import { runsToCsv } from "../lib/runs-csv";
-import { stepLabel } from "../lib/pipeline-editor";
+import { progressLabel, stepLabel } from "../lib/pipeline-editor";
 import { runWarning } from "../lib/run-warning";
 import { entitiesIn, scoreWithout } from "../lib/scoring-view";
 import { nextSort, sortEvaluations, type Sort, type SortKey } from "../lib/run-sort";
@@ -59,11 +58,15 @@ import type {
 } from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
 
+type LabRoute = { evaluationId: number | null; filters: EvaluationFilters };
+
 type Props = {
   settings: AppSettings;
   isModelReady: boolean;
   activeModel: ModelInfo | undefined;
   pipelineKinds: string[];
+  route: LabRoute;
+  onRoute: (next: LabRoute) => void;
 };
 
 function executionProfileLabel(profile: ModelExecutionProfile): string {
@@ -74,14 +77,15 @@ function executionProfileLabel(profile: ModelExecutionProfile): string {
 }
 
 /** Run the configured extraction over a dataset and score what comes back. */
-export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Props) {
+export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route, onRoute }: Props) {
   // A pipeline that never asks a model anything runs the same whatever is
   // loaded, so waiting for one would be a delay that buys nothing.
   const modelBlocks = usesModel(pipelineKinds) && !isModelReady;
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
-  const [openEvaluation, setOpenEvaluation] = useState<EvaluationDetail | null>(null);
+  const [loadedRun, setLoadedRun] = useState<EvaluationDetail | null>(null);
+  const openEvaluation = loadedRun && loadedRun.id === route.evaluationId ? loadedRun : null;
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [engine, setEngine] = useState<import("../lib/types").ExtractionEngine | null>(null);
@@ -90,7 +94,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
     api.extractionEngine().then(value => { if (current) setEngine(value); }).catch(() => { if (current) setEngine(null); });
     return () => { current = false; };
   }, [settings]);
-  const [filters, setFilters] = useState<EvaluationFilters>(emptyFilters);
+  const filters = route.filters;
   // Two ways of reading the same runs. Both were on one page and it grew
   // taller than anything anyone would scroll.
   const [view, setView] = useState<"runs" | "analytics">("runs");
@@ -192,7 +196,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       if (openId === runningId) {
         const detailIsCurrent = detailRequests.begin();
         void api.evaluation(runningId)
-          .then((detail) => { if (detailIsCurrent()) setOpenEvaluation(detail); })
+          .then((detail) => { if (detailIsCurrent()) setLoadedRun(detail); })
           .catch(() => undefined);
       }
     }, 2000);
@@ -207,29 +211,47 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
     });
   }
 
+  function publish(evaluationId: number | null, nextFilters: EvaluationFilters = filters) {
+    if (
+      evaluationId === route.evaluationId
+      && JSON.stringify(nextFilters) === JSON.stringify(route.filters)
+    ) return;
+    onRoute({ evaluationId, filters: nextFilters });
+  }
+
   function openRun(evaluationId: number) {
-    const isCurrent = detailRequests.begin();
-    void guard(async () => {
-      const detail = await api.evaluation(evaluationId);
-      if (!isCurrent()) return;
-      // Expanded rows and the name filter belong to one run's documents.
-      if (detail.id !== openEvaluation?.id) {
-        setExpanded(new Set());
-        setRunDocumentQuery("");
-      }
-      setOpenEvaluation(detail);
-    });
+    publish(evaluationId);
   }
 
   function closeRun() {
-    detailRequests.invalidate();
-    setOpenEvaluation(null);
+    publish(null);
   }
+
+  // The address bar is what opens a run. A click only writes the hash, and
+  // the back button writes it too, so both arrive here.
+  useEffect(() => {
+    if (route.evaluationId === null) {
+      detailRequests.invalidate();
+      return;
+    }
+    const isCurrent = detailRequests.begin();
+    void api.evaluation(route.evaluationId)
+      .then((detail) => {
+        if (!isCurrent()) return;
+        setExpanded(new Set());
+        setRunDocumentQuery("");
+        setLoadedRun(detail);
+      })
+      .catch((cause) => {
+        if (!isCurrent()) return;
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+  }, [route.evaluationId, detailRequests]);
 
   async function refreshOpenRun(evaluationId: number) {
     const isCurrent = detailRequests.begin();
     const detail = await api.evaluation(evaluationId);
-    if (isCurrent()) setOpenEvaluation(detail);
+    if (isCurrent()) setLoadedRun(detail);
   }
 
   async function guard(action: () => Promise<void>) {
@@ -314,6 +336,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         <LoaderCircle className="spin" size={15} />
         <span>
           {running.dataset} · {running.succeeded_documents} of {running.total_documents} documents
+          {running.current_step ? ` · ${progressLabel(running.current_step)}` : ""}
           {running.failed_documents > 0 && ` · ${running.failed_documents} failed`}
         </span>
         <span className="run-progress-bar"><i style={{ width: `${(running.completed_documents / Math.max(running.total_documents, 1)) * 100}%` }} /></span>
@@ -342,7 +365,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       </div>
         </div>
 
-        <RunFiltersBar evaluations={evaluations} filters={filters} setFilters={value => { setFilters(value); setPage(1); }}>
+        <RunFiltersBar evaluations={evaluations} filters={filters} setFilters={value => { setPage(1); publish(route.evaluationId, value); }}>
           {view === "runs" && <button
             type="button"
             className="secondary-button small"
@@ -517,6 +540,11 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         )}
         <span className="pages-tag">{openEvaluation.max_pages || "?"} pages per extraction</span>
         <span className="pages-tag">{openEvaluation.prompts.entities.length} fields</span>
+        {openEvaluation.fingerprint && (
+          <span className="pages-tag" title="Documents, labels, prompts, pipeline, model profile, register and supplier rules">
+            {openEvaluation.fingerprint.slice(0, 8)}
+          </span>
+        )}
         {openEvaluation.execution_profile && (
           <span className="pages-tag" title="The model controls recorded when this run started">
             {executionProfileLabel(openEvaluation.execution_profile)}
@@ -560,9 +588,11 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
               .
             </strong>{" "}
             The accuracy above covers only the {openEvaluation.succeeded_documents} documents that were scored.
-            {openEvaluation.has_dataset_snapshot
-              ? " A retry uses the original PDFs, labels, prompts, pipeline, model profile and page limit. External processors and registers may have changed."
-              : " This older run has no input snapshot and cannot be retried."}
+            {openEvaluation.has_register_snapshot
+              ? " A retry uses the original PDFs, labels, prompts, pipeline, model profile, page limit, register and supplier rules."
+              : openEvaluation.has_dataset_snapshot
+                ? " A retry uses the original PDFs, labels, prompts, pipeline, model profile and page limit. This run did not record the register or the supplier rules, so today's are used."
+                : " This older run has no input snapshot and cannot be retried."}
           </span>
           <button
             className="secondary-button"

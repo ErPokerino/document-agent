@@ -366,3 +366,37 @@ async def test_a_derived_entity_a_step_fills_is_left_to_that_step(tmp_path, monk
     result = await DocumentPipeline(steps).run(context)
 
     assert result.artifacts["extraction"]["id_subject"].value == "S0001"
+
+
+def test_a_lookup_can_be_built_from_a_frozen_register() -> None:
+    """The rows compiled into the step are the ones the run recorded, not the live table."""
+    from app.pipeline.steps import ApplySupplierRules, LookUpInMasterData
+    from app.services.supplier_rules import SupplierRule
+
+    definition = PipelineDefinition(
+        name="frozen",
+        steps=[
+            PipelineStep(kind=StepKind.render_pages),
+            PipelineStep(kind=StepKind.llm_extract),
+            PipelineStep(
+                kind=StepKind.master_data_lookup,
+                config={"source_entity": "supplier_name", "target_entity": "id_subject"},
+            ),
+            PipelineStep(kind=StepKind.supplier_rules),
+        ],
+    )
+    rows = [{"id_subject": "S1", "supplier_name": "ACME"}]
+    rules = [SupplierRule(id_subject="S1", entity="currency", kind="fixed", value="EUR")]
+
+    steps = build_steps(
+        definition,
+        prompts=PROMPTS,
+        entities=ENTITIES,
+        register_rows=rows,
+        frozen_rules=rules,
+    )
+
+    lookup = next(step for step in steps if isinstance(step, LookUpInMasterData))
+    applied = next(step for step in steps if isinstance(step, ApplySupplierRules))
+    assert lookup.master_data.rows("suppliers") == rows
+    assert applied.rules == rules

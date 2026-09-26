@@ -11,7 +11,7 @@ type Props = {
   locations: FieldLocation[];
   /** The field the reader is looking at, if any. */
   active: string | null;
-  onActive: (entity: string | null) => void;
+  onActive: (entity: string) => void;
 };
 
 /**
@@ -60,10 +60,8 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
               }}
               title={location.entity}
               aria-label={`${location.entity} on page ${location.page + 1}`}
-              onMouseEnter={() => onActive(location.entity)}
-              onMouseLeave={() => onActive(null)}
+              onClick={() => onActive(location.entity)}
               onFocus={() => onActive(location.entity)}
-              onBlur={() => onActive(null)}
             >
               <span>{location.entity}</span>
             </button>
@@ -73,7 +71,7 @@ export function PageHighlight({ runId, locations, active, onActive }: Props) {
       <div className="highlight-note">
         <span>
           {pages.length > 1 && `Page ${shown + 1} of ${pages.length} with values. `}
-          Hover a field to pick it out. A field with no box was not traced to a spot on the page.
+          The box follows the field in the list. A field with no box was not traced to a spot on the page.
         </span>
         <span className="highlight-zoom">
           <button type="button" onClick={() => step(-0.25)} disabled={zoom <= 0.5} aria-label="Zoom out"><Minus size={12} /></button>

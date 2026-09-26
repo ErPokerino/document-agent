@@ -192,3 +192,10 @@ const STEP_LABELS: Record<StepKind, string> = {
 export function stepLabel(kind: string): string {
   return STEP_LABELS[kind as StepKind] ?? kind;
 }
+
+/** What to show while a document is inside a step. These two are not catalogue entries. */
+export function progressLabel(kind: string): string {
+  if (kind === "inspect_pdf") return "Reading the PDF";
+  if (kind === "mark_unfilled") return "Marking empty fields";
+  return stepLabel(kind);
+}

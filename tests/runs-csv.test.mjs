@@ -45,7 +45,7 @@ const rows = (csv) => csv.trim().split("\n").map((line) => line.split(","));
 test("one row per run, with the columns an analysis needs", () => {
   const [header, first] = rows(runsToCsv([run()], null));
 
-  assert.deepEqual(header.slice(0, 6), ["run_id", "created_at", "dataset", "pipeline", "model", "runs_on"]);
+  assert.deepEqual(header.slice(0, 7), ["run_id", "created_at", "dataset", "pipeline", "fingerprint", "model", "runs_on"]);
   assert.ok(header.includes("status"));
   assert.equal(first[0], "16");
   assert.equal(first[3], "OCR then model");

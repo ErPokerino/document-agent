@@ -105,6 +105,8 @@ export type Evaluation = {
   layout_pages: number;
   custom_extractor_pages: number | null;
   usage_complete: boolean;
+  fingerprint: string | null;
+  current_step: string | null;
   metrics: Metrics;
 };
 
@@ -136,10 +138,13 @@ export type EvaluationDetail = {
   layout_pages: number;
   custom_extractor_pages: number | null;
   usage_complete: boolean;
+  fingerprint: string | null;
+  current_step: string | null;
   metrics: Metrics;
   prompts: PromptConfiguration;
   pipeline_definition: PipelineDefinition | null;
   has_dataset_snapshot: boolean;
+  has_register_snapshot: boolean;
   documents: EvaluationDocumentResult[];
 };
 
@@ -396,6 +401,10 @@ export type ModelLoadResponse = {
 export type ModelPricing = {
   input_per_million: number | null;
   output_per_million: number | null;
+};
+
+export type PipelineActivity = {
+  step: string | null;
 };
 
 export type PipelineDefinition = {

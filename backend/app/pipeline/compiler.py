@@ -31,8 +31,8 @@ from app.pipeline.steps import (
     RefineWithRegex,
     RenderPages,
 )
-from app.services.master_data import TABLES, MasterDataStore
-from app.services.supplier_rules import SupplierRuleStore
+from app.services.master_data import TABLES, MasterDataStore, UnknownTable
+from app.services.supplier_rules import SupplierRule, SupplierRuleStore
 from app.services.similarity import ALGORITHMS, DEFAULT_ALGORITHM
 
 
@@ -41,6 +41,27 @@ DEFAULT_RENDER_SCALE = 1.35
 
 class PipelineError(ValueError):
     """The pipeline cannot be run as written."""
+
+
+class FrozenRegister:
+    """The supplier rows a run started with, instead of the live table.
+
+    A retry that looked up today's register would score a different experiment
+    under the same run id. `rows` ignores the search arguments the live store
+    accepts: the snapshot is already the whole table.
+    """
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = [dict(row) for row in rows]
+
+    def table(self, key: str):
+        if key not in TABLES:
+            raise UnknownTable(f"No reference table named {key!r}")
+        return TABLES[key]
+
+    def rows(self, table_key: str, **_: Any) -> list[dict[str, Any]]:
+        self.table(table_key)
+        return [dict(row) for row in self._rows]
 
 
 def _rules(config: dict[str, Any]) -> list[RegexRule]:
@@ -83,6 +104,8 @@ def _build_one(
     gcp: GcpSettings,
     master_data: MasterDataStore | None,
     supplier_rules: SupplierRuleStore | None,
+    register_rows: list[dict[str, Any]] | None,
+    frozen_rules: list[SupplierRule] | None,
 ) -> Any:
     from app.services.processors import binding, KINDS
     config = binding(step, gcp) if step.kind.value in KINDS else step.config
@@ -117,19 +140,27 @@ def _build_one(
             project_id=config.get("project_id"), location=config.get("location"),
         )
     if step.kind is StepKind.supplier_rules:
-        if supplier_rules is None:
+        if frozen_rules is not None:
+            applicable = frozen_rules
+        elif supplier_rules is None:
             raise PipelineError("No supplier rules are available to apply")
+        else:
+            applicable = supplier_rules.all()
         return ApplySupplierRules(
-            supplier_rules.all(),
+            applicable,
             prompts,
             str(config.get("source_entity") or "id_subject"),
         )
     if step.kind is StepKind.master_data_lookup:
-        if master_data is None:
+        if register_rows is not None:
+            source = FrozenRegister(register_rows)
+        elif master_data is None:
             raise PipelineError("No master data is available to look anything up in")
+        else:
+            source = master_data
         return LookUpInMasterData(
             entities=entities,
-            master_data=master_data,
+            master_data=source,
             table=_table(config),
             source_entity=_required_entity(config, "source_entity"),
             target_entity=_required_entity(config, "target_entity"),
@@ -147,6 +178,8 @@ def build_steps(
     gcp: GcpSettings | None = None,
     master_data: MasterDataStore | None = None,
     supplier_rules: SupplierRuleStore | None = None,
+    register_rows: list[dict[str, Any]] | None = None,
+    frozen_rules: list[SupplierRule] | None = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
     problems = describe_problems(definition)
@@ -164,6 +197,8 @@ def build_steps(
                     gcp=gcp or GcpSettings(),
                     master_data=master_data,
                     supplier_rules=supplier_rules,
+                    register_rows=register_rows,
+                    frozen_rules=frozen_rules,
                 )
             )
         except (ValidationError, ValueError) as exc:

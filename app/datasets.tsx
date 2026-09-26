@@ -31,12 +31,18 @@ import { DocumentPreview, type PreviewTarget } from "./document-preview";
 type Props = {
   savedEntities: EntityDefinition[];
   isModelReady: boolean;
+  dataset?: string | null;
+  onDataset?: (name: string | null) => void;
 };
 
 /** Documents with known correct values: the yardstick a test run is measured against. */
-export function Datasets({ savedEntities, isModelReady }: Props) {
+export function Datasets({ savedEntities, isModelReady, dataset = null, onDataset }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
+  const selectedDataset = dataset;
+
+  function chooseDataset(name: string | null) {
+    onDataset?.(name);
+  }
   const [documents, setDocuments] = useState<DatasetDocument[]>([]);
   const [newDatasetName, setNewDatasetName] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -258,7 +264,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
               void guard(async () => {
                 const created = await api.importDataset(picked);
                 await refreshDatasets();
-                setSelectedDataset(created.name);
+                chooseDataset(created.name);
                 closeLabels();
               });
             }}
@@ -281,7 +287,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
                   if (!next || next === dataset.name) { setRenaming(null); return; }
                   void guard(async () => {
                     await api.renameDataset(dataset.name, next);
-                    if (selectedDataset === dataset.name) setSelectedDataset(next);
+                    if (selectedDataset === dataset.name) chooseDataset(next);
                     setRenaming(null);
                     await refreshDatasets();
                   });
@@ -302,7 +308,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
                   onClick={() => guard(async () => {
                     await api.deleteDataset(dataset.name);
                     if (selectedDataset === dataset.name) {
-                      setSelectedDataset(null);
+                      chooseDataset(null);
                       setDocuments([]);
                       closeLabels();
                     }
@@ -315,7 +321,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
               </div>
             ) : (
               <>
-                <button className="dataset-pick" onClick={() => { setSelectedDataset(dataset.name); closeLabels(); setPickedRuns(new Set()); }}>
+                <button className="dataset-pick" onClick={() => { chooseDataset(dataset.name); closeLabels(); setPickedRuns(new Set()); }}>
                   <span className="radio">{selectedDataset === dataset.name && <span />}</span>
                   <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
                 </button>

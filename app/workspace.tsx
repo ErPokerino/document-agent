@@ -22,11 +22,12 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
-import { ChangeEvent, DragEvent, Fragment, useEffect, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, Fragment, KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import type { DataFlow } from "../lib/data-flow";
 import { formatBytes } from "../lib/format";
+import { progressLabel } from "../lib/pipeline-editor";
 import { buildReviewedExport } from "../lib/review";
 import type { AppSettings, Confidence, EntityDefinition, EntityFormat, ExtractionResponse } from "../lib/types";
 import { PageHighlight } from "./page-highlight";
@@ -258,6 +259,7 @@ type Props = {
   lmStudioBlocks: boolean;
   dataFlow: DataFlow;
   pipelineShape: string[];
+  pipelineKinds: string[];
   onOpenLlm: () => void;
 };
 
@@ -271,6 +273,7 @@ export function Workspace({
   lmStudioBlocks,
   dataFlow,
   pipelineShape,
+  pipelineKinds,
   onOpenLlm,
 }: Props) {
   const {
@@ -287,6 +290,10 @@ export function Workspace({
   // Which field the reader is pointing at, so the list and the page image
   // can highlight the same one from either side.
   const [locatedField, setLocatedField] = useState<string | null>(null);
+  const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
+  const [ackRun, setAckRun] = useState<number | null>(null);
+  const [polledStep, setPolledStep] = useState<string | null>(null);
+  const fieldRefs = useRef<Record<string, HTMLInputElement | null>>({});
   // The preview shows the document or the values found on it, in the same
   // place. Two copies of one PDF down the page was the first attempt.
   const [previewMode, setPreviewMode] = useState<"document" | "highlights">("highlights");
@@ -298,8 +305,72 @@ export function Workspace({
   // does not leave a gap in the numbering.
   const firstStepNumber = callsModel ? 2 : 1;
   const unresolvedWarningCount = result
-    ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name)).length
+    ? Object.entries(result.data).filter(([name, field]) => field.warning && !editedFields.has(name) && !acknowledged.has(name)).length
     : 0;
+
+  const runId = result?.run_id ?? null;
+  if (ackRun !== runId) {
+    setAckRun(runId);
+    setAcknowledged(new Set());
+  }
+  const activeStep = processState === "processing" ? polledStep : null;
+
+  // Lab's poll reports documents. A step changes inside one document, so the
+  // strip asks on its own while this document is being processed.
+  useEffect(() => {
+    if (processState !== "processing") return;
+    let current = true;
+    const timer = window.setInterval(() => {
+      void api.activity()
+        .then((activity) => { if (current) setPolledStep(activity.step); })
+        .catch(() => undefined);
+    }, 500);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, [processState]);
+
+  function focusField(name: string) {
+    setLocatedField(name);
+    fieldRefs.current[name]?.focus();
+  }
+
+  function moveField(delta: number) {
+    const names = configuredEntities.map((entity) => entity.name);
+    if (!names.length) return;
+    const index = locatedField ? names.indexOf(locatedField) : -1;
+    const next = names[Math.min(names.length - 1, Math.max(0, index + delta))];
+    focusField(next);
+  }
+
+  function onReviewKey(event: KeyboardEvent<HTMLInputElement>) {
+    const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+    const down = event.key === "ArrowDown" || (!typing && event.key === "j");
+    const up = event.key === "ArrowUp" || (!typing && event.key === "k");
+    if (down || up) {
+      event.preventDefault();
+      moveField(down ? 1 : -1);
+      return;
+    }
+    if (event.key === "Enter" && locatedField) {
+      event.preventDefault();
+      const name = locatedField;
+      setAcknowledged((current) => new Set(current).add(name));
+      moveField(1);
+      return;
+    }
+    if (event.key === "Escape" && locatedField) {
+      event.preventDefault();
+      const name = locatedField;
+      if (editedFields.has(name)) workspace.revertReviewValue(name);
+      setAcknowledged((current) => {
+        const next = new Set(current);
+        next.delete(name);
+        return next;
+      });
+    }
+  }
   const canHighlight = Boolean(result?.run_id) && (result?.locations.length ?? 0) > 0;
 
   function handleFileInput(event: ChangeEvent<HTMLInputElement>) {
@@ -325,7 +396,7 @@ export function Workspace({
           {(processState === "processing" || processState === "cancelling") && <LoaderCircle className="spin" size={10} />}
           {processState === "complete" && unresolvedWarningCount === 0 && <Check size={10} />}
           {unresolvedWarningCount > 0 && <AlertCircle size={10} />}
-          {unresolvedWarningCount > 0 ? "Review needed" : processState === "complete" ? "Complete" : processState === "cancelling" ? "Stopping" : processState === "processing" ? "Processing" : "Waiting"}
+          {unresolvedWarningCount > 0 ? "Review needed" : processState === "complete" ? "Complete" : processState === "cancelling" ? "Stopping" : processState === "processing" ? (activeStep ? progressLabel(activeStep) : "Processing") : "Waiting"}
         </span>
       </div>
 
@@ -354,17 +425,18 @@ export function Workspace({
               : "text";
           return (
             <div
-              className={`field-row ${field?.warning && !edited ? "has-warning" : ""} ${locatedField === entity.name ? "located" : ""}`}
+              className={`field-row ${field?.warning && !edited && !acknowledged.has(entity.name) ? "has-warning" : ""} ${locatedField === entity.name ? "located" : ""}`}
               key={entity.name}
-              onMouseEnter={() => setLocatedField(entity.name)}
-              onMouseLeave={() => setLocatedField(null)}
+              onFocus={() => setLocatedField(entity.name)}
             >
               <div className="field-meta"><span>{prettyName(entity.name)}</span><code>{entity.name}</code></div>
               <div className={`field-value ${editableValue ? "populated" : ""}`}>
                 {field ? (
                   <div className="editable-value">
                     <input
+                      ref={(node) => { fieldRefs.current[entity.name] = node; }}
                       aria-label={`Edit ${prettyName(entity.name)}`}
+                      onKeyDown={onReviewKey}
                       type={inputType}
                       step={entity.format === "integer" ? "1" : entity.format === "decimal" ? "any" : undefined}
                       maxLength={entity.format === "currency" ? 3 : undefined}
@@ -503,7 +575,7 @@ export function Workspace({
                     runId={result!.run_id!}
                     locations={result!.locations}
                     active={locatedField}
-                    onActive={setLocatedField}
+                    onActive={focusField}
                   />
                 ) : (
                   <iframe src={previewUrl} title={`Preview of ${file.name}`} />
@@ -524,14 +596,24 @@ export function Workspace({
           </>
         )}
         <div className={`pipeline-step ${file ? "done" : ""}`}><b>{file ? <Check size={10} /> : firstStepNumber}</b> PDF input</div>
-        {pipelineShape.map((label, index) => (
-          <Fragment key={`${label}-${index}`}>
-            <ChevronRight size={13} />
-            <div className={`pipeline-step ${processState === "processing" ? "active pulse" : result ? "done" : ""}`}>
-              <b>{result ? <Check size={10} /> : firstStepNumber + index + 1}</b> {label}
-            </div>
-          </Fragment>
-        ))}
+        {pipelineShape.map((label, index) => {
+          const activeIndex = pipelineKinds.indexOf(activeStep ?? "");
+          const stepClass = result
+            ? "done"
+            : processState === "processing" && activeIndex === index
+              ? "active pulse"
+              : processState === "processing" && activeIndex > index
+                ? "done"
+                : "";
+          return (
+            <Fragment key={`${label}-${index}`}>
+              <ChevronRight size={13} />
+              <div className={`pipeline-step ${stepClass}`}>
+                <b>{stepClass === "done" ? <Check size={10} /> : firstStepNumber + index + 1}</b> {label}
+              </div>
+            </Fragment>
+          );
+        })}
         <ChevronRight size={13} />
         <div className={`pipeline-step ${result ? "done" : ""}`}><b>{result ? <Check size={10} /> : firstStepNumber + pipelineShape.length + 1}</b> JSON validation</div>
       </footer>

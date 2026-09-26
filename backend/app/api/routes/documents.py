@@ -6,7 +6,8 @@ import time
 from fastapi import File, HTTPException, UploadFile, APIRouter
 
 from app.api import deps
-from app.domain.models import ExtractionResponse, ProcessingInfo
+from app.domain.models import ExtractionResponse, PipelineActivity, ProcessingInfo
+from app.pipeline.engine import step_name
 from app.services.lm_studio import LMStudioError
 
 router = APIRouter()
@@ -39,7 +40,10 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             pipeline = deps.document_pipeline(settings)
             started = time.perf_counter()
             try:
-                result = await pipeline.run(context)
+                result = await pipeline.run(
+                    context,
+                    on_step=lambda step: deps.pipeline_activity.__setitem__("step", step_name(step)),
+                )
             except asyncio.CancelledError:
                 # Cancelling the task closes an in-flight httpx request. LM
                 # Studio sees the disconnect and stops generation; no later
@@ -89,6 +93,12 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
             )
         finally:
             deps.active_document_task = None
+            deps.pipeline_activity["step"] = None
+
+
+@router.get("/api/activity", response_model=PipelineActivity)
+async def pipeline_activity() -> PipelineActivity:
+    return PipelineActivity(step=deps.pipeline_activity["step"])
 
 
 @router.post("/api/documents/extract/cancel", status_code=202)

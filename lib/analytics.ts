@@ -73,8 +73,16 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
     // comparison against OCR needs to be able to tell apart.
     if (evaluation.steps?.includes("read_pdf_text")) readings.unshift("Native PDF text");
     const baseDetail = engineDetail(evaluation);
-    const detail = readings.length ? [baseDetail !== engineLabel(evaluation) ? baseDetail : "", ...readings].filter(Boolean).join("; ") : baseDetail;
-    const key = `${processorKey}\u0000${engineKey(evaluation)}\u0000${evaluation.pipeline}\u0000${evaluation.dataset}`;
+    let detail = readings.length ? [baseDetail !== engineLabel(evaluation) ? baseDetail : "", ...readings].filter(Boolean).join("; ") : baseDetail;
+    // A fingerprint is the whole configuration: documents, labels, prompts,
+    // pipeline, model profile, register and rules. Runs from before it
+    // existed still group by the coarser key.
+    const key = evaluation.fingerprint
+      ? evaluation.fingerprint
+      : `${processorKey}\u0000${engineKey(evaluation)}\u0000${evaluation.pipeline}\u0000${evaluation.dataset}`;
+    if (evaluation.fingerprint) {
+      detail = [`configuration ${evaluation.fingerprint.slice(0, 8)}`, detail].filter(Boolean).join("; ");
+    }
     const group =
       grouped.get(key) ??
       { model: engineLabel(evaluation), pipeline: evaluation.pipeline, dataset: evaluation.dataset, detail, accuracy: [], seconds: [], cost: [], tokens: [] };

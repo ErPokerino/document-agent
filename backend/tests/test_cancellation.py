@@ -43,7 +43,7 @@ async def test_workspace_cancel_cancels_the_pipeline_task(tmp_path, monkeypatch)
     interrupted = asyncio.Event()
 
     class SlowPipeline:
-        async def run(self, context):
+        async def run(self, context, on_step=None):
             entered.set()
             try:
                 await asyncio.Event().wait()

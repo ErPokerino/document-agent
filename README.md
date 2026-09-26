@@ -341,12 +341,12 @@ strict comparison use the same GGUF quantization, LM Studio and runtime-backend
 versions, driver family and pipeline snapshot; then compare the stored profile
 and CSV columns before attributing a score change to prompt quality.
 
-New Lab snapshots freeze the pipeline definition, model controls, PDF inputs
-and labels. Custom Extractor revisions are also pinned when processor metadata
-is available. Other remote processors, Master Data and supplier rules remain
-mutable. A retry after those inputs change can therefore produce a different
-answer even when the stored pipeline and model profile match; use a new run
-when comparing such a change.
+New Lab snapshots freeze the pipeline definition, model controls, PDF inputs,
+labels, the supplier register and the supplier rules. A fingerprint of that
+configuration is stored with the run. Custom Extractor revisions are also
+pinned when processor metadata is available. Other remote processors remain
+whatever Google serves. A run recorded before the register snapshot uses today's
+tables on retry, and the Lab says so.
 
 ## Multi-page documents
 
@@ -388,9 +388,11 @@ by hash. Both its first execution and retries read those bytes. Adding documents
 editing labels, removing or renaming the source dataset no longer changes a retry.
 The Lab preview also reads the snapshot. Evaluations predating this change remain
 readable, but cannot be retried: their original input set cannot be reconstructed
-reliably. New Lab runs pin Custom Extractor versions when metadata is available; other
-remote processors, registers and supplier rules remain mutable. Input files are retained when a run is deleted; automatic reclamation is
-not implemented, so deleting history does not promise to reclaim PDF storage.
+reliably. New Lab runs pin Custom Extractor versions when metadata is available,
+and snapshot the supplier register and supplier rules so a retry replays them.
+Other remote processors remain mutable. Input files that no remaining evaluation
+refers to are reclaimed after a grace period; a file just snapshotted is kept
+until the run that names it is written.
 
 Lab and reviewed-run selectors traverse cursor pages before filtering, comparing
 or exporting, rather than silently using only the newest fifty records. For a
@@ -430,9 +432,9 @@ filled with today's default. Additional LLMs are identified separately. A retry
 with a different Google project/location is refused. Multiple extractor steps
 are resolved and pinned independently. CSV includes the recorded identities.
 
-Analytics groups by engine/version, pipeline and dataset. This separates dataset
-names, not revisions of their input manifests; full configuration fingerprints
-remain future work. Charts use compact numbers linked to comparison rows and a
+Analytics groups runs that share a configuration fingerprint. Runs recorded
+before a fingerprint existed still group by engine, pipeline and dataset.
+Charts use compact numbers linked to comparison rows and a
 detail panel, with collision avoidance for labels. Tooltips omit dataset names
 and duplicate reader names. Pareto rows have a subtle background and a badge,
 recomputed for the selected axis; this is a trade-off frontier, not a universal

@@ -7,6 +7,7 @@ import type {
   Evaluation,
   EvaluationDetail,
   ExtractionResponse,
+  PipelineActivity,
   ExtractionRun,
   GcpKeyStatus,
   GeminiKeyStatus,
@@ -218,6 +219,7 @@ export const api = {
   deletePipeline: (name: string) =>
     request<void>(`/api/pipelines/${segment(name)}`, { method: "DELETE" }),
 
+  activity: () => request<PipelineActivity>("/api/activity"),
   evaluations: () => history<Evaluation>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
   startEvaluation: (dataset: string) => request<Evaluation>("/api/evaluations", json("POST", { dataset })),

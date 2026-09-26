@@ -96,10 +96,12 @@ settings. LM Studio/runtime/driver versions are not exposed reliably, so do not
 promise bit-identical output across different inference stacks.
 
 New Lab evaluations resolve and pin each Custom Extractor revision when metadata
-is available. Legacy or metadata-denied runs retain unknown versions. The
-evaluation snapshot does not freeze Master Data or supplier rules. Do not describe retry as a fully
-immutable experiment until those mutable inputs gain their own revisions or
-snapshots.
+is available. Legacy or metadata-denied runs retain unknown versions. A new run
+also stores a fingerprint and a snapshot of the supplier register and supplier
+rules, and a retry replays that snapshot. A run from before the snapshot
+existed still uses the live tables, and the Lab says so. Remote processors
+other than a pinned Custom Extractor version are still whatever Google serves
+at retry time.
 
 New evaluations freeze their input PDF bytes and labels in a manifest and the
 hash-addressed `backend/data/evaluation-inputs` folder. Retry and historical
@@ -176,7 +178,7 @@ app/          React components; page.tsx is the shell and every section's host
 lib/          Frontend logic worth testing on its own, and generated types
 tests/        Node test runner, one file per lib module
 backend/app/
-  main.py         every FastAPI endpoint, in sections marked `# -- …`
+  main.py         the FastAPI app; endpoints live in api/routes
   domain/         Pydantic models — the contract the frontend types come from
   pipeline/       Step definitions, the compiler, and the steps themselves
   services/       LM Studio, Gemini, Document AI, master data, supplier rules

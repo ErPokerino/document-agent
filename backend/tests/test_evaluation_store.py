@@ -550,3 +550,29 @@ def test_an_input_just_snapshotted_is_kept_before_its_run_is_recorded(store) -> 
     store.delete(evaluation_id)
 
     assert len(list((store.path.parent / "evaluation-inputs").glob("*.pdf"))) == 1
+
+
+def test_a_run_keeps_the_fingerprint_and_the_register_it_started_with(store) -> None:
+    """A retry has to replay the register that was measured, not the one edited since."""
+    evaluation_id = store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        dataset_snapshot={"a.pdf": {"sha256": "ab", "labels": {}}},
+        fingerprint="abc",
+        register_snapshot=[{"id_subject": "S1"}],
+        rules_snapshot=[{"id_subject": "S1", "entity": "currency", "kind": "fixed"}],
+    )
+
+    detail = store.get_evaluation(evaluation_id)
+    assert detail.fingerprint == "abc"
+    assert detail.register_snapshot == [{"id_subject": "S1"}]
+    assert detail.rules_snapshot[0]["kind"] == "fixed"
+    assert detail.current_step is None
+
+    store.set_current_step(evaluation_id, "llm_extract")
+    assert store.get_evaluation(evaluation_id).current_step == "llm_extract"
+
+    store.finish(evaluation_id, "completed")
+    assert store.get_evaluation(evaluation_id).current_step is None

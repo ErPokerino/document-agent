@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from typing import Any
 
 import pymupdf
 
@@ -14,7 +15,6 @@ from app.services.document_ai import (
 )
 from app.services.extraction_provider import ExtractionProvider
 from app.services.gemini import GeminiClient
-from app.services.master_data import MasterDataStore
 from app.services.similarity import DEFAULT_ALGORITHM, similarity
 from app.services.supplier_rules import (
     SupplierRule,
@@ -380,7 +380,9 @@ class LookUpInMasterData:
         self,
         *,
         entities: list[EntityDefinition],
-        master_data: MasterDataStore,
+        # A MasterDataStore, or the frozen rows a Lab run recorded. Both
+        # answer table() and rows(); the step does not write.
+        master_data: Any,
         table: str,
         source_entity: str,
         target_entity: str,

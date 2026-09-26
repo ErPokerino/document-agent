@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -21,13 +22,43 @@ class PipelineStep(Protocol):
     async def run(self, context: PipelineContext) -> None: ...
 
 
+# Steps compiled before `kind` was stored on the instance still need a name
+# the UI can show. The class is the only remaining evidence.
+_STEP_NAMES = {
+    "InspectPdf": "inspect_pdf",
+    "RenderPages": "render_pages",
+    "ReadPdfText": "read_pdf_text",
+    "ExtractEntities": "llm_extract",
+    "RefineWithRegex": "regex_refine",
+    "LookUpInMasterData": "master_data_lookup",
+    "ApplySupplierRules": "supplier_rules",
+    "ExtractWithCustomExtractor": "document_ai_extract",
+    "MarkUnfilledDerivedEntities": "mark_unfilled",
+}
+
+
+def step_name(step: object) -> str:
+    kind = getattr(step, "kind", None)
+    if isinstance(kind, str) and kind:
+        return kind
+    return _STEP_NAMES.get(type(step).__name__, type(step).__name__)
+
+
 class DocumentPipeline:
     """Small orchestration core designed for future classification and validation steps."""
 
     def __init__(self, steps: list[PipelineStep]) -> None:
         self.steps = steps
 
-    async def run(self, context: PipelineContext) -> PipelineContext:
+    async def run(
+        self,
+        context: PipelineContext,
+        on_step: Callable[[object], None] | None = None,
+    ) -> PipelineContext:
         for step in self.steps:
+            # Reported before the step runs, so a poll during a long call
+            # names the step that is actually in flight.
+            if on_step is not None:
+                on_step(step)
             await step.run(context)
         return context

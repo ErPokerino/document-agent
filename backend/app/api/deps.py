@@ -98,6 +98,8 @@ model_warmup_modes: dict[str, str] = {}
 model_runtime_profiles: dict[str, str] = {}
 active_model_operation: str | None = None
 active_document_task: asyncio.Task[Any] | None = None
+# The step inside the workspace request. Lab runs report theirs on the evaluation row.
+pipeline_activity: dict[str, str | None] = {"step": None}
 evaluation_task: asyncio.Task | None = None
 evaluation_cancelled: asyncio.Event | None = None
 # A run still marked `running` belongs to a backend that no longer exists.
@@ -463,6 +465,8 @@ def evaluation_model(detail: Any) -> Evaluation:
                 "custom_extractor_pages",
                 "usage_complete",
                 "extraction_engine",
+                "fingerprint",
+                "current_step",
             )
         },
         metrics=metrics_model(detail.metrics),

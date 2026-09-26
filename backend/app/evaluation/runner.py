@@ -15,7 +15,7 @@ from app.evaluation.datasets import DatasetStore
 from app.evaluation.scoring import score_document
 from app.evaluation.store import EvaluationStore
 from app.pipeline.definition import DEFAULT_PIPELINE_NAME
-from app.pipeline.engine import DocumentPipeline, PipelineContext
+from app.pipeline.engine import DocumentPipeline, PipelineContext, step_name
 from app.services.document_ai import DocumentAiError
 from app.services.gemini import GeminiError
 from app.services.lm_studio import LMStudioError
@@ -78,7 +78,11 @@ async def run_evaluation(
                 content = await asyncio.to_thread(reader, name)
                 # The steps hold no per-document state, so one compiled
                 # pipeline serves the whole run.
-                result = await DocumentPipeline(steps).run(make_context(name, content))
+                result = await DocumentPipeline(steps).run(
+                    make_context(name, content),
+                    on_step=lambda step: evaluations.set_current_step(evaluation_id, step_name(step)),
+                )
+                evaluations.set_current_step(evaluation_id, None)
                 if cancelled is not None and cancelled.is_set():
                     evaluations.finish(evaluation_id, "cancelled")
                     return
@@ -86,6 +90,7 @@ async def run_evaluation(
                 evaluations.finish(evaluation_id, "cancelled")
                 raise
             except (OSError, ValueError, LMStudioError, GeminiError, DocumentAiError) as exc:
+                evaluations.set_current_step(evaluation_id, None)
                 evaluations.record_document_failure(evaluation_id, name, str(exc))
                 if model_is_gone(str(exc)):
                     scored = evaluations.attempted_documents(evaluation_id)

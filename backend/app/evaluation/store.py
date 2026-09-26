@@ -132,6 +132,11 @@ class EvaluationSummary:
     usage_complete: bool
     metrics: EvaluationMetrics
     extraction_engine: dict[str, Any] | None = None
+    # Null on a run recorded before the fingerprint existed. An empty string
+    # is not used: absence and a computed hash must stay distinguishable.
+    fingerprint: str | None = None
+    # The step in flight, cleared when the document finishes. Not a duration.
+    current_step: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +145,10 @@ class EvaluationDetail(EvaluationSummary):
     pipeline_definition: PipelineDefinition | None = None
     documents: list[EvaluationDocument] = None  # type: ignore[assignment]
     dataset_snapshot: dict[str, Any] | None = None
+    # None means this run did not record them. An empty list means it did,
+    # and the register or the rule list was empty.
+    register_snapshot: list[dict[str, Any]] | None = None
+    rules_snapshot: list[dict[str, Any]] | None = None
 
     @property
     def failures(self) -> list[tuple[str, str]]:
@@ -201,6 +210,9 @@ class EvaluationStore:
                 "extraction_engine_json": "TEXT",
                 "dataset_snapshot_json": "TEXT",
                 "fingerprint": "TEXT",
+                "register_snapshot_json": "TEXT",
+                "rules_snapshot_json": "TEXT",
+                "current_step": "TEXT",
             },
         )
         # Runs recorded before the column exists still happened somewhere. The
@@ -274,6 +286,9 @@ class EvaluationStore:
         execution_profile: ModelExecutionProfile | None = None,
         dataset_snapshot: dict[str, Any] | None = None,
         extraction_engine: dict[str, Any] | None = None,
+        fingerprint: str | None = None,
+        register_snapshot: list[dict[str, Any]] | None = None,
+        rules_snapshot: list[dict[str, Any]] | None = None,
     ) -> int:
         if dataset_snapshot is not None and len(dataset_snapshot) != total_documents:
             raise ValueError("The document snapshot does not match the evaluation total")
@@ -283,8 +298,9 @@ class EvaluationStore:
                 INSERT INTO evaluations
                     (created_at, dataset, model, prompts_json, status, total_documents,
                      max_pages, pipeline, steps, provider, pipeline_json,
-                     execution_profile_json, dataset_snapshot_json, extraction_engine_json)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     execution_profile_json, dataset_snapshot_json, extraction_engine_json,
+                     fingerprint, register_snapshot_json, rules_snapshot_json)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -308,6 +324,9 @@ class EvaluationStore:
                     ),
                     json.dumps(dataset_snapshot, ensure_ascii=False) if dataset_snapshot is not None else None,
                     json.dumps(extraction_engine) if extraction_engine is not None else None,
+                    fingerprint,
+                    json.dumps(register_snapshot, ensure_ascii=False) if register_snapshot is not None else None,
+                    json.dumps(rules_snapshot, ensure_ascii=False) if rules_snapshot is not None else None,
                 ),
             )
             return int(cursor.lastrowid)
@@ -507,7 +526,7 @@ class EvaluationStore:
         # even if the task that was driving it reaches its own ending later.
         with self._connect() as connection:
             connection.execute(
-                "UPDATE evaluations SET status = ?, finished_at = ?, error = ? "
+                "UPDATE evaluations SET status = ?, finished_at = ?, error = ?, current_step = NULL "
                 "WHERE id = ? AND status = 'running'",
                 (status, _now(), error, evaluation_id),
             )
@@ -524,6 +543,14 @@ class EvaluationStore:
                 (_now(),),
             )
             return cursor.rowcount
+
+    def set_current_step(self, evaluation_id: int, step: str | None) -> None:
+        """Name the step in flight. A finished run is left alone."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE evaluations SET current_step = ? WHERE id = ? AND status = 'running'",
+                (step, evaluation_id),
+            )
 
     def list_evaluations(self, limit: int = 50, before_id: int | None = None) -> list[EvaluationSummary]:
         with self._connect() as connection:
@@ -571,6 +598,10 @@ class EvaluationStore:
                 else None
             ),
             dataset_snapshot=json.loads(row["dataset_snapshot_json"]) if row["dataset_snapshot_json"] else None,
+            register_snapshot=(
+                json.loads(row["register_snapshot_json"]) if row["register_snapshot_json"] else None
+            ),
+            rules_snapshot=json.loads(row["rules_snapshot_json"]) if row["rules_snapshot_json"] else None,
             documents=[
                 EvaluationDocument(
                     name=document["document"],
@@ -654,4 +685,6 @@ class EvaluationStore:
             usage_complete=bool(progress["usage_complete"]) and progress["succeeded"] == row["total_documents"],
             metrics=aggregate(outcomes),
             extraction_engine=json.loads(row["extraction_engine_json"]) if row["extraction_engine_json"] else None,
+            fingerprint=row["fingerprint"],
+            current_step=row["current_step"],
         )
