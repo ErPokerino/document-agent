@@ -41,7 +41,7 @@ export function SystemPrompts({ draftSettings, setDraftSettings }: Props) {
       <div className="settings-card prompt-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Sparkles size={18} /></span>
-          <div><h3>Global prompts</h3><p>The agent, the single document request and the confidence rubric. The entity names and descriptions are appended from Entities.</p></div>
+          <div><h3>Global prompts</h3><p>The agent, the single document request and the confidence rubric. The field names and descriptions are appended from the fields in Extraction.</p></div>
         </div>
         <div className="prompt-field">
           <div className="prompt-field-head">

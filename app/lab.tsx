@@ -516,7 +516,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
           </span>
         )}
         <span className="pages-tag">{openEvaluation.max_pages || "?"} pages per extraction</span>
-        <span className="pages-tag">{openEvaluation.prompts.entities.length} entities</span>
+        <span className="pages-tag">{openEvaluation.prompts.entities.length} fields</span>
         {openEvaluation.execution_profile && (
           <span className="pages-tag" title="The model controls recorded when this run started">
             {executionProfileLabel(openEvaluation.execution_profile)}
@@ -580,7 +580,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
       )}
 
       <div className="metric-grid">
-        {tallyRows("Accuracy per entity", openEvaluation.metrics.per_entity)}
+        {tallyRows("Accuracy per field", openEvaluation.metrics.per_entity)}
         {tallyRows("How often each confidence level was right", openEvaluation.metrics.per_confidence)}
       </div>
 
@@ -638,7 +638,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                   <thead>
                     <tr>
                       <th aria-label="Result" />
-                      <th>Entity</th>
+                      <th>Field</th>
                       <th>Expected</th>
                       <th>Got</th>
                       <th>Confidence</th>

@@ -299,7 +299,7 @@ export function LanguageModels(props: Props) {
             </button>
           </div>
         )}
-        <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends a schema built from your entities with every request, in the shape each provider accepts. Nothing has to be configured in LM Studio or in Google AI Studio.</span></div></div>
+        <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends a schema built from your fields with every request, in the shape each provider accepts. Nothing has to be configured in LM Studio or in Google AI Studio.</span></div></div>
       </div>
 
       <div className="settings-card" hidden={runsFilter !== "api"}>

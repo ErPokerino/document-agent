@@ -247,6 +247,26 @@ def test_importing_a_name_already_taken_is_refused_with_a_reason(monkeypatch, tm
     assert "Invoices" in clash.json()["detail"]
 
 
+def test_a_dataset_named_outside_latin_1_can_be_downloaded(monkeypatch, tmp_path) -> None:
+    """HTTP headers are Latin-1; the name went into the header as it was and failed it."""
+    from urllib.parse import unquote
+
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    store = DatasetStore(tmp_path / "datasets")
+    store.create("Łódź")
+    store.add_document("Łódź", "a.pdf", b"%PDF-1.4 a")
+    monkeypatch.setattr(main, "dataset_store", store)
+
+    with TestClient(main.app) as client:
+        exported = client.get("/api/datasets/Łódź/export.zip")
+
+    assert exported.status_code == 200
+    assert "Łódź.zip" in unquote(exported.headers["content-disposition"])
+
+
 def test_exporting_a_dataset_that_is_not_there_is_a_404(monkeypatch, tmp_path) -> None:
     from fastapi.testclient import TestClient
 

@@ -45,6 +45,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# vinext's build still writes a Cloudflare deploy pointer; nothing here deploys
+/.wrangler/
+
 /dist/
 /outputs/
 /work/

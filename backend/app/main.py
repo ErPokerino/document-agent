@@ -58,7 +58,7 @@ from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
 from app.pipeline.compiler import PipelineError, build_steps
 from app.pipeline.steps import render_page_png
-from app.services.spreadsheet import decode as decode_spreadsheet
+from app.services.spreadsheet import content_disposition, decode as decode_spreadsheet
 from app.pipeline.definition import (
     CONTRACTS,
     PipelineDefinition,
@@ -1378,7 +1378,7 @@ async def export_dataset(name: str) -> Response:
     return Response(
         content=archive,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
+        headers={"Content-Disposition": content_disposition("attachment", f"{name}.zip")},
     )
 
 
@@ -1448,7 +1448,7 @@ async def read_dataset_document(name: str, document: str) -> Response:
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{document}"'},
+        headers={"Content-Disposition": content_disposition("inline", document)},
     )
 
 
@@ -1683,7 +1683,7 @@ async def export_evaluation(evaluation_id: int) -> Response:
     return Response(
         content=evaluation_to_csv(detail),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition("attachment", filename)},
     )
 
 

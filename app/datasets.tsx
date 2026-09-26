@@ -341,7 +341,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
         <div className="settings-card">
       <div className="settings-card-heading">
         <span className="settings-card-icon"><Tag size={18} /></span>
-        <div><h3>{selectedDataset}</h3><p>A document is only scored on the entities you labelled.</p></div>
+        <div><h3>{selectedDataset}</h3><p>A document is only scored on the fields you labelled.</p></div>
       </div>
 
       <div
@@ -478,7 +478,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
             );
           })}
           <div className="label-editor-actions">
-            <p className="field-help">Entities left as <em>Not labelled</em> are excluded from the score. <em>Absent in document</em> means the model must return nothing.</p>
+            <p className="field-help">Fields left as <em>Not labelled</em> are excluded from the score. <em>Absent in document</em> means the model must return nothing.</p>
             <button className="primary-button" disabled={busy} onClick={saveLabels}><Save size={14} /> Save ground truth</button>
           </div>
         </div>

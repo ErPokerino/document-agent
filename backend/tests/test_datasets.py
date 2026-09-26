@@ -147,6 +147,22 @@ def test_names_that_could_escape_the_dataset_folder_are_rejected(store, name) ->
         store.create(name)
 
 
+@pytest.mark.parametrize("name", ["Fattura_n°3.pdf", "Caffè Nerò 2026.pdf", "Müller & Söhne.pdf"])
+def test_an_ordinary_italian_file_name_is_accepted(store, name) -> None:
+    """Only ASCII was allowed, so accented or `n°` names were refused on upload."""
+    store.create("Fatture àccentate")
+
+    store.add_document("Fatture àccentate", name, pdf_bytes())
+
+    assert [document.name for document in store.list_documents("Fatture àccentate")] == [name]
+
+
+@pytest.mark.parametrize("name", ["a:b", 'quote"', "trailing.", "star*", "tab\t", ".hidden"])
+def test_names_windows_refuses_or_hides_are_rejected(store, name) -> None:
+    with pytest.raises(InvalidName):
+        store.create(name)
+
+
 def test_document_names_are_validated_too(store) -> None:
     store.create("invoices")
 

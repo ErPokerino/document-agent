@@ -21,8 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Anything outside this cannot traverse out of the dataset root.
-SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,127}$")
+# Anything outside this cannot traverse out of the dataset root: no separator,
+# no leading dot, none of the characters Windows refuses in a file name. Letters
+# are any script's, because `Fattura_n°3.pdf` is an ordinary Italian file name.
+SAFE_NAME = re.compile(r'^[^\\/:*?"<>|\x00-\x1f.][^\\/:*?"<>|\x00-\x1f]{0,127}(?<![. ])$')
 LABEL_SOURCES = ("manual", "promoted_run", "imported")
 
 

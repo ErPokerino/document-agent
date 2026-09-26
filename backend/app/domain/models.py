@@ -597,6 +597,9 @@ class EvaluationDocumentResult(BaseModel):
     elapsed_ms: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # The CSV carried these per document while the detail dropped them.
+    ocr_pages: int | None = None
+    layout_pages: int | None = None
     custom_extractor_pages: int | None = None
     items: list[EvaluationFieldResult]
 

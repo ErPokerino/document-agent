@@ -7,6 +7,7 @@ semicolons, in Windows-1252 unless told otherwise.
 """
 
 import csv
+from urllib.parse import quote
 
 FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 DELIMITERS = ",;\t"
@@ -49,3 +50,17 @@ def dialect_of(text: str) -> type[csv.Dialect] | csv.Dialect:
         return csv.Sniffer().sniff(header, delimiters=DELIMITERS)
     except csv.Error:
         return csv.excel
+
+
+def content_disposition(kind: str, filename: str) -> str:
+    """A download header that survives a name outside Latin-1.
+
+    HTTP headers are Latin-1, so `Fattura_n°3.pdf` fits and `Łódź.zip` does
+    not: it failed the response. The plain `filename` is an ASCII stand-in,
+    and `filename*` carries the real name for every browser that reads it.
+    """
+    fallback = "".join(
+        character if character.isascii() and character not in '"\\' else "_"
+        for character in filename
+    )
+    return f"{kind}; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"

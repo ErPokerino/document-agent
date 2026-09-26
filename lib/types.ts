@@ -150,6 +150,8 @@ export type EvaluationDocumentResult = {
   elapsed_ms: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
+  ocr_pages: number | null;
+  layout_pages: number | null;
   custom_extractor_pages: number | null;
   items: EvaluationFieldResult[];
 };
