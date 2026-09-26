@@ -57,6 +57,40 @@ def test_a_derived_entity_is_not_expected_back_from_the_model() -> None:
     assert set(result) == {"supplier_name", "total_amount"}
 
 
+def test_the_gemini_prompt_does_not_describe_a_field_the_model_cannot_see() -> None:
+    prompt = GeminiClient._system_prompt(MIXED)
+
+    assert "supplier_name" in prompt
+    assert "id_subject" not in prompt
+
+
+def test_gemini_does_not_report_a_derived_entity_as_not_returned() -> None:
+    """`MarkUnfilledDerivedEntities` skips a field that is already present.
+
+    Materialised by the parse as "the model did not return this field", a
+    derived id kept that wrong warning in every pipeline without a lookup.
+    """
+    body = {
+        "candidates": [
+            {
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [
+                        {
+                            "text": '{"supplier_name": "ACME", "total_amount": 1.0, '
+                            '"confidence": {"supplier_name": "high", "total_amount": "high"}}'
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+
+    result = GeminiClient._parse(body, MIXED.entities)
+
+    assert set(result) == {"supplier_name", "total_amount"}
+
+
 def test_a_pipeline_can_ask_which_entities_it_must_fill_itself() -> None:
     from app.domain.models import derived_entities, model_entities
 

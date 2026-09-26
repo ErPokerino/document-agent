@@ -58,7 +58,7 @@ class LabelFile:
     updated_at: str | None = None
 
 
-def _validate(name: str, kind: str) -> str:
+def validate_name(name: str, kind: str) -> str:
     if not isinstance(name, str) or not SAFE_NAME.match(name) or name.strip() != name:
         raise InvalidName(f"{kind} name must be plain text without path separators: {name!r}")
     return name
@@ -71,13 +71,13 @@ class DatasetStore:
     # -- paths ---------------------------------------------------------------
 
     def _dataset_dir(self, dataset: str) -> Path:
-        return self.root / _validate(dataset, "Dataset")
+        return self.root / validate_name(dataset, "Dataset")
 
     def _documents_dir(self, dataset: str) -> Path:
         return self._dataset_dir(dataset) / "documents"
 
     def _document_path(self, dataset: str, document: str) -> Path:
-        return self._documents_dir(dataset) / _validate(document, "Document")
+        return self._documents_dir(dataset) / validate_name(document, "Document")
 
     def _label_path(self, dataset: str, document: str) -> Path:
         return self._document_path(dataset, document).with_suffix(".json")

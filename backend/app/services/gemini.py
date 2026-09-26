@@ -249,6 +249,9 @@ class GeminiClient:
         if not isinstance(payload, dict):
             raise GeminiError("Gemini did not return a JSON object.")
 
+        # A derived field is filled by a later step, or marked unfilled by one.
+        # Materialised here as "not returned", it would hide that later warning.
+        entities = model_entities(entities)
         confidence = payload.get("confidence")
         confidence = confidence if isinstance(confidence, dict) else {}
         expanded = {
@@ -283,7 +286,7 @@ class GeminiClient:
     def _system_prompt(prompts: PromptConfiguration) -> str:
         entity_lines = "\n".join(
             f"- {entity.name} [{entity.format.value}]: {entity.description}"
-            for entity in prompts.entities
+            for entity in model_entities(prompts.entities)
         )
         return f"""{prompts.system_prompt.strip()}
 

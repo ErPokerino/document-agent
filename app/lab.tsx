@@ -36,6 +36,7 @@ import { formatUsd, totalCost } from "../lib/cost";
 import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import { labRunTarget } from "../lib/lab-target";
+import { latestOnly } from "../lib/latest";
 import { usesModel } from "../lib/pipeline-steps";
 import {
   emptyFilters,
@@ -103,6 +104,8 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [listRequests] = useState(latestOnly);
+  const [detailRequests] = useState(latestOnly);
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
   // Reads this machine's own history rather than assuming a cost, so it
@@ -149,7 +152,9 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
   }
 
   async function refreshEvaluations() {
-    setEvaluations(await api.evaluations());
+    const isCurrent = listRequests.begin();
+    const next = await api.evaluations();
+    if (isCurrent()) setEvaluations(next);
   }
 
   async function refreshValidatedRuns() {
@@ -180,14 +185,19 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
     const runningId = running.id;
     const openId = openEvaluation?.id;
     const timer = window.setInterval(() => {
-      void api.evaluations().then(setEvaluations).catch(() => undefined);
+      const listIsCurrent = listRequests.begin();
+      void api.evaluations()
+        .then((next) => { if (listIsCurrent()) setEvaluations(next); })
+        .catch(() => undefined);
       if (openId === runningId) {
-        void api.evaluation(runningId).then(setOpenEvaluation).catch(() => undefined);
+        const detailIsCurrent = detailRequests.begin();
+        void api.evaluation(runningId)
+          .then((detail) => { if (detailIsCurrent()) setOpenEvaluation(detail); })
+          .catch(() => undefined);
       }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [running, openEvaluation?.id]);
-
+  }, [running, openEvaluation?.id, listRequests, detailRequests]);
   function toggleExpanded(name: string) {
     setExpanded((current) => {
       const next = new Set(current);
@@ -198,7 +208,28 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
   }
 
   function openRun(evaluationId: number) {
-    void guard(async () => setOpenEvaluation(await api.evaluation(evaluationId)));
+    const isCurrent = detailRequests.begin();
+    void guard(async () => {
+      const detail = await api.evaluation(evaluationId);
+      if (!isCurrent()) return;
+      // Expanded rows and the name filter belong to one run's documents.
+      if (detail.id !== openEvaluation?.id) {
+        setExpanded(new Set());
+        setRunDocumentQuery("");
+      }
+      setOpenEvaluation(detail);
+    });
+  }
+
+  function closeRun() {
+    detailRequests.invalidate();
+    setOpenEvaluation(null);
+  }
+
+  async function refreshOpenRun(evaluationId: number) {
+    const isCurrent = detailRequests.begin();
+    const detail = await api.evaluation(evaluationId);
+    if (isCurrent()) setOpenEvaluation(detail);
   }
 
   async function guard(action: () => Promise<void>) {
@@ -421,7 +452,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
                         disabled={busy}
                         onClick={() => guard(async () => {
                           await api.deleteEvaluation(evaluation.id);
-                          if (openEvaluation?.id === evaluation.id) setOpenEvaluation(null);
+                          if (openEvaluation?.id === evaluation.id) closeRun();
                           setConfirmingRun(null);
                           await refreshEvaluations();
                         })}
@@ -471,7 +502,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
         <a className="secondary-button small" href={apiUrls.evaluationCsv(openEvaluation.id)} download>
           <Download size={13} /> CSV
         </a>
-        <button className="icon-button" aria-label="Close" onClick={() => setOpenEvaluation(null)}><X size={15} /></button>
+        <button className="icon-button" aria-label="Close" onClick={closeRun}><X size={15} /></button>
       </div>
 
       <div className="run-tags">
@@ -540,7 +571,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds }: Prop
             onClick={() => guard(async () => {
               await api.retryEvaluation(openEvaluation.id);
               await refreshEvaluations();
-              setOpenEvaluation(await api.evaluation(openEvaluation.id));
+              await refreshOpenRun(openEvaluation.id);
             })}
           >
             <RefreshCw size={14} /> Retry {openEvaluation.failed_documents + openEvaluation.pending_documents} documents

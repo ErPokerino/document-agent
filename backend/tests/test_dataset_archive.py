@@ -159,6 +159,48 @@ def test_a_label_that_is_not_an_object_is_left_out_rather_than_crashing(tmp_path
     assert summary.labelled_count == 0
 
 
+def test_an_archive_with_one_unusable_name_writes_nothing(tmp_path) -> None:
+    """The first documents used to land before the bad name was reached.
+
+    The half-imported dataset then blocked a corrected archive under the same
+    name, because importing over an existing dataset is refused.
+    """
+    store = DatasetStore(tmp_path / "datasets")
+    data = make_zip({"documents/a.pdf": b"%PDF-1.4 a", "documents/.hidden.pdf": b"%PDF-1.4 b"})
+
+    with pytest.raises(InvalidName):
+        read_archive(store, data, name="Partial")
+
+    assert store.list_datasets() == []
+
+
+def test_a_failure_while_writing_removes_the_dataset_it_started(tmp_path, monkeypatch) -> None:
+    store = DatasetStore(tmp_path / "datasets")
+    data = make_zip({"documents/a.pdf": b"%PDF-1.4 a", "documents/b.pdf": b"%PDF-1.4 b"})
+    original = store.add_document
+
+    def fail_on_b(dataset, filename, *args, **kwargs):
+        if filename == "b.pdf":
+            raise OSError("disk full")
+        return original(dataset, filename, *args, **kwargs)
+
+    monkeypatch.setattr(store, "add_document", fail_on_b)
+    with pytest.raises(OSError):
+        read_archive(store, data, name="Partial")
+
+    assert store.list_datasets() == []
+
+
+def test_two_names_that_differ_only_in_case_are_refused(tmp_path) -> None:
+    store = DatasetStore(tmp_path / "datasets")
+    data = make_zip({"documents/a.pdf": b"%PDF-1.4 a", "documents/A.PDF": b"%PDF-1.4 b"})
+
+    with pytest.raises(ArchiveError):
+        read_archive(store, data, name="Cased")
+
+    assert store.list_datasets() == []
+
+
 # -- over the API -------------------------------------------------------------
 
 

@@ -779,6 +779,8 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
                 raise HTTPException(status_code=499, detail="Document processing was cancelled")
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except DocumentAiError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
             except (LMStudioError, GeminiError) as exc:
                 if "terminated" in str(exc).lower() or "device was lost" in str(exc).lower():
                     model_runtime_states[settings.model] = "error"
@@ -1537,7 +1539,7 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
             result = await pipeline.run(context)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except (LMStudioError, GeminiError) as exc:
+        except (LMStudioError, GeminiError, DocumentAiError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         elapsed_ms = round((time.perf_counter() - started) * 1000)

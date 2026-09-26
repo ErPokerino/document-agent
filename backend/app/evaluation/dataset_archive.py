@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
-from app.evaluation.datasets import DatasetStore, DatasetSummary, InvalidName
+from app.evaluation.datasets import DatasetStore, DatasetSummary, InvalidName, validate_name
 
 
 DOCUMENTS = "documents"
@@ -110,17 +110,33 @@ def read_archive(store: DatasetStore, data: bytes, name: str | None = None) -> D
                 f"nothing to import."
             )
 
-        store.create(dataset)
-        for filename, entry in sorted(pdfs.items()):
-            store.add_document(
-                dataset,
-                filename,
-                archive.read(entry),
-                labels=labels.get(PurePosixPath(filename).stem),
-                # The store already has a word for ground truth that was made
-                # somewhere else.
-                source="imported",
+        # Every name is checked before anything is written: a dataset left
+        # half-imported blocks the next attempt under the same name.
+        validate_name(dataset, "Dataset")
+        for filename in pdfs:
+            validate_name(filename, "Document")
+        folded = [filename.casefold() for filename in pdfs]
+        if len(set(folded)) != len(folded):
+            raise ArchiveError(
+                "The archive holds two documents whose names differ only in case, "
+                "and they would overwrite each other on this file system."
             )
+
+        store.create(dataset)
+        try:
+            for filename, entry in sorted(pdfs.items()):
+                store.add_document(
+                    dataset,
+                    filename,
+                    archive.read(entry),
+                    labels=labels.get(PurePosixPath(filename).stem),
+                    # The store already has a word for ground truth that was
+                    # made somewhere else.
+                    source="imported",
+                )
+        except BaseException:
+            store.delete(dataset)
+            raise
 
     return next(
         summary for summary in store.list_datasets() if summary.name == dataset
