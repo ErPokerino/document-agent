@@ -10,6 +10,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.domain.models import (
+    MODEL_NOT_USED,
     AppSettings,
     CorrectionsRequest,
     Dataset,
@@ -56,6 +57,8 @@ from app.evaluation.export import evaluation_to_csv
 from app.evaluation.runner import run_evaluation
 from app.evaluation.store import EvaluationStore
 from app.pipeline.compiler import PipelineError, build_steps
+from app.pipeline.steps import render_page_png
+from app.services.spreadsheet import decode as decode_spreadsheet
 from app.pipeline.definition import (
     CONTRACTS,
     PipelineDefinition,
@@ -342,7 +345,7 @@ def _execution_profile(
 def _recorded_model(settings: AppSettings, pipeline: PipelineDefinition) -> tuple[str, str]:
     """Name only a model the pipeline can actually call."""
     if not uses_model(pipeline):
-        return "Not used", "none"
+        return MODEL_NOT_USED, "none"
     return settings.model, settings.provider
 
 
@@ -427,9 +430,11 @@ async def models() -> list[ModelInfo]:
         # Discovery awaited the network. Re-read before writing so a prompt or
         # pipeline saved in the meantime is never replaced by this migration's
         # stale snapshot.
-        latest = settings_store.read()
-        if latest.provider == "lm_studio" and latest.model == settings.model:
-            settings_store.write(latest.model_copy(update={"model": resolved.id}))
+        settings_store.update(
+            lambda latest: latest.model_copy(update={"model": resolved.id})
+            if latest.provider == "lm_studio" and latest.model == settings.model
+            else latest
+        )
     return [*_models_with_runtime_state(discovered), *hosted]
 
 
@@ -503,8 +508,8 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
             # Re-read rather than write back the snapshot this request
             # started with: a load takes minutes, and anything chosen in the
             # meantime — a pipeline, above all — would be reverted by it.
-            settings_store.write(
-                settings_store.read().model_copy(update={"model": request.model})
+            settings_store.update(
+                lambda latest: latest.model_copy(update={"model": request.model})
             )
             return ModelLoadResponse.model_validate(result)
         except LMStudioError as exc:
@@ -581,9 +586,10 @@ async def verify_gemini_key() -> GeminiKeyStatus:
 
 @app.delete("/api/settings/gemini", status_code=204, response_class=Response)
 async def clear_gemini_key() -> Response:
-    settings = settings_store.read()
-    settings_store.write(
-        settings.model_copy(update={"gemini": settings.gemini.model_copy(update={"api_key": ""})})
+    settings_store.update(
+        lambda latest: latest.model_copy(
+            update={"gemini": latest.gemini.model_copy(update={"api_key": ""})}
+        )
     )
     return Response(status_code=204)
 
@@ -648,7 +654,23 @@ async def update_settings(settings: AppSettings) -> AppSettings:
                         "pipeline that reads text."
                     ),
                 )
-    saved = settings_store.write(settings)
+    def merged(latest: AppSettings) -> AppSettings:
+        # The model list was awaited above. The catalog and the key are
+        # taken from the settings as they are now, so a processor saved or a
+        # key cleared in the meantime is not reverted by this form.
+        gemini = (
+            settings.gemini
+            if settings.gemini.api_key != previous_settings.gemini.api_key
+            else settings.gemini.model_copy(update={"api_key": latest.gemini.api_key})
+        )
+        return settings.model_copy(
+            update={
+                "gemini": gemini,
+                "gcp": settings.gcp.model_copy(update={"processors": latest.gcp.processors}),
+            }
+        )
+
+    saved = settings_store.update(merged)
     previous_schema = [
         (entity.name, entity.format) for entity in previous_settings.prompts.entities
     ]
@@ -1069,9 +1091,11 @@ async def rename_pipeline(name: str, request: PipelineRenameRequest) -> SavedPip
     except UnknownPipeline as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    settings = settings_store.read()
-    if settings.pipeline == name:
-        settings_store.write(settings.model_copy(update={"pipeline": renamed.name}))
+    settings_store.update(
+        lambda latest: latest.model_copy(update={"pipeline": renamed.name})
+        if latest.pipeline == name
+        else latest
+    )
     return _saved_pipeline(renamed)
 
 
@@ -1190,11 +1214,11 @@ async def import_master_data(table_key: str, file: UploadFile = File(...)) -> Ma
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="The file exceeds the 20 MB limit")
     try:
-        text = content.decode("utf-8-sig")
+        text = decode_spreadsheet(content)
     except UnicodeDecodeError as exc:
         raise HTTPException(
             status_code=415,
-            detail="That file is not UTF-8 text, so its rows cannot be read.",
+            detail="That file is neither UTF-8 nor Windows-1252 text, so its rows cannot be read.",
         ) from exc
     try:
         report = csv_to_rows(master_data_store, table_key, text)
@@ -1596,14 +1620,9 @@ async def run_page_image(run_id: int, page: int) -> Response:
     if content is None:
         raise HTTPException(status_code=404, detail="That run's document is no longer stored.")
 
-    document = pymupdf.open(stream=content, filetype="pdf")
-    try:
-        if page < 0 or page >= document.page_count:
-            raise HTTPException(status_code=404, detail=f"That document has no page {page + 1}")
-        pixmap = document[page].get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
-        rendered = pixmap.tobytes("png")
-    finally:
-        document.close()
+    rendered = await asyncio.to_thread(render_page_png, content, page, 2)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail=f"That document has no page {page + 1}")
 
     return Response(
         content=rendered,
@@ -1787,7 +1806,6 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 prompts=settings.prompts,
                 model=recorded_model,
                 provider=recorded_provider,
-                max_pages=pipeline_definition.page_limit,
                 steps=steps,
                 pipeline_name=settings.pipeline,
                 pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
@@ -1933,7 +1951,6 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 prompts=detail.prompts,
                 model=detail.model,
                 provider=detail.provider,
-                max_pages=page_limit,
                 steps=steps,
                 pipeline_name=detail.pipeline,
                 pipeline_steps=detail.steps,
@@ -1990,36 +2007,43 @@ async def list_processors():
 async def save_processor(processor_ref: str, entry: DocumentProcessor):
     if processor_ref != entry.id:
         raise HTTPException(status_code=400, detail="The processor reference does not match its id")
-    settings = settings_store.read()
-    existing = next((p for p in settings.gcp.processors if p.id == entry.id), None)
-    identity_fields = ("kind", "project_id", "location", "processor_id")
-    if existing and any(getattr(existing, f) != getattr(entry, f) for f in identity_fields):
-        raise HTTPException(status_code=409, detail="A registered processor's identity cannot change. Register another processor to use a different resource.")
-    if any(p.id != entry.id and all(getattr(p, f) == getattr(entry, f) for f in identity_fields) for p in settings.gcp.processors):
-        raise HTTPException(status_code=409, detail="This processor is already registered")
     entry.name = entry.name.strip()
     if not entry.name:
         raise HTTPException(status_code=400, detail="A processor name is required")
-    settings.gcp.processors = [p for p in settings.gcp.processors if p.id != entry.id] + [entry]
-    settings_store.write(settings)
+
+    def registered(settings: AppSettings) -> AppSettings:
+        existing = next((p for p in settings.gcp.processors if p.id == entry.id), None)
+        identity_fields = ("kind", "project_id", "location", "processor_id")
+        if existing and any(getattr(existing, f) != getattr(entry, f) for f in identity_fields):
+            raise HTTPException(status_code=409, detail="A registered processor's identity cannot change. Register another processor to use a different resource.")
+        if any(p.id != entry.id and all(getattr(p, f) == getattr(entry, f) for f in identity_fields) for p in settings.gcp.processors):
+            raise HTTPException(status_code=409, detail="This processor is already registered")
+        settings.gcp.processors = [p for p in settings.gcp.processors if p.id != entry.id] + [entry]
+        return settings
+
+    settings_store.update(registered)
     return entry
 
 
 @app.delete("/api/processors/{processor_ref}", status_code=204, response_class=Response)
 async def delete_processor(processor_ref: str):
-    settings = settings_store.read()
-    entry = next((p for p in settings.gcp.processors if p.id == processor_ref), None)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Processor not found")
-    names = processor_used_by(entry, pipeline_store.list(), settings.gcp)
-    if names:
-        raise HTTPException(status_code=409, detail="Processor used by: " + ", ".join(names))
-    settings.gcp.processors = [p for p in settings.gcp.processors if p.id != processor_ref]
     from app.services.processors import KINDS
-    field = KINDS[entry.kind]
-    if (settings.gcp.project_id, settings.gcp.location, getattr(settings.gcp, field).split("/processorVersions/")[0]) == (entry.project_id, entry.location, entry.processor_id):
-        setattr(settings.gcp, field, "")
-    settings_store.write(settings)
+    pipelines = pipeline_store.list()
+
+    def removed(settings: AppSettings) -> AppSettings:
+        entry = next((p for p in settings.gcp.processors if p.id == processor_ref), None)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Processor not found")
+        names = processor_used_by(entry, pipelines, settings.gcp)
+        if names:
+            raise HTTPException(status_code=409, detail="Processor used by: " + ", ".join(names))
+        settings.gcp.processors = [p for p in settings.gcp.processors if p.id != processor_ref]
+        field = KINDS[entry.kind]
+        if (settings.gcp.project_id, settings.gcp.location, getattr(settings.gcp, field).split("/processorVersions/")[0]) == (entry.project_id, entry.location, entry.processor_id):
+            setattr(settings.gcp, field, "")
+        return settings
+
+    settings_store.update(removed)
     return Response(status_code=204)
 
 

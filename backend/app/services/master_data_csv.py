@@ -19,6 +19,7 @@ import io
 from dataclasses import dataclass, field
 
 from app.services.master_data import DuplicateRow, MasterDataStore, TableDefinition
+from app.services.spreadsheet import dialect_of, safe_text, unguarded
 
 
 @dataclass
@@ -39,14 +40,14 @@ def rows_to_csv(store: MasterDataStore, table_key: str) -> str:
     writer = csv.DictWriter(buffer, fieldnames=columns, lineterminator="\r\n")
     writer.writeheader()
     for row in store.rows(table_key):
-        writer.writerow({key: row.get(key, "") for key in columns})
+        writer.writerow({key: safe_text(str(row.get(key) or "")) for key in columns})
     return buffer.getvalue()
 
 
 def csv_to_rows(store: MasterDataStore, table_key: str, text: str) -> ImportReport:
     """Add every row the file holds that the table can take."""
     table = store.table(table_key)
-    reader = csv.DictReader(io.StringIO(text))
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect_of(text))
     if not reader.fieldnames:
         raise ValueError("That file has no header row, so its columns cannot be read.")
 
@@ -61,7 +62,7 @@ def csv_to_rows(store: MasterDataStore, table_key: str, text: str) -> ImportRepo
     report = ImportReport()
     for position, raw in enumerate(reader, start=2):
         values = {
-            column: (raw.get(header) or "").strip()
+            column: unguarded((raw.get(header) or "").strip())
             for header, column in mapping.items()
             if (raw.get(header) or "").strip()
         }

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Iterator, Literal
 
 from app.domain.models import FieldExtraction
+from app.services import db
 
 
 RuleKind = Literal["fixed", "regex", "prompt"]
@@ -166,19 +167,14 @@ class SupplierRuleStore:
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        db.prepare(self.path)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        try:
+        with db.connect(self.path) as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
 
     def all(self) -> list[SupplierRule]:
         with self._connect() as connection:

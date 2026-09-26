@@ -491,3 +491,62 @@ def test_snapshot_bytes_are_verified_before_reuse(store) -> None:
     (store.path.parent / "evaluation-inputs" / f"{digest}.pdf").write_bytes(b"corrupted")
     with pytest.raises(ValueError, match="digest"):
         store.read_snapshot_document(digest)
+
+
+def test_a_cancelled_run_is_not_reported_finished_by_its_task(store) -> None:
+    """Cancel marks the row at once; the task driving it may still reach its end."""
+    evaluation_id = start(store, total=1)
+    store.record_document(evaluation_id, "a.pdf", outcomes("EUR", 125.31), 10)
+    store.finish(evaluation_id, "cancelled")
+
+    store.complete(evaluation_id)
+
+    assert store.get_evaluation(evaluation_id).status == "cancelled"
+
+
+def snapshot_run(store, content: bytes) -> int:
+    digest = store.snapshot_document(content)
+    return store.start(
+        dataset="invoices",
+        model="vision-model",
+        prompts=PromptConfiguration(),
+        total_documents=1,
+        dataset_snapshot={"a.pdf": {"sha256": digest, "labels": {}}},
+    )
+
+
+def age_inputs(store) -> None:
+    import os
+
+    for path in (store.path.parent / "evaluation-inputs").glob("*.pdf"):
+        os.utime(path, (0, 0))
+
+
+def test_deleting_the_last_run_that_used_an_input_reclaims_it(store) -> None:
+    """Inputs were kept forever, so every deleted Lab run left its PDFs behind."""
+    evaluation_id = snapshot_run(store, b"%PDF-1.4 only here")
+    age_inputs(store)
+
+    store.delete(evaluation_id)
+
+    assert list((store.path.parent / "evaluation-inputs").glob("*.pdf")) == []
+
+
+def test_an_input_another_run_still_uses_is_kept(store) -> None:
+    first = snapshot_run(store, b"%PDF-1.4 shared")
+    second = snapshot_run(store, b"%PDF-1.4 shared")
+    age_inputs(store)
+
+    store.delete(first)
+
+    digest = store.get_evaluation(second).dataset_snapshot["a.pdf"]["sha256"]
+    assert store.read_snapshot_document(digest) == b"%PDF-1.4 shared"
+
+
+def test_an_input_just_snapshotted_is_kept_before_its_run_is_recorded(store) -> None:
+    """Starting a run snapshots its inputs before writing the row that names them."""
+    evaluation_id = snapshot_run(store, b"%PDF-1.4 being started")
+
+    store.delete(evaluation_id)
+
+    assert len(list((store.path.parent / "evaluation-inputs").glob("*.pdf"))) == 1

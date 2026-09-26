@@ -96,3 +96,49 @@ def test_switching_from_ocr_to_images_requires_a_vision_warmup(api) -> None:
     assert client.put("/api/settings", json=payload).status_code == 200
 
     assert main.model_runtime_states["first"] == "loaded"
+
+
+def test_a_processor_registered_while_settings_are_saved_survives_the_save(tmp_path, monkeypatch) -> None:
+    """The settings form awaited the model list, then wrote back its old catalog."""
+    from app.domain.models import DocumentProcessor
+
+    settings = SettingsStore(tmp_path / "settings.json")
+    settings.write(AppSettings(model="first", pipeline="Vision extraction"))
+    pipelines = PipelineStore(tmp_path / "pipelines")
+    pipelines.seed_default()
+    registered = DocumentProcessor(
+        id="ocr", name="OCR", kind="document_ai_ocr", project_id="p", location="eu", processor_id="abc"
+    )
+
+    class RegistersDuringTheCheck:
+        def __init__(self, base_url: str) -> None:
+            pass
+
+        async def list_models(self, excluded_model_ids=None):
+            current = settings.read()
+            current.gcp.processors = [registered]
+            settings.write(current)
+            return [ModelInfo(id="first", name="First", vision=True), ModelInfo(id="second", name="Second", vision=True)]
+
+    monkeypatch.setattr(main, "settings_store", settings)
+    monkeypatch.setattr(main, "pipeline_store", pipelines)
+    monkeypatch.setattr(main, "LMStudioClient", RegistersDuringTheCheck)
+    with TestClient(main.app) as client:
+        payload = client.get("/api/settings").json()
+        payload["model"] = "second"
+        assert client.put("/api/settings", json=payload).status_code == 200
+
+    after = settings.read()
+    assert after.model == "second"
+    assert [processor.id for processor in after.gcp.processors] == ["ocr"]
+
+
+def test_a_corrupt_settings_file_is_replaced_once(tmp_path) -> None:
+    """The fallback to defaults used to run again on every read."""
+    path = tmp_path / "settings.json"
+    path.write_text("{not json", encoding="utf-8")
+    store = SettingsStore(path)
+
+    assert store.read() == AppSettings()
+    assert path.with_suffix(".corrupt.json").read_text(encoding="utf-8") == "{not json"
+    assert AppSettings.model_validate_json(path.read_text(encoding="utf-8")) == AppSettings()

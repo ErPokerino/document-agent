@@ -22,6 +22,7 @@ from typing import Any, Iterator
 
 from app.domain.models import FieldExtraction, ModelExecutionProfile, PromptConfiguration
 from app.pipeline.definition import PipelineDefinition
+from app.services import db
 
 
 SCHEMA = """
@@ -94,21 +95,21 @@ class RunStore:
         # files are stored once, and the database stays small enough to copy.
         self.documents_dir = self.path.parent / "documents"
         self.documents_dir.mkdir(parents=True, exist_ok=True)
+        db.prepare(self.path)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
-            existing = {row["name"] for row in connection.execute("PRAGMA table_info(runs)")}
-            if "provider" not in existing:
-                connection.execute(
-                    "ALTER TABLE runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'lm_studio'"
-                )
-            if "pipeline" not in existing:
-                # Nullable on purpose: a run from before pipelines existed has no
-                # honest answer, and reads back as the default pipeline.
-                connection.execute("ALTER TABLE runs ADD COLUMN pipeline TEXT")
-            if "steps" not in existing:
-                connection.execute("ALTER TABLE runs ADD COLUMN steps TEXT")
-            if "execution_profile_json" not in existing:
-                connection.execute("ALTER TABLE runs ADD COLUMN execution_profile_json TEXT")
+            db.add_missing_columns(
+                connection,
+                "runs",
+                {
+                    "provider": "TEXT NOT NULL DEFAULT 'lm_studio'",
+                    # Nullable on purpose: a run from before pipelines existed
+                    # has no honest answer, and reads back as the default.
+                    "pipeline": "TEXT",
+                    "steps": "TEXT",
+                    "execution_profile_json": "TEXT",
+                },
+            )
 
     def read_document(self, file_sha256: str) -> bytes | None:
         path = self._document_path(file_sha256)
@@ -121,16 +122,8 @@ class RunStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        # One connection per operation: sqlite3 connections are not safe to
-        # share between threads, and these operations are short.
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        try:
+        with db.connect(self.path) as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
 
     def record_run(
         self,

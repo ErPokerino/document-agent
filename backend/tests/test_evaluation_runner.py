@@ -71,7 +71,6 @@ async def execute(datasets, evaluations, evaluation_id, cancelled=None):
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        max_pages=1,
         steps=default_steps(),
         make_context=lambda name, content: PipelineContext(
             filename=name, content=content, model="vision-model", lm_studio_url="http://localhost:1234"
@@ -155,7 +154,6 @@ async def test_labels_naming_an_unconfigured_entity_fail_only_that_document(work
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        max_pages=1,
         steps=default_steps(),
         make_context=lambda name, content: PipelineContext(
             filename=name, content=content, model="vision-model", lm_studio_url="http://localhost:1234"
@@ -233,7 +231,6 @@ async def test_the_run_uses_the_same_context_the_app_builds(workspace, monkeypat
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        max_pages=1,
         steps=default_steps(),
         make_context=make_context,
     )
@@ -261,7 +258,6 @@ async def test_a_document_ai_failure_costs_one_document_not_the_whole_run(worksp
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        max_pages=1,
         steps=[Refuses()],
         make_context=lambda name, content: PipelineContext(
             filename=name, content=content, model="m", lm_studio_url="http://x"
@@ -309,7 +305,6 @@ async def test_a_run_stops_when_the_runtime_dies_instead_of_hammering_it(workspa
         entities=ENTITIES,
         prompts=PromptConfiguration(entities=ENTITIES),
         model="vision-model",
-        max_pages=1,
         steps=default_steps(),
         make_context=lambda name, content: PipelineContext(
             filename=name, content=content, model="m", lm_studio_url="http://x"

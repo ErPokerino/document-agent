@@ -45,15 +45,19 @@ async def test_short_document_does_not_report_a_cut() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pdf_safety_limit_is_explicit() -> None:
-    with pytest.raises(ValueError, match="at most"):
-        await InspectPdf(max_pages=4, page_limit=4).run(make_context(5))
+async def test_a_document_longer_than_the_limit_is_cut_rather_than_refused() -> None:
+    """A hard page refusal existed beside the limit and was never wired to anything."""
+    context = make_context(5)
+    await InspectPdf(page_limit=4).run(context)
+
+    assert context.artifacts["processed_pages"] == 4
+    assert context.artifacts["cut_applied"] is True
 
 
 @pytest.mark.asyncio
 async def test_configured_page_limit_is_the_only_automatic_cut() -> None:
     context = make_context(12)
-    await InspectPdf(max_pages_to_analyze=6).run(context)
+    await InspectPdf(page_limit=6).run(context)
 
     assert context.artifacts["page_limit"] == 6
     assert context.artifacts["processed_pages"] == 6
@@ -63,7 +67,7 @@ async def test_configured_page_limit_is_the_only_automatic_cut() -> None:
 @pytest.mark.asyncio
 async def test_short_document_uses_all_pages_below_configured_limit() -> None:
     context = make_context(12)
-    await InspectPdf(max_pages_to_analyze=20).run(context)
+    await InspectPdf(page_limit=20).run(context)
 
     assert context.artifacts["processed_pages"] == 12
     assert context.artifacts["cut_applied"] is False

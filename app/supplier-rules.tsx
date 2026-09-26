@@ -48,9 +48,12 @@ export function SupplierRules({ idSubject, supplierName, entities, onError, onCo
   // read when the supplier changes and at no other time. A ref keeps the
   // callback current without making it a reason to fetch again.
   const report = useRef(onCountChange);
+  const reportError = useRef(onError);
   useEffect(() => {
     report.current = onCountChange;
+    reportError.current = onError;
   });
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,11 +61,16 @@ export function SupplierRules({ idSubject, supplierName, entities, onError, onCo
       .supplierRules(idSubject)
       .then((found) => {
         if (cancelled) return;
+        setLoadError(null);
         setRules(found);
         report.current(found.length);
       })
-      .catch(() => {
-        if (!cancelled) setRules([]);
+      .catch((cause) => {
+        if (cancelled) return;
+        // Not "no rules": what this supplier carries is unknown.
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setLoadError(message);
+        reportError.current(message);
       });
     return () => {
       cancelled = true;
@@ -86,6 +94,7 @@ export function SupplierRules({ idSubject, supplierName, entities, onError, onCo
     onCountChange(found.length);
   };
 
+  if (loadError !== null) return <p className="field-help">The rules for {supplierName} could not be read: {loadError}</p>;
   if (rules === null) return <p className="field-help">Reading the rules…</p>;
 
   return (

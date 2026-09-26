@@ -11,15 +11,17 @@ import os
 import re
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from app.domain.models import ModelExecutionProfile, PromptConfiguration
+from app.domain.models import MODEL_NOT_USED, ModelExecutionProfile, PromptConfiguration
 from app.pipeline.definition import PipelineDefinition
 from app.evaluation.scoring import EvaluationMetrics, FieldOutcome, aggregate
+from app.services import db
 
 
 SCHEMA = """
@@ -152,10 +154,31 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# Longer than the gap between snapshotting an evaluation's inputs and writing
+# the row that names them, which includes waiting for a model to be ready.
+INPUT_GRACE_SECONDS = 60 * 60
+
+
+def _snapshot_digests(snapshot_json: str | None) -> set[str]:
+    if not snapshot_json:
+        return set()
+    try:
+        snapshot = json.loads(snapshot_json)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(snapshot, dict):
+        return set()
+    return {
+        str(entry["sha256"])
+        for entry in snapshot.values()
+        if isinstance(entry, dict) and isinstance(entry.get("sha256"), str)
+    }
+
+
 class EvaluationStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        db.prepare(self.path)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
             self._add_missing_columns(connection)
@@ -163,32 +186,27 @@ class EvaluationStore:
     @staticmethod
     def _add_missing_columns(connection: sqlite3.Connection) -> None:
         """Bring a database created by an earlier version up to date."""
-        existing = {row["name"] for row in connection.execute("PRAGMA table_info(evaluations)")}
-        if "max_pages" not in existing:
-            connection.execute(
-                "ALTER TABLE evaluations ADD COLUMN max_pages INTEGER NOT NULL DEFAULT 0"
-            )
-        if "pipeline" not in existing:
-            # Nullable: a run started before pipelines existed ran the default one.
-            connection.execute("ALTER TABLE evaluations ADD COLUMN pipeline TEXT")
-        if "steps" not in existing:
-            # A run from before this says nothing rather than claiming a shape.
-            connection.execute("ALTER TABLE evaluations ADD COLUMN steps TEXT")
-        if "provider" not in existing:
-            connection.execute("ALTER TABLE evaluations ADD COLUMN provider TEXT")
-        if "pipeline_json" not in existing:
-            connection.execute("ALTER TABLE evaluations ADD COLUMN pipeline_json TEXT")
-        if "execution_profile_json" not in existing:
-            connection.execute(
-                "ALTER TABLE evaluations ADD COLUMN execution_profile_json TEXT"
-            )
-        if "extraction_engine_json" not in existing:
-            connection.execute("ALTER TABLE evaluations ADD COLUMN extraction_engine_json TEXT")
-        if "dataset_snapshot_json" not in existing:
-            connection.execute("ALTER TABLE evaluations ADD COLUMN dataset_snapshot_json TEXT")
+        db.add_missing_columns(
+            connection,
+            "evaluations",
+            {
+                "max_pages": "INTEGER NOT NULL DEFAULT 0",
+                # Nullable: a run started before pipelines existed ran the default one.
+                "pipeline": "TEXT",
+                # A run from before this says nothing rather than claiming a shape.
+                "steps": "TEXT",
+                "provider": "TEXT",
+                "pipeline_json": "TEXT",
+                "execution_profile_json": "TEXT",
+                "extraction_engine_json": "TEXT",
+                "dataset_snapshot_json": "TEXT",
+                "fingerprint": "TEXT",
+            },
+        )
         # Runs recorded before the column exists still happened somewhere. The
         # registry of hosted models is the best evidence available in
-        # hindsight; anything it does not know ran through LM Studio.
+        # hindsight; a run that recorded no model called none, and anything
+        # else ran through LM Studio.
         from app.services.gemini import GEMINI_MODELS, LEGACY_GEMINI_MODELS
 
         hosted = [model.id for model in (*GEMINI_MODELS, *LEGACY_GEMINI_MODELS)]
@@ -197,20 +215,28 @@ class EvaluationStore:
             f"""
             UPDATE evaluations
                SET provider = CASE WHEN model IN ({placeholders}) THEN 'gemini'
+                                   WHEN model = ? THEN 'none'
                                    ELSE 'lm_studio' END
              WHERE provider IS NULL
             """,
-            hosted,
+            [*hosted, MODEL_NOT_USED],
         )
 
-        document_columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(evaluation_documents)")
-        }
-        for column in ("prompt_tokens", "completion_tokens", "ocr_pages", "layout_pages", "custom_extractor_pages", "usage_complete"):
-            if column not in document_columns:
-                connection.execute(
-                    f"ALTER TABLE evaluation_documents ADD COLUMN {column} INTEGER"
+        db.add_missing_columns(
+            connection,
+            "evaluation_documents",
+            {
+                column: "INTEGER"
+                for column in (
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "ocr_pages",
+                    "layout_pages",
+                    "custom_extractor_pages",
+                    "usage_complete",
                 )
+            },
+        )
 
         # Runs finished before "partial" existed were all stored as "completed",
         # including ones where most documents never reached the model. Their
@@ -230,14 +256,8 @@ class EvaluationStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        try:
+        with db.connect(self.path) as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
 
     def start(
         self,
@@ -298,7 +318,11 @@ class EvaluationStore:
         directory = self.path.parent / "evaluation-inputs"
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{digest}.pdf"
-        if not target.exists():
+        if target.exists():
+            # Fresh again, so deleting an older run that shared it cannot
+            # reclaim it before the run being started records its reference.
+            os.utime(target)
+        else:
             with tempfile.NamedTemporaryFile(dir=directory, delete=False) as output:
                 temporary = Path(output.name)
                 output.write(content)
@@ -353,9 +377,41 @@ class EvaluationStore:
 
     def delete(self, evaluation_id: int) -> bool:
         with self._connect() as connection:
+            row = connection.execute(
+                "SELECT dataset_snapshot_json FROM evaluations WHERE id = ?", (evaluation_id,)
+            ).fetchone()
             cursor = connection.execute("DELETE FROM evaluations WHERE id = ?", (evaluation_id,))
             # The child rows go with it through ON DELETE CASCADE.
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted and row is not None:
+            self._reclaim_inputs(_snapshot_digests(row["dataset_snapshot_json"]))
+        return deleted
+
+    def _reclaim_inputs(self, candidates: set[str]) -> None:
+        """Remove the input PDFs no remaining evaluation refers to.
+
+        A file touched within the grace period is kept even when nothing refers
+        to it yet: an evaluation being started snapshots its inputs before the
+        row that names them is written.
+        """
+        if not candidates:
+            return
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT dataset_snapshot_json FROM evaluations WHERE dataset_snapshot_json IS NOT NULL"
+            ).fetchall()
+        referenced: set[str] = set()
+        for remaining in rows:
+            referenced |= _snapshot_digests(remaining["dataset_snapshot_json"])
+        directory = self.path.parent / "evaluation-inputs"
+        cutoff = time.time() - INPUT_GRACE_SECONDS
+        for digest in candidates - referenced:
+            target = directory / f"{digest}.pdf"
+            try:
+                if target.stat().st_mtime < cutoff:
+                    target.unlink()
+            except FileNotFoundError:
+                continue
 
     def record_document(
         self,
@@ -436,7 +492,10 @@ class EvaluationStore:
                 INSERT INTO evaluation_documents (evaluation_id, document, status, error)
                 VALUES (?, ?, 'failed', ?)
                 ON CONFLICT(evaluation_id, document) DO UPDATE
-                    SET status = 'failed', error = excluded.error
+                    SET status = 'failed', error = excluded.error,
+                        elapsed_ms = NULL, prompt_tokens = NULL, completion_tokens = NULL,
+                        ocr_pages = NULL, layout_pages = NULL,
+                        custom_extractor_pages = NULL, usage_complete = NULL
                 """,
                 (evaluation_id, document, error),
             )
@@ -444,9 +503,12 @@ class EvaluationStore:
     def finish(self, evaluation_id: int, status: str, error: str | None = None) -> None:
         if status not in TERMINAL_STATUSES:
             raise ValueError(f"{status!r} is not a terminal evaluation status")
+        # Only a run in flight can finish. A cancelled run stays cancelled
+        # even if the task that was driving it reaches its own ending later.
         with self._connect() as connection:
             connection.execute(
-                "UPDATE evaluations SET status = ?, finished_at = ?, error = ? WHERE id = ?",
+                "UPDATE evaluations SET status = ?, finished_at = ?, error = ? "
+                "WHERE id = ? AND status = 'running'",
                 (status, _now(), error, evaluation_id),
             )
 

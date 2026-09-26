@@ -1,6 +1,8 @@
 import json
 import os
+import threading
 from pathlib import Path
+from typing import Callable
 
 from pydantic import ValidationError
 
@@ -30,6 +32,8 @@ OLD_ENTITY_DESCRIPTIONS = {
 class SettingsStore:
     def __init__(self, path: Path) -> None:
         self.path = path
+        # Reentrant, so a mutator may read the settings it is changing.
+        self._lock = threading.RLock()
 
     def read(self) -> AppSettings:
         if not self.path.exists():
@@ -40,9 +44,21 @@ class SettingsStore:
             return AppSettings.model_validate(self._migrate_defaults(data))
         except (json.JSONDecodeError, ValidationError, TypeError, AttributeError):
             # An unreadable settings file must not make every endpoint fail.
-            # Keep the original for inspection and continue from the defaults.
-            self.path.with_suffix(".corrupt.json").write_text(raw, encoding="utf-8")
-            return AppSettings()
+            # Keep the original for inspection and continue from the defaults,
+            # written back so the fallback happens once rather than on every read.
+            with self._lock:
+                self.path.with_suffix(".corrupt.json").write_text(raw, encoding="utf-8")
+                return self.write(AppSettings())
+
+    def update(self, change: Callable[[AppSettings], AppSettings]) -> AppSettings:
+        """Read, change and write as one step.
+
+        Two requests that each read the settings, awaited something, and wrote
+        back what they read would lose one another's change. The mutator runs
+        on the settings as they are now, and must not await anything.
+        """
+        with self._lock:
+            return self.write(change(self.read()))
 
     @staticmethod
     def _migrate_defaults(data: dict) -> dict:
@@ -88,16 +104,17 @@ class SettingsStore:
         return data
 
     def write(self, settings: AppSettings) -> AppSettings:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Write-then-rename: an interrupted write can never leave a truncated
-        # settings file behind, because the rename is atomic.
-        temporary = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
-        try:
-            temporary.write_text(
-                json.dumps(settings.model_dump(mode="json"), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            os.replace(temporary, self.path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        with self._lock:
+            write_json_atomically(self.path, settings.model_dump(mode="json"))
         return settings
+
+
+def write_json_atomically(path: Path, payload: object) -> None:
+    """Write-then-rename: an interrupted write never leaves a truncated file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)

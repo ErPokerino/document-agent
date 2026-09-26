@@ -120,6 +120,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
   const [openedAs, setOpenedAs] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [tables, setTables] = useState<{ key: string; label: string }[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -174,10 +175,13 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
         .checkPipeline(draft)
         .then((checked) => {
           if (!active) return;
+          setCheckError(null);
           setProblems(checked.problems);
           setWarnings(checked.warnings);
         })
-        .catch(() => active && setProblems([]));
+        // Not "no problems": the check did not happen. The previous result
+        // stays, and saving still runs the same check.
+        .catch((cause) => active && setCheckError(cause instanceof Error ? cause.message : String(cause)));
     }, 250);
     return () => {
       active = false;
@@ -775,6 +779,13 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
             <div className="alert warning-alert" role="status">
               <Info size={17} />
               <span>{warnings.join(" ")}</span>
+            </div>
+          )}
+
+          {checkError && (
+            <div className="alert warning-alert" role="status">
+              <AlertCircle size={17} />
+              <span>This pipeline could not be checked: {checkError}</span>
             </div>
           )}
 

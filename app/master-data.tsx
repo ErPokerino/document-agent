@@ -23,6 +23,7 @@ import {
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
+import { latestOnly } from "../lib/latest";
 import { InfoHint } from "./info-hint";
 import type { EntityDefinition, MasterDataImport, MasterDataTable } from "../lib/types";
 import { SupplierRules } from "./supplier-rules";
@@ -83,17 +84,19 @@ export function MasterData({ entities }: { entities: EntityDefinition[] }) {
       .catch(() => undefined);
   }, []);
 
+  // A slower answer to an earlier search must not replace the newer one.
+  const [rowRequests] = useState(latestOnly);
   const refresh = useCallback(async () => {
     if (!tableKey) return;
-    setRows(
-      await api.masterDataRows(tableKey, {
-        query,
-        sort: sort?.column ?? "",
-        descending: sort?.descending ?? false,
-        filters: columnFilters,
-      }),
-    );
-  }, [tableKey, query, sort, columnFilters]);
+    const isCurrent = rowRequests.begin();
+    const found = await api.masterDataRows(tableKey, {
+      query,
+      sort: sort?.column ?? "",
+      descending: sort?.descending ?? false,
+      filters: columnFilters,
+    });
+    if (isCurrent()) setRows(found);
+  }, [tableKey, query, sort, columnFilters, rowRequests]);
 
   // Search and sort on the server: a reference table is the kind that outgrows
   // the browser long before anything else here does.

@@ -25,6 +25,11 @@ When value is null, confidence must be low. Confidence is a qualitative assessme
 """
 
 
+# What a run records as its model when its pipeline cannot call one, rather
+# than whichever model happens to be selected.
+MODEL_NOT_USED = "Not used"
+
+
 class EntityFormat(str, Enum):
     text = "text"
     date = "date"

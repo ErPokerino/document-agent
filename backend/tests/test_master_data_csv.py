@@ -121,3 +121,43 @@ def test_the_report_says_what_happened_row_by_row(store) -> None:
     assert report.added == 1
     assert report.skipped == 2
     assert len(report.reasons) == 2
+
+
+# -- spreadsheets as Excel writes them ------------------------------------------
+
+
+def test_a_semicolon_file_from_an_italian_excel_is_read(tmp_path) -> None:
+    """Excel set to Italian saves "CSV" with semicolons; the header was one column."""
+    empty = MasterDataStore(tmp_path / "semicolon.db")
+    report = csv_to_rows(empty, "suppliers", "name;id_subject\r\nRossi Srl;S900\r\n")
+
+    assert report.added == 1
+    assert empty.rows("suppliers")[0]["id_subject"] == "S900"
+
+
+def test_a_windows_1252_file_is_decoded() -> None:
+    """Excel's default for "CSV" on Windows is not UTF-8."""
+    from app.services.spreadsheet import decode
+
+    text = "name\r\nCaff\u00e8 Ner\u00f2\r\n"
+    assert decode(text.encode("cp1252")) == text
+
+
+def test_a_name_that_would_be_a_formula_is_exported_as_text(tmp_path) -> None:
+    """A spreadsheet evaluates a cell starting with =, and the name is someone else's text."""
+    store = MasterDataStore(tmp_path / "formula.db")
+    store.add("suppliers", {"id_subject": "=HYPERLINK(1)", "name": "Plain Srl"})
+
+    exported = rows_to_csv(store, "suppliers")
+
+    assert "'=HYPERLINK(1)" in exported
+
+
+def test_a_guarded_export_imports_back_unchanged(tmp_path) -> None:
+    source = MasterDataStore(tmp_path / "source.db")
+    source.add("suppliers", {"id_subject": "-S1", "name": "Minus Srl"})
+    target = MasterDataStore(tmp_path / "target.db")
+
+    csv_to_rows(target, "suppliers", rows_to_csv(source, "suppliers"))
+
+    assert target.rows("suppliers")[0]["id_subject"] == "-S1"

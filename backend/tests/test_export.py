@@ -179,3 +179,12 @@ def test_token_usage_is_exported_per_document() -> None:
 
     assert row["prompt_tokens"] == "1500"
     assert row["completion_tokens"] == "90"
+
+
+def test_extracted_text_that_would_be_a_formula_is_exported_as_text() -> None:
+    """An extracted value is text from a document, and Excel would evaluate it."""
+    from app.evaluation.export import _cell
+
+    assert _cell("=1+1") == "'=1+1"
+    assert _cell("@SUM(A1)") == "'@SUM(A1)"
+    assert _cell(-12.5) == "-12.5"

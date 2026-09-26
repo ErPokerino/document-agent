@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Literal
 
+from app.services import db
 from app.services.similarity import normalize_company_name
 
 
@@ -140,7 +141,7 @@ def _now() -> str:
 class MasterDataStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        db.prepare(self.path)
         with self._connect() as connection:
             for table in TABLES.values():
                 columns = ", ".join(f"{column.key} TEXT" for column in table.columns)
@@ -155,13 +156,8 @@ class MasterDataStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
-        try:
+        with db.connect(self.path) as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
 
     @staticmethod
     def table(key: str) -> TableDefinition:

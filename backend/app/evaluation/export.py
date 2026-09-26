@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from app.evaluation.store import EvaluationDetail
+from app.services.spreadsheet import safe_text
 
 
 COLUMNS = (
@@ -59,6 +60,8 @@ def _cell(value: Any) -> str:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, str):
+        return safe_text(value)
     return str(value)
 
 

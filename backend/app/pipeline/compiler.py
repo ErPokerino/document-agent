@@ -144,16 +144,13 @@ def build_steps(
     gcp: GcpSettings | None = None,
     master_data: MasterDataStore | None = None,
     supplier_rules: SupplierRuleStore | None = None,
-    max_pages: int | None = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
     problems = describe_problems(definition)
     if problems:
         raise PipelineError(" ".join(problems))
 
-    steps: list[Any] = [
-        InspectPdf(max_pages_to_analyze=definition.page_limit, max_pages=max_pages)
-    ]
+    steps: list[Any] = [InspectPdf(page_limit=definition.page_limit)]
     for index, step in enumerate(definition.steps, start=1):
         try:
             steps.append(

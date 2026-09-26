@@ -1,3 +1,4 @@
+import asyncio
 import base64
 
 import pymupdf
@@ -43,35 +44,35 @@ def build_extraction_client(context: PipelineContext):
     return LMStudioClient(context.lm_studio_url)
 
 
+def _page_count(content: bytes) -> int:
+    try:
+        document = pymupdf.open(stream=content, filetype="pdf")
+    except Exception as exc:
+        raise ValueError("The file is not a valid PDF") from exc
+    try:
+        return document.page_count
+    finally:
+        document.close()
+
+
 class InspectPdf:
-    def __init__(
-        self,
-        max_pages_to_analyze: int = 10,
-        max_pages: int | None = None,
-        page_limit: int | None = None,
-    ) -> None:
-        self.max_pages_to_analyze = max_pages_to_analyze
-        self.max_pages = max_pages
-        # Explicit override used by isolated pipeline tests.
+    """Count the pages and decide which of them the pipeline may process.
+
+    The pipeline's page limit is the only cut. A PDF longer than it is still
+    accepted, and the pages beyond the limit are reported as not processed.
+    """
+
+    def __init__(self, page_limit: int = 10) -> None:
         self.page_limit = page_limit
 
     async def run(self, context: PipelineContext) -> None:
-        try:
-            document = pymupdf.open(stream=context.content, filetype="pdf")
-        except Exception as exc:
-            raise ValueError("The file is not a valid PDF") from exc
-
-        try:
-            page_count = document.page_count
-        finally:
-            document.close()
-
+        # pymupdf blocks. On the event loop, a large PDF would stall health,
+        # cancel and every other request until it was done.
+        page_count = await asyncio.to_thread(_page_count, context.content)
         if page_count == 0:
             raise ValueError("The PDF contains no pages")
-        if self.max_pages is not None and page_count > self.max_pages:
-            raise ValueError(f"The POC supports at most {self.max_pages} pages")
 
-        page_limit = self.page_limit or self.max_pages_to_analyze
+        page_limit = self.page_limit
         processed_pages = min(page_count, page_limit)
         context.artifacts.update(
             {
@@ -81,9 +82,46 @@ class InspectPdf:
                 "first_processed_page": 1,
                 "last_processed_page": processed_pages,
                 "cut_applied": page_count > processed_pages,
-                "configured_page_limit": self.max_pages_to_analyze,
+                "configured_page_limit": page_limit,
             }
         )
+
+
+def render_page_png(content: bytes, page: int, scale: float) -> bytes | None:
+    """One page as a PNG, or None when the document has no such page."""
+    document = pymupdf.open(stream=content, filetype="pdf")
+    try:
+        if page < 0 or page >= document.page_count:
+            return None
+        pixmap = document[page].get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+        return pixmap.tobytes("png")
+    finally:
+        document.close()
+
+
+def _render_pages(content: bytes, pages: int, scale: float) -> list[str]:
+    images: list[str] = []
+    document = pymupdf.open(stream=content, filetype="pdf")
+    matrix = pymupdf.Matrix(scale, scale)
+    rendered_bytes = 0
+    try:
+        for page_index in range(pages):
+            pixmap = document[page_index].get_pixmap(matrix=matrix, alpha=False)
+            encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
+            del pixmap
+            rendered_bytes += len(encoded)
+            if rendered_bytes > MAX_TOTAL_IMAGE_BYTES:
+                budget_mb = MAX_TOTAL_IMAGE_BYTES // (1024 * 1024)
+                raise ValueError(
+                    f"Rendering page {page_index + 1} exceeded the {budget_mb} MB image "
+                    f"budget for a single request. The budget covers every page this "
+                    f"pipeline renders, so it is reached sooner the higher the page "
+                    f"limit is set."
+                )
+            images.append(encoded)
+    finally:
+        document.close()
+    return images
 
 
 class RenderPages:
@@ -98,30 +136,9 @@ class RenderPages:
 
     async def run(self, context: PipelineContext) -> None:
         processed_pages: int = context.artifacts["processed_pages"]
-        images: list[str] = []
-
-        document = pymupdf.open(stream=context.content, filetype="pdf")
-        matrix = pymupdf.Matrix(self.scale, self.scale)
-        rendered_bytes = 0
-        try:
-            for page_index in range(processed_pages):
-                pixmap = document[page_index].get_pixmap(matrix=matrix, alpha=False)
-                encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
-                del pixmap
-                rendered_bytes += len(encoded)
-                if rendered_bytes > MAX_TOTAL_IMAGE_BYTES:
-                    budget_mb = MAX_TOTAL_IMAGE_BYTES // (1024 * 1024)
-                    raise ValueError(
-                        f"Rendering page {page_index + 1} exceeded the {budget_mb} MB image "
-                        f"budget for a single request. The budget covers every page this "
-                        f"pipeline renders, so it is reached sooner the higher the page "
-                        f"limit is set."
-                    )
-                images.append(encoded)
-        finally:
-            document.close()
-
-        context.artifacts["images"] = images
+        context.artifacts["images"] = await asyncio.to_thread(
+            _render_pages, context.content, processed_pages, self.scale
+        )
 
 
 class ExtractEntities:
@@ -222,7 +239,7 @@ class ReadWithDocumentAi:
         processed_pages: int = context.artifacts["processed_pages"]
         # Document AI charges per page, so the pipeline's page limit has to be
         # applied before the document leaves this machine, not after.
-        content = _first_pages(context.content, processed_pages)
+        content = await asyncio.to_thread(_first_pages, context.content, processed_pages)
 
         answer = await self._client(context).process(self.processor_id, content)
         document = answer.get("document") or {}

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.pipeline.definition import PipelineDefinition
 from app.pipeline.store import PipelineStore, UnknownPipeline
+from app.services.settings_store import write_json_atomically
 
 
 def adopt_legacy_page_limit(settings_path: Path, pipelines: PipelineStore) -> None:
@@ -39,9 +40,7 @@ def adopt_legacy_page_limit(settings_path: Path, pipelines: PipelineStore) -> No
         default.page_limit = limit
         pipelines.save(default)
 
-    Path(settings_path).write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    write_json_atomically(Path(settings_path), data)
 
 
 # The model id DocuFlow used to ship as its default: the one installed on the
@@ -76,5 +75,5 @@ def clear_inherited_model_default(
         return
 
     data["model"] = ""
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomically(path, data)
     done.write_text("", encoding="utf-8")

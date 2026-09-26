@@ -53,7 +53,6 @@ async def run_evaluation(
     entities: list[EntityDefinition],
     prompts: PromptConfiguration,
     model: str,
-    max_pages: int,
     steps: list[Any],
     # One place builds a pipeline context, and it is not here. Assembling a
     # second one is how the Lab ended up running without the Google Cloud
@@ -75,7 +74,8 @@ async def run_evaluation(
 
             started = time.perf_counter()
             try:
-                content = read_document(name) if read_document is not None else datasets.read_document(dataset, name)
+                reader = read_document or (lambda document: datasets.read_document(dataset, document))
+                content = await asyncio.to_thread(reader, name)
                 # The steps hold no per-document state, so one compiled
                 # pipeline serves the whole run.
                 result = await DocumentPipeline(steps).run(make_context(name, content))
@@ -115,7 +115,9 @@ async def run_evaluation(
             # The extraction step leaves whatever the provider reported here.
             stats = result.artifacts.get("inference_stats") or {}
             pages = result.artifacts.get("document_ai_pages") or {}
-            evaluations.record_document(
+            # Off the event loop: the UI polls this run while it writes.
+            await asyncio.to_thread(
+                evaluations.record_document,
                 evaluation_id,
                 name,
                 outcomes,
@@ -128,7 +130,8 @@ async def run_evaluation(
                 usage_complete=not resumed and result.artifacts.get("usage_complete", True),
             )
             if run_store is not None:
-                run_store.record_run(
+                await asyncio.to_thread(
+                    run_store.record_run,
                     filename=name,
                     content=content,
                     model=model,

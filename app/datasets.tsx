@@ -24,6 +24,7 @@ import { api, apiUrls } from "../lib/api";
 import { filterByName } from "../lib/document-filter";
 import { formatLabels, labelModes } from "../lib/format";
 import { draftFromModel, draftToLabels, labelsToDraft, type LabelDraft, type LabelMode } from "../lib/labels";
+import { latestOnly } from "../lib/latest";
 import type { Dataset, DatasetDocument, EntityDefinition, ExtractionRun } from "../lib/types";
 import { DocumentPreview, type PreviewTarget } from "./document-preview";
 
@@ -56,6 +57,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [labelRequests] = useState(latestOnly);
   const uploadInput = useRef<HTMLInputElement>(null);
   const archiveInput = useRef<HTMLInputElement>(null);
 
@@ -117,9 +119,13 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
     }
   }
 
+  // Opening one document's labels and drafting another's both fill the one
+  // editor; whichever was asked for last is the one it shows.
   function openLabels(document: string) {
+    const isCurrent = labelRequests.begin();
     void guard(async () => {
       const current = await api.documentLabels(selectedDataset!, document);
+      if (!isCurrent()) return;
       setLabelDraft(labelsToDraft(current.labels, savedEntities));
       setLabelHints({});
       setLabelling(document);
@@ -127,10 +133,12 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
   }
 
   function draftWithModel(document: string) {
+    const isCurrent = labelRequests.begin();
     setDrafting(document);
     void guard(async () => {
       try {
         const proposal = await api.draftLabels(selectedDataset!, document);
+        if (!isCurrent()) return;
         setLabelDraft(draftFromModel(proposal.labels, savedEntities));
         setLabelHints(proposal.confidence);
         setLabelling(document);
@@ -138,6 +146,15 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
         setDrafting(null);
       }
     });
+  }
+
+  function closeLabels() {
+    labelRequests.invalidate();
+    setLabelling(null);
+  }
+
+  function editLabel(name: string, entry: LabelDraft) {
+    setLabelDraft((current) => ({ ...current, [name]: entry }));
   }
 
   function saveLabels() {
@@ -242,7 +259,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
                 const created = await api.importDataset(picked);
                 await refreshDatasets();
                 setSelectedDataset(created.name);
-                setLabelling(null);
+                closeLabels();
               });
             }}
           />
@@ -287,7 +304,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
                     if (selectedDataset === dataset.name) {
                       setSelectedDataset(null);
                       setDocuments([]);
-                      setLabelling(null);
+                      closeLabels();
                     }
                     setConfirmingDataset(null);
                     await refreshDatasets();
@@ -298,7 +315,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
               </div>
             ) : (
               <>
-                <button className="dataset-pick" onClick={() => { setSelectedDataset(dataset.name); setLabelling(null); setPickedRuns(new Set()); }}>
+                <button className="dataset-pick" onClick={() => { setSelectedDataset(dataset.name); closeLabels(); setPickedRuns(new Set()); }}>
                   <span className="radio">{selectedDataset === dataset.name && <span />}</span>
                   <span className="model-option-copy"><strong>{dataset.name}</strong><small>{dataset.document_count} documents · {dataset.labelled_count} labelled</small></span>
                 </button>
@@ -404,7 +421,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
               <button className="secondary-button small" disabled={!isModelReady || busy} title={isModelReady ? "Extract with the active pipeline, then review the draft labels" : "Load and warm up the model in LLM first"} onClick={() => draftWithModel(document.name)}>
                 {drafting === document.name ? <LoaderCircle className="spin" size={13} /> : <Wand2 size={13} />} Draft
               </button>
-              <button className="secondary-button small" onClick={() => openLabels(document.name)}>{document.labelled ? "Edit" : "Label"}</button>
+              <button className="secondary-button small" disabled={busy} onClick={() => openLabels(document.name)}>{document.labelled ? "Edit" : "Label"}</button>
               {confirmingDocument === document.name ? (
                 <span className="row-confirm compact">
                   <button className="secondary-button small ghost" onClick={() => setConfirmingDocument(null)}>Cancel</button>
@@ -436,7 +453,7 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
             <button className="secondary-button small" onClick={() => setPreview({ dataset: selectedDataset, document: labelling })}>
               <Eye size={13} /> View document
             </button>
-            <button className="icon-button" aria-label="Close" onClick={() => setLabelling(null)}><X size={15} /></button>
+            <button className="icon-button" aria-label="Close" onClick={closeLabels}><X size={15} /></button>
           </div>
           {Object.keys(labelHints).length > 0 && (
             <p className="field-help draft-note">
@@ -452,10 +469,10 @@ export function Datasets({ savedEntities, isModelReady }: Props) {
                   <span>{entity.name}</span>
                   <small>{formatLabels[entity.format]}</small>
                 </div>
-                <select value={entry.mode} onChange={(event) => setLabelDraft({ ...labelDraft, [entity.name]: { ...entry, mode: event.target.value as LabelMode } })}>
+                <select value={entry.mode} onChange={(event) => editLabel(entity.name, { ...entry, mode: event.target.value as LabelMode })}>
                   {Object.entries(labelModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
-                <input disabled={entry.mode !== "value"} placeholder={entry.mode === "value" ? "Correct value" : "—"} value={entry.text} onChange={(event) => setLabelDraft({ ...labelDraft, [entity.name]: { mode: "value", text: event.target.value } })} />
+                <input disabled={entry.mode !== "value"} placeholder={entry.mode === "value" ? "Correct value" : "—"} value={entry.text} onChange={(event) => editLabel(entity.name, { mode: "value", text: event.target.value })} />
                 {hint ? <span className={`confidence-pill ${hint}`}><i /> {hint}</span> : <span />}
               </div>
             );

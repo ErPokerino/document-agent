@@ -31,7 +31,7 @@ def test_the_page_limit_comes_from_the_pipeline() -> None:
     default = PipelineDefinition.default()
     default.page_limit = 7
 
-    assert compile_it(default)[0].max_pages_to_analyze == 7
+    assert compile_it(default)[0].page_limit == 7
 
 
 def test_the_render_scale_is_taken_from_the_step_configuration() -> None:
