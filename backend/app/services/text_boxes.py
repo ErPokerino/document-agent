@@ -179,10 +179,14 @@ def _spellings(value: object) -> list[str]:
 
     if _DECIMAL.match(text):
         whole, _, fraction = text.partition(".")
-        # 1220.00 on a page that wrote 1.220,00 — and on one that wrote 1220.
-        candidates.append(f"{whole},{fraction}")
-        candidates.append(_grouped(whole, ".") + "," + fraction)
-        candidates.append(_grouped(whole, ",") + "." + fraction)
+        # A decimal is stored as a float, so 1.220,00 on the page is 1220.0
+        # here: the cents a document prints have to be put back to match.
+        for digits in dict.fromkeys((fraction, fraction.ljust(2, "0"))):
+            # 1220.00 on a page that wrote 1.220,00 — and on one that wrote 1220.
+            candidates.append(f"{whole}.{digits}")
+            candidates.append(f"{whole},{digits}")
+            candidates.append(_grouped(whole, ".") + "," + digits)
+            candidates.append(_grouped(whole, ",") + "." + digits)
         if int(fraction) == 0:
             candidates.append(whole)
             candidates.append(_grouped(whole, "."))

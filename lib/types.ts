@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
 
-export type StepKind = "render_pages" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
+export type StepKind = "render_pages" | "read_pdf_text" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
 
 export type Confidence = FieldExtraction["confidence"];
 

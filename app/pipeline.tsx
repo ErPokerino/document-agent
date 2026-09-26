@@ -515,6 +515,34 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                     </div>
                   )}
 
+                  {step.kind === "read_pdf_text" && (() => {
+                    const feedsModel = (step.config as { feeds_model?: boolean }).feeds_model !== false;
+                    return (
+                    <div className="flow-step-body">
+                      <label className="flow-field">
+                        <span>What this reading is for<InfoHint text="A native PDF carries its text and word positions. Choose positions only to enable document highlighting while keeping page images as the model input." /></span>
+                        <select
+                          value={feedsModel ? "text_and_positions" : "positions_only"}
+                          onChange={(event) =>
+                            setSteps(patchStepConfig(draft.steps, index, {
+                              feeds_model: event.target.value === "text_and_positions",
+                            }))
+                          }
+                        >
+                          <option value="text_and_positions">Give the model the text, and locate values</option>
+                          <option value="positions_only">Locate values only, do not give the model the text</option>
+                        </select>
+                      </label>
+                      <p className="field-help">
+                        Read on this machine, at no cost. A scanned document carries no text and is
+                        refused rather than read as empty; a page without text is named as such.
+                        Embedded text can differ from what the page shows, so compare it with OCR
+                        in Lab before relying on it.
+                      </p>
+                    </div>
+                    );
+                  })()}
+
                   {step.kind === "document_ai_ocr" && (() => {
                     const feedsModel = (step.config as { feeds_model?: boolean }).feeds_model !== false;
                     return (

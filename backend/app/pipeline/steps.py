@@ -28,7 +28,7 @@ from app.services.custom_extractor import (
     locations_from_response,
     schema_override,
 )
-from app.services.text_boxes import tokens_from_ocr
+from app.services.text_boxes import Box, TextToken, tokens_from_ocr
 from app.services.lm_studio import LMStudioClient
 
 
@@ -140,6 +140,81 @@ class RenderPages:
         context.artifacts["images"] = await asyncio.to_thread(
             _render_pages, context.content, processed_pages, self.scale
         )
+
+
+def _native_text(content: bytes, pages: int) -> tuple[list[str], list[TextToken]]:
+    """Each page's embedded text, and every word on it with a normalized box."""
+    document = pymupdf.open(stream=content, filetype="pdf")
+    texts: list[str] = []
+    tokens: list[TextToken] = []
+    try:
+        for index in range(pages):
+            page = document[index]
+            texts.append(page.get_text("text").strip())
+            # Word boxes are in unrotated page space; the rendered page and the
+            # highlight are not, so each box is turned with the page first.
+            width, height = page.rect.width or 1, page.rect.height or 1
+            for x0, y0, x1, y1, word, *_ in page.get_text("words"):
+                if not word.strip():
+                    continue
+                rect = pymupdf.Rect(x0, y0, x1, y1) * page.rotation_matrix
+                tokens.append(
+                    TextToken(
+                        text=word,
+                        page=index,
+                        box=Box(
+                            left=max(0.0, rect.x0 / width),
+                            top=max(0.0, rect.y0 / height),
+                            right=min(1.0, rect.x1 / width),
+                            bottom=min(1.0, rect.y1 / height),
+                        ),
+                    )
+                )
+    finally:
+        document.close()
+    return texts, tokens
+
+
+class ReadPdfText:
+    """Read the text a native PDF carries, without sending it anywhere.
+
+    Most invoices are generated rather than scanned, and their text is already
+    in the file: reading it costs nothing, takes milliseconds and never leaves
+    the machine. A scan carries none, and an empty reading passed on as a
+    successful one would have a model answer from nothing — so a document with
+    no text on any page it may read is refused, and a page without text is
+    named in the text the model is given.
+
+    Native text is not automatically right. Reading order, stale embedded OCR
+    and tables can all differ from what the page shows, which is why this is a
+    reader to measure in Lab against OCR, not a default.
+    """
+
+    def __init__(self, feeds_model: bool = True) -> None:
+        # As with OCR: a reading can be there only to locate values on the page
+        # while a vision model reads the picture.
+        self.feeds_model = feeds_model
+
+    async def run(self, context: PipelineContext) -> None:
+        processed_pages: int = context.artifacts["processed_pages"]
+        texts, tokens = await asyncio.to_thread(_native_text, context.content, processed_pages)
+        empty = [index + 1 for index, text in enumerate(texts) if not text]
+        if len(empty) == len(texts):
+            span = "page 1" if processed_pages == 1 else f"pages 1–{processed_pages}"
+            raise ValueError(
+                f"The PDF carries no text of its own on {span}, which is what a scanned "
+                "document looks like."
+            )
+
+        context.artifacts["ocr_tokens"] = tokens
+        context.artifacts["pdf_text_pages"] = [
+            {"page": index + 1, "characters": len(text)} for index, text in enumerate(texts)
+        ]
+        if self.feeds_model:
+            context.artifacts["text"] = "\n\n".join(
+                f"[Page {index + 1}]\n{text}" if text else f"[Page {index + 1} carries no embedded text.]"
+                for index, text in enumerate(texts)
+            )
 
 
 class ExtractEntities:

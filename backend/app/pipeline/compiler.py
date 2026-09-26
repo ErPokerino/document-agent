@@ -26,6 +26,7 @@ from app.pipeline.steps import (
     InspectPdf,
     LookUpInMasterData,
     MarkUnfilledDerivedEntities,
+    ReadPdfText,
     ReadWithDocumentAi,
     RefineWithRegex,
     RenderPages,
@@ -87,6 +88,8 @@ def _build_one(
     config = binding(step, gcp) if step.kind.value in KINDS else step.config
     if step.kind is StepKind.render_pages:
         return RenderPages(scale=float(config.get("scale", DEFAULT_RENDER_SCALE)))
+    if step.kind is StepKind.read_pdf_text:
+        return ReadPdfText(feeds_model=bool(config.get("feeds_model", True)))
     if step.kind in (StepKind.document_ai_ocr, StepKind.document_ai_layout):
         # The processor comes from Settings unless the step names its own,
         # which is how a second processor can be tried without changing both.

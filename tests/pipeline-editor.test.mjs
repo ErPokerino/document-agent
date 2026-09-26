@@ -135,6 +135,18 @@ test("steps are offered grouped by what they do", () => {
   assert.deepEqual(grouped[3].entries.map((entry) => entry.kind), ["regex_refine"]);
 });
 
+test("the native PDF reader is offered with the other readers, and reads locally", () => {
+  const grouped = groupCatalogue([
+    { kind: "render_pages", label: "Render pages" },
+    { kind: "read_pdf_text", label: "Read PDF text" },
+    { kind: "document_ai_ocr", label: "Document AI OCR" },
+  ]);
+
+  assert.deepEqual(grouped[0].entries.map((entry) => entry.kind), ["render_pages", "read_pdf_text", "document_ai_ocr"]);
+  assert.deepEqual(defaultConfigFor("read_pdf_text"), { feeds_model: true });
+  assert.match(summarizeStep({ kind: "read_pdf_text", config: {} }), /PDF/);
+});
+
 test("a step nobody grouped still gets offered", () => {
   const grouped = groupCatalogue([{ kind: "something_new", label: "Something new" }]);
 
@@ -171,6 +183,7 @@ test("every step the backend can run has a readable name", () => {
   // it exhaustive now; this keeps the fallback honest about what it is for.
   const kinds = [
     "render_pages",
+    "read_pdf_text",
     "document_ai_ocr",
     "document_ai_layout",
     "document_ai_extract",

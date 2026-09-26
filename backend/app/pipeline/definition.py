@@ -36,6 +36,7 @@ class Artifact(str, Enum):
 
 class StepKind(str, Enum):
     render_pages = "render_pages"
+    read_pdf_text = "read_pdf_text"
     document_ai_ocr = "document_ai_ocr"
     document_ai_layout = "document_ai_layout"
     document_ai_extract = "document_ai_extract"
@@ -63,6 +64,17 @@ CONTRACTS: dict[StepKind, StepContract] = {
         description="Turn the first pages of the PDF into images for a vision model.",
         requires_all=(Artifact.pdf,),
         produces=(Artifact.images,),
+    ),
+    StepKind.read_pdf_text: StepContract(
+        kind=StepKind.read_pdf_text,
+        label="Read PDF text",
+        description=(
+            "Read the text a native PDF already carries, with word positions, on "
+            "this machine. A scan carries none, and the step says so rather than "
+            "passing an empty reading on."
+        ),
+        requires_all=(Artifact.pdf,),
+        produces=(Artifact.text,),
     ),
     StepKind.document_ai_ocr: StepContract(
         kind=StepKind.document_ai_ocr,

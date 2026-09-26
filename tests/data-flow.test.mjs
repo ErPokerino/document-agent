@@ -28,6 +28,12 @@ test("Document AI sends the pages to Google even when the model is local", () =>
   assert.match(flow.detail, /this machine/);
 });
 
+test("reading the text a PDF carries keeps the document on the machine", () => {
+  const flow = describeDataFlow("lm_studio", ["read_pdf_text", "llm_extract"]);
+
+  assert.equal(flow.leavesTheMachine, false);
+});
+
 test("the Layout Parser counts as much as OCR does", () => {
   assert.equal(describeDataFlow("lm_studio", ["document_ai_layout"]).leavesTheMachine, true);
 });

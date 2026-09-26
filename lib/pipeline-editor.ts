@@ -37,6 +37,7 @@ export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
     };
   }
   if (kind.startsWith("document_ai_")) return { processor_ref: "", processor_version: "" };
+  if (kind === "read_pdf_text") return { feeds_model: true };
   return {};
 }
 
@@ -84,6 +85,7 @@ export function summarizeStep(step: PipelineStep): string {
     const scale = Number((step.config as { scale?: number }).scale ?? DEFAULT_RENDER_SCALE);
     return `Page images at ${scale}× zoom`;
   }
+  if (step.kind === "read_pdf_text") return "Text the PDF already carries";
   if (step.kind === "document_ai_ocr") return "OCR text from Document AI";
   if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
   if (step.kind === "document_ai_extract") return "Fields from Custom Extractor";
@@ -134,7 +136,7 @@ const GROUPS: { title: string; blurb: string; kinds: string[] }[] = [
   {
     title: "Read the document",
     blurb: "Read images, text or fields from the PDF for the pipeline.",
-    kinds: ["render_pages", "document_ai_ocr", "document_ai_layout", "document_ai_extract"],
+    kinds: ["render_pages", "read_pdf_text", "document_ai_ocr", "document_ai_layout", "document_ai_extract"],
   },
   { title: "Ask a model", blurb: "One call that fills the extracted fields.", kinds: ["llm_extract"] },
   {
@@ -176,6 +178,7 @@ export function groupCatalogue(
  */
 const STEP_LABELS: Record<StepKind, string> = {
   render_pages: "Render pages",
+  read_pdf_text: "Read PDF text",
   document_ai_ocr: "Document AI OCR",
   document_ai_layout: "Document AI Layout Parser",
   document_ai_extract: "Document AI Custom Extractor",

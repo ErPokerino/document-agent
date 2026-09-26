@@ -69,6 +69,9 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
     const processors = evaluation.processor_bindings ?? [];
     const processorKey = JSON.stringify(processors.map(step => [step.kind, step.config.project_id, step.config.location, step.config.processor_id]));
     const readings = processors.filter(step => step.kind !== "document_ai_extract").map(step => `${step.kind === "document_ai_ocr" ? "OCR" : "Layout Parser"}: ${String(step.config.processor_id).replace("/processorVersions/", " · ")} (${step.config.project_id} / ${step.config.location})`);
+    // The local reader has no processor to name, and is exactly what a
+    // comparison against OCR needs to be able to tell apart.
+    if (evaluation.steps?.includes("read_pdf_text")) readings.unshift("Native PDF text");
     const baseDetail = engineDetail(evaluation);
     const detail = readings.length ? [baseDetail !== engineLabel(evaluation) ? baseDetail : "", ...readings].filter(Boolean).join("; ") : baseDetail;
     const key = `${processorKey}\u0000${engineKey(evaluation)}\u0000${evaluation.pipeline}\u0000${evaluation.dataset}`;
