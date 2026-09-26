@@ -12,6 +12,7 @@ from app.services.document_ai import (
     markdown_from_layout,
     text_from_ocr,
 )
+from app.services.extraction_provider import ExtractionProvider
 from app.services.gemini import GeminiClient
 from app.services.master_data import MasterDataStore
 from app.services.similarity import DEFAULT_ALGORITHM, similarity
@@ -37,7 +38,7 @@ from app.services.lm_studio import LMStudioClient
 MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024
 
 
-def build_extraction_client(context: PipelineContext):
+def build_extraction_client(context: PipelineContext) -> ExtractionProvider:
     """The pipeline is provider-agnostic; only this decides who does the work."""
     if context.provider == "gemini":
         return GeminiClient(context.gemini_api_key, context.gemini_thinking_level)

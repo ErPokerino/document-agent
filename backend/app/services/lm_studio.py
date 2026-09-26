@@ -33,12 +33,22 @@ from app.domain.models import (
     model_entities,
 )
 
-
-# Prefixed to the text an OCR or layout step produced, so the model knows
-# where it came from and that it may trust it over its own reading.
-DOCUMENT_TEXT_HEADER = (
-    "A previous step read the document. Use this text as the source of truth for anything it contains:"
+from app.services.extraction_provider import (
+    DOCUMENT_TEXT_HEADER,
+    VALUE_CHARACTER_CEILING,
+    VALUE_CHARACTERS_PER_TOKEN,
+    ExtractionProvider,
+    page_note,
 )
+
+__all__ = [
+    "DOCUMENT_TEXT_HEADER",
+    "VALUE_CHARACTER_CEILING",
+    "VALUE_CHARACTERS_PER_TOKEN",
+    "LMStudioClient",
+    "LMStudioError",
+    "page_note",
+]
 
 
 class LMStudioError(ProviderError):
@@ -62,20 +72,6 @@ MODEL_PROFILE_EVAL_BATCH_SIZE = 512
 MODEL_PROFILE_FLASH_ATTENTION = True
 MODEL_PROFILE_OFFLOAD_KV_CACHE = False
 MODEL_PROFILE_SEED = 0
-# The longest a single extracted value may be. A schema sent to LM Studio
-# becomes a grammar, and a grammar permitting an unbounded string permits one
-# forever: a model too small for the document cannot answer with invalid JSON,
-# so it stays inside an open value and repeats until the token budget or the
-# request timeout ends it — ten minutes a document, on this bench. Bounded, the
-# same model fails one field instantly and the run carries on. Set well above
-# any real invoice field, so it never truncates an answer that was going well.
-VALUE_CHARACTER_CEILING = 200
-# Characters per token in a value that has gone wrong. Measured on this bench:
-# the runaway that the ceiling above was written against ran to 1,289
-# characters in 600 tokens, and it was CJK fragments rather than prose, which
-# would have run three to four. Two is the pessimistic end, which is where a
-# ceiling belongs.
-VALUE_CHARACTERS_PER_TOKEN = 2
 # A large model on CPU often fails the first image and succeeds on the next:
 # qwen3.6-35b-a3b takes 95 seconds over a blank warm-up page and needed two
 # goes. Each attempt reloads the model, so they are not cheap — but reporting a
@@ -102,34 +98,6 @@ def loaded_profile_matches(config: dict[str, Any], *, cpu_safe: bool) -> bool:
         and config.get("flash_attention") is MODEL_PROFILE_FLASH_ATTENTION
         and config.get("offload_kv_cache_to_gpu") is MODEL_PROFILE_OFFLOAD_KV_CACHE
     )
-
-
-def page_note(*, total_pages: int, processed_pages: int) -> str:
-    """Tell the model how much of the document it is looking at.
-
-    Both numbers, always. A model handed page 1 of a 7-page invoice and told
-    nothing reads the first subtotal as the total; told the document is longer
-    than what it can see, it returns null instead of guessing.
-    """
-    document = f"This document has {total_pages} page" + ("" if total_pages == 1 else "s")
-    if processed_pages >= total_pages:
-        if total_pages == 1:
-            return f"{document}, and it is supplied here."
-        return f"{document}, and all {total_pages} of them are supplied here."
-
-    missing = total_pages - processed_pages
-    seen = (
-        "the first page only is supplied here"
-        if processed_pages == 1
-        else f"only the first {processed_pages} are supplied here"
-    )
-    return (
-        f"{document}, and {seen}: {missing} page" + ("" if missing == 1 else "s") + " "
-        "you cannot see follow. Do not infer anything from them. Return null for a value that "
-        "is not visible on the pages you were given, and never treat a subtotal or a "
-        "carried-forward amount as the final total."
-    )
-
 
 
 # LM Studio's REST API answers `Failed to load LLM 'x': Error: Failed to load
@@ -264,7 +232,7 @@ def _representative_warmup_image() -> str:
     return base64.b64encode(png).decode("ascii")
 
 
-class LMStudioClient:
+class LMStudioClient(ExtractionProvider):
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.last_prediction_stats: dict[str, int | float] | None = None
@@ -926,11 +894,13 @@ class LMStudioClient:
         processed_pages: int,
         document_text: str = "",
     ) -> dict[str, FieldExtraction]:
-        note = page_note(total_pages=total_pages, processed_pages=processed_pages)
-        user_text = prompts.user_prompt.replace("{page_range}", page_range)
-        user_text = f"{user_text.strip()}\n\n{note}"
-        if document_text.strip():
-            user_text = f"{user_text}\n\n{DOCUMENT_TEXT_HEADER}\n\n{document_text.strip()}"
+        user_text = self._user_text(
+            prompts,
+            page_range,
+            total_pages=total_pages,
+            processed_pages=processed_pages,
+            document_text=document_text,
+        )
         content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
         content.extend(
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image}"}}
@@ -1081,14 +1051,10 @@ class LMStudioClient:
 
     @staticmethod
     def _system_prompt(prompts: PromptConfiguration) -> str:
-        entity_lines = "\n".join(
-            f"- {entity.name} [{entity.format.value}]: {entity.description}"
-            for entity in model_entities(prompts.entities)
-        )
         return f"""{prompts.system_prompt.strip()}
 
 Entities to extract:
-{entity_lines}
+{ExtractionProvider._entity_lines(prompts)}
 
 {prompts.confidence_prompt.strip()}
 Return each value in the JSON property with its exact entity name.
@@ -1136,50 +1102,6 @@ Return only JSON that conforms to the supplied schema.
             "required": [*value_keys, "c"],
             "additionalProperties": False,
         }
-
-    @staticmethod
-    def _value_token_ceiling(entity_format: EntityFormat) -> int:
-        """The most tokens one value of this format may legally take.
-
-        A date and a currency code are pinned by their own pattern and a number
-        by what a number looks like; free text is the only value that can run
-        all the way to VALUE_CHARACTER_CEILING.
-        """
-        if entity_format is EntityFormat.date:
-            return 8
-        if entity_format is EntityFormat.currency:
-            return 4
-        if entity_format in (EntityFormat.decimal, EntityFormat.integer):
-            return 16
-        return VALUE_CHARACTER_CEILING // VALUE_CHARACTERS_PER_TOKEN
-
-    @staticmethod
-    def _output_token_budget(entities: list[EntityDefinition]) -> int:
-        """Room for the longest answer the schema still permits.
-
-        The property names are part of the generated output, so a schema with
-        long names needs a larger budget than one with short names: roughly one
-        token per three characters of key, plus the value and the JSON
-        punctuation around each property.
-
-        The value allowance is derived from VALUE_CHARACTER_CEILING rather than
-        picked, because the two have to agree. A flat 32 tokens a property was
-        written before the ceiling existed and is a third of what one bounded
-        free-text value can cost, so a schema with six or more text fields
-        could be cut off mid-value with nothing wrong in what it was writing —
-        the very failure the ceiling was added to remove. The grammar stops a
-        runaway now; this number only has to stop truncating good answers.
-
-        Derived entities are excluded because `_generation_schema` excludes
-        them: the model is never asked for a value it will not write.
-        """
-        entities = model_entities(entities)
-        key_tokens = sum(max(1, len(entity.name) // 3) for entity in entities)
-        value_tokens = sum(
-            LMStudioClient._value_token_ceiling(entity.format) for entity in entities
-        )
-        # Four a property for the quotes, the colon and the comma.
-        return 128 + key_tokens + value_tokens + len(entities) * 4
 
     @staticmethod
     def _named_response_shape_is_valid(

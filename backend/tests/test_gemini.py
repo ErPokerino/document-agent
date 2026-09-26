@@ -200,6 +200,26 @@ async def test_no_thinking_config_is_sent_to_a_model_without_thinking() -> None:
     assert "thinkingConfig" not in FakeAsyncClient.requests[0]["body"]["generationConfig"]
 
 
+async def test_a_model_without_thinking_gets_the_same_output_budget_as_a_local_one() -> None:
+    from app.services.extraction_provider import ExtractionProvider
+
+    FakeAsyncClient.response = answer({entity.name: None for entity in ENTITIES})
+
+    await extract(GeminiClient("k"), "gemini-3.5-flash-lite")
+
+    config = FakeAsyncClient.requests[0]["body"]["generationConfig"]
+    assert config["maxOutputTokens"] == ExtractionProvider._output_token_budget(ENTITIES)
+
+
+async def test_a_thinking_model_is_not_capped_by_the_answer_budget() -> None:
+    """Thinking counts against the same limit, and how much a hard invoice needs is unmeasured."""
+    FakeAsyncClient.response = answer({entity.name: None for entity in ENTITIES})
+
+    await extract(GeminiClient("k"), "gemini-3.8-flash")
+
+    assert "maxOutputTokens" not in FakeAsyncClient.requests[0]["body"]["generationConfig"]
+
+
 async def test_the_answer_becomes_validated_fields() -> None:
     FakeAsyncClient.response = answer(
         {

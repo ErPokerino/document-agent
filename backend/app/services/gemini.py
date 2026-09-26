@@ -26,9 +26,9 @@ from app.domain.models import (
     model_entities,
 )
 from app.services.errors import ProviderError
+from app.services.extraction_provider import ExtractionProvider
 from app.services.field_validation import validate_result
 from app.services.field_wording import described_for_reader
-from app.services.lm_studio import DOCUMENT_TEXT_HEADER, page_note
 
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -69,7 +69,7 @@ def find_model(model_id: str) -> GeminiModel | None:
     return next((model for model in (*GEMINI_MODELS, *LEGACY_GEMINI_MODELS) if model.id == model_id), None)
 
 
-class GeminiClient:
+class GeminiClient(ExtractionProvider):
     def __init__(self, api_key: str, thinking_level: str = "low") -> None:
         self.api_key = (api_key or "").strip()
         self.thinking_level = thinking_level if thinking_level in THINKING_LEVELS else "low"
@@ -154,10 +154,13 @@ class GeminiClient:
         document_text: str = "",
     ) -> dict[str, FieldExtraction]:
         headers = self._headers()
-        note = page_note(total_pages=total_pages, processed_pages=processed_pages)
-        user_text = f"{prompts.user_prompt.replace('{page_range}', page_range).strip()}\n\n{note}"
-        if document_text.strip():
-            user_text = f"{user_text}\n\n{DOCUMENT_TEXT_HEADER}\n\n{document_text.strip()}"
+        user_text = self._user_text(
+            prompts,
+            page_range,
+            total_pages=total_pages,
+            processed_pages=processed_pages,
+            document_text=document_text,
+        )
         parts: list[dict[str, Any]] = [{"text": user_text}]
         parts.extend(
             {"inlineData": {"mimeType": "image/png", "data": image}} for image in images
@@ -173,6 +176,12 @@ class GeminiClient:
             # Gemini 3 defaults to "high"; an extraction does not need to pay for
             # that, so the configured level is always stated.
             generation_config["thinkingConfig"] = {"thinkingLevel": self.thinking_level}
+        else:
+            # The answer is all a model without thinking writes, so it gets
+            # the same budget as a local one. Thinking tokens count against
+            # the same limit, and nothing measured says how many a hard
+            # invoice takes, so a thinking model is not capped here.
+            generation_config["maxOutputTokens"] = self._output_token_budget(prompts.entities)
 
         payload = {
             "systemInstruction": {"parts": [{"text": self._system_prompt(prompts)}]},
@@ -264,7 +273,9 @@ class GeminiClient:
             }
             for entity in entities
         }
-        return validate_result(expanded, entities)
+        # The proto schema has no length bound, so the ceiling LM Studio's
+        # grammar enforces is applied to the answer instead.
+        return ExtractionProvider._within_ceiling(validate_result(expanded, entities), entities)
 
     @staticmethod
     def _prediction_stats(body: dict[str, Any]) -> dict[str, int | float] | None:
@@ -285,14 +296,10 @@ class GeminiClient:
 
     @staticmethod
     def _system_prompt(prompts: PromptConfiguration) -> str:
-        entity_lines = "\n".join(
-            f"- {entity.name} [{entity.format.value}]: {entity.description}"
-            for entity in model_entities(prompts.entities)
-        )
         return f"""{prompts.system_prompt.strip()}
 
 Entities to extract:
-{entity_lines}
+{ExtractionProvider._entity_lines(prompts)}
 
 {prompts.confidence_prompt.strip()}
 Return one property per entity, named exactly as above, and a `confidence`
