@@ -15,6 +15,7 @@ from typing import Any, Callable, ClassVar
 import httpx
 from pydantic import ValidationError
 
+from app.services.errors import ProviderError
 from app.services.field_validation import parse_named_value, validate_result
 from app.services.host import (
     HostCapabilities,
@@ -40,8 +41,12 @@ DOCUMENT_TEXT_HEADER = (
 )
 
 
-class LMStudioError(RuntimeError):
-    pass
+class LMStudioError(ProviderError):
+    def __init__(self, message: str, *, runtime_lost: bool = False) -> None:
+        super().__init__(message)
+        # The runtime itself went away, not just this request: the model has to
+        # be loaded again before anything else can run on it.
+        self.runtime_lost = runtime_lost
 
 
 INFERENCE_TIMEOUT_SECONDS = 600
@@ -754,7 +759,10 @@ class LMStudioClient:
             return response.json()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:800]
-            raise LMStudioError(self._friendly_engine_error(detail, "Model loading failed")) from exc
+            raise LMStudioError(
+                self._friendly_engine_error(detail, "Model loading failed"),
+                runtime_lost=self._runtime_lost(detail),
+            ) from exc
         except httpx.HTTPError as exc:
             if path == "/v1/chat/completions":
                 raise LMStudioError(
@@ -991,7 +999,8 @@ class LMStudioClient:
             except httpx.HTTPStatusError as exc:
                 detail = exc.response.text[:600]
                 raise LMStudioError(
-                    self._friendly_engine_error(detail, "LM Studio rejected the request")
+                    self._friendly_engine_error(detail, "LM Studio rejected the request"),
+                    runtime_lost=self._runtime_lost(detail),
                 ) from exc
             except httpx.TimeoutException as exc:
                 raise LMStudioError(
@@ -1033,6 +1042,15 @@ class LMStudioClient:
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 result[key] = value
         return result or None
+
+    @staticmethod
+    def _runtime_lost(detail: str) -> bool:
+        """Whether LM Studio's own words say the loaded model stopped serving."""
+        return (
+            "DeviceLost" in detail
+            or '"terminated"' in detail
+            or "request terminated" in detail.lower()
+        )
 
     @staticmethod
     def _friendly_engine_error(detail: str, prefix: str) -> str:

@@ -25,6 +25,7 @@ from app.domain.models import (
     PromptConfiguration,
     model_entities,
 )
+from app.services.errors import ProviderError
 from app.services.field_validation import validate_result
 from app.services.field_wording import described_for_reader
 from app.services.lm_studio import DOCUMENT_TEXT_HEADER, page_note
@@ -40,7 +41,7 @@ CONFIDENCE_LEVELS = ["low", "medium", "high"]
 THINKING_LEVELS = ("low", "medium", "high")
 
 
-class GeminiError(RuntimeError):
+class GeminiError(ProviderError):
     pass
 
 

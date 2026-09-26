@@ -19,6 +19,8 @@ from typing import Any
 
 import httpx
 
+from app.services.errors import ProviderError
+
 SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 # The exchanged token lasts an hour; renew a minute early so a long run never
 # starts a request with a token that expires mid-flight.
@@ -36,7 +38,7 @@ HEADING_TYPES = {
 }
 
 
-class DocumentAiError(RuntimeError):
+class DocumentAiError(ProviderError):
     """Anything that stops a document from being processed, in plain words."""
 
 

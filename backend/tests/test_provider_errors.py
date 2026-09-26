@@ -46,3 +46,42 @@ async def test_a_document_ai_failure_is_a_bad_gateway_with_its_message(tmp_path,
     assert "permission denied" in response.json()["detail"]
     assert main.active_model_operation is None
     main.model_runtime_states.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lost", [True, False])
+async def test_only_a_lost_runtime_takes_the_model_out_of_ready(tmp_path, monkeypatch, lost) -> None:
+    """Decided from LM Studio's own words, not by matching the friendlier message."""
+    from app.services.lm_studio import LMStudioError
+
+    class LosesTheRuntime:
+        async def run(self, context):
+            raise LMStudioError("LM Studio rejected the request", runtime_lost=lost)
+
+    settings = SettingsStore(tmp_path / "settings.json")
+    settings.write(AppSettings(model="vision-model"))
+    monkeypatch.setattr(main, "settings_store", settings)
+    monkeypatch.setattr(main, "run_store", RunStore(tmp_path / "docuflow.db"))
+    monkeypatch.setattr(main, "LMStudioClient", ReadyClient)
+    monkeypatch.setattr(main, "_document_pipeline", lambda settings: LosesTheRuntime())
+    main.model_runtime_states["vision-model"] = "ready"
+    main.release_model_operation()
+
+    transport = httpx.ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/documents/extract",
+            files={"file": ("invoice.pdf", b"%PDF-1.4", "application/pdf")},
+        )
+
+    assert response.status_code == 502
+    assert main.model_runtime_states["vision-model"] == ("error" if lost else "ready")
+    main.model_runtime_states.clear()
+
+
+def test_lm_studio_says_when_its_runtime_is_gone() -> None:
+    from app.services.lm_studio import LMStudioClient
+
+    assert LMStudioClient._runtime_lost('{"error": "terminated"}')
+    assert LMStudioClient._runtime_lost("vk::DeviceLostError: ErrorDeviceLost")
+    assert not LMStudioClient._runtime_lost('{"error": "context length exceeded"}')

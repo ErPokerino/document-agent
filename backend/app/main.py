@@ -8,6 +8,9 @@ from typing import Annotated, Any, AsyncIterator
 import pymupdf
 from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.services.errors import ProviderError
 
 from app.domain.models import (
     MODEL_NOT_USED,
@@ -117,6 +120,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(ProviderError)
+async def provider_failed(request, exc: ProviderError) -> JSONResponse:
+    """A service behind the request failed; the request itself was fine.
+
+    One answer for every provider, so a new call site cannot forget one of
+    them and turn Google's message into a bare 500.
+    """
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
@@ -801,14 +814,13 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
                 raise HTTPException(status_code=499, detail="Document processing was cancelled")
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-            except DocumentAiError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-            except (LMStudioError, GeminiError) as exc:
-                if "terminated" in str(exc).lower() or "device was lost" in str(exc).lower():
+            except LMStudioError as exc:
+                if exc.runtime_lost:
                     model_runtime_states[settings.model] = "error"
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+                raise
 
-            run_id = run_store.record_run(
+            run_id = await asyncio.to_thread(
+                run_store.record_run,
                 filename=context.filename,
                 content=content,
                 model=recorded_model,
@@ -1563,8 +1575,6 @@ async def draft_labels(name: str, document: str) -> DraftLabels:
             result = await pipeline.run(context)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except (LMStudioError, GeminiError, DocumentAiError) as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         extraction = result.artifacts["extraction"]
