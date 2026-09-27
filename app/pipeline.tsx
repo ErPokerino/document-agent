@@ -19,6 +19,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
+import { OCR_ONLY_WITHOUT_PDF_TEXT, isPdfTextFallback } from "../lib/pipeline-steps";
 import { ProcessorPicker } from "./processor-picker";
 import { InfoHint } from "./info-hint";
 import {
@@ -369,7 +370,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
               {pipeline.problems.length > 0 ? (
                 <span className="status-tag failed">Cannot run</span>
               ) : pipeline.warnings.length > 0 ? (
-                <span className="status-tag partial" title={pipeline.warnings.join(" ")}>Partial</span>
+                <span className="status-tag partial" title={pipeline.warnings.join(" ")}>Warnings</span>
               ) : null}
               {inUse === pipeline.name ? (
                 <span className="status-tag completed">In use</span>
@@ -535,7 +536,8 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                       </label>
                       <p className="field-help">
                         Read on this machine, at no cost. A scanned document carries no text and is
-                        refused rather than read as empty; a page without text is named as such.
+                        refused rather than read as empty, unless a Document AI OCR step after this
+                        one is set to read it; a page without text is named as such.
                         Embedded text can differ from what the page shows, so compare it with OCR
                         in Lab before relying on it.
                       </p>
@@ -545,8 +547,23 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
 
                   {step.kind === "document_ai_ocr" && (() => {
                     const feedsModel = (step.config as { feeds_model?: boolean }).feeds_model !== false;
+                    const onlyWithoutText = isPdfTextFallback(step);
                     return (
                     <div className="flow-step-body">
+                      <label className="flow-field">
+                        <span>Which documents it reads<InfoHint text="Set after Read PDF text, OCR can read only the PDFs that carry no text of their own, such as scans. The others are not sent to Google and not billed." /></span>
+                        <select
+                          value={onlyWithoutText ? "without_pdf_text" : "every_document"}
+                          onChange={(event) =>
+                            setSteps(patchStepConfig(draft.steps, index, {
+                              [OCR_ONLY_WITHOUT_PDF_TEXT]: event.target.value === "without_pdf_text",
+                            }))
+                          }
+                        >
+                          <option value="every_document">Every document</option>
+                          <option value="without_pdf_text">Only a PDF that carries no text of its own</option>
+                        </select>
+                      </label>
                       <label className="flow-field">
                         <span>What this reading is for<InfoHint text="OCR returns text and word positions. Choose positions only to enable document highlighting while keeping page images as the model input." /></span>
                         <select
@@ -567,6 +584,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                           : "The model is not shown this text — it reads the page some other way — and the reading is used only to find where each value sits."}
                         {" "}Uses the processor selected above. Billed by Google per page, so
                         only the pages this pipeline allows are sent.
+                        {onlyWithoutText && " A PDF that Read PDF text found text on is not sent at all."}
                       </p>
                     </div>
                     );

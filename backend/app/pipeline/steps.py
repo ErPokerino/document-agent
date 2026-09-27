@@ -188,18 +188,29 @@ class ReadPdfText:
     Native text is not automatically right. Reading order, stale embedded OCR
     and tables can all differ from what the page shows, which is why this is a
     reader to measure in Lab against OCR, not a default.
+
+    When the pipeline has an OCR step set to read what this step could not,
+    the refusal is that step's to replace: the document is marked as carrying
+    no text and passed on with nothing read, rather than refused.
     """
 
-    def __init__(self, feeds_model: bool = True) -> None:
+    def __init__(self, feeds_model: bool = True, ocr_follows: bool = False) -> None:
         # As with OCR: a reading can be there only to locate values on the page
         # while a vision model reads the picture.
         self.feeds_model = feeds_model
+        self.ocr_follows = ocr_follows
 
     async def run(self, context: PipelineContext) -> None:
         processed_pages: int = context.artifacts["processed_pages"]
         texts, tokens = await asyncio.to_thread(_native_text, context.content, processed_pages)
+        context.artifacts["pdf_text_pages"] = [
+            {"page": index + 1, "characters": len(text)} for index, text in enumerate(texts)
+        ]
         empty = [index + 1 for index, text in enumerate(texts) if not text]
         if len(empty) == len(texts):
+            if self.ocr_follows:
+                context.artifacts["pdf_text_missing"] = True
+                return
             span = "page 1" if processed_pages == 1 else f"pages 1–{processed_pages}"
             raise ValueError(
                 f"The PDF carries no text of its own on {span}, which is what a scanned "
@@ -207,9 +218,6 @@ class ReadPdfText:
             )
 
         context.artifacts["ocr_tokens"] = tokens
-        context.artifacts["pdf_text_pages"] = [
-            {"page": index + 1, "characters": len(text)} for index, text in enumerate(texts)
-        ]
         if self.feeds_model:
             context.artifacts["text"] = "\n\n".join(
                 f"[Page {index + 1}]\n{text}" if text else f"[Page {index + 1} carries no embedded text.]"
@@ -290,7 +298,7 @@ class ReadWithDocumentAi:
     keeps the headings and tables, plus the raw structure for anything later.
     """
 
-    def __init__(self, kind: str, processor_id: str, feeds_model: bool = True, project_id: str | None = None, location: str | None = None) -> None:
+    def __init__(self, kind: str, processor_id: str, feeds_model: bool = True, project_id: str | None = None, location: str | None = None, only_without_pdf_text: bool = False) -> None:
         self.kind = kind
         self.processor_id = processor_id
         self.project_id = project_id
@@ -300,6 +308,9 @@ class ReadWithDocumentAi:
         # picture and never sees this text. Handing the model text it was not
         # meant to have would quietly change what it extracts.
         self.feeds_model = feeds_model
+        # Set, the step reads only a document Read PDF text found no text on;
+        # every other document is neither uploaded nor billed.
+        self.only_without_pdf_text = only_without_pdf_text
 
     def _client(self, context: PipelineContext) -> DocumentAiClient:
         return DocumentAiClient(
@@ -307,6 +318,8 @@ class ReadWithDocumentAi:
         )
 
     async def run(self, context: PipelineContext) -> None:
+        if self.only_without_pdf_text and not context.artifacts.get("pdf_text_missing"):
+            return
         if not self.processor_id.strip():
             raise DocumentAiError(
                 f"No processor id is configured for {self.kind.replace('_', ' ')}. "

@@ -37,7 +37,7 @@ import { filterByName } from "../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../lib/format";
 import { labRunTarget } from "../lib/lab-target";
 import { useLatest } from "../lib/latest";
-import { usesModel } from "../lib/pipeline-steps";
+import { isPdfTextFallback, usesModel } from "../lib/pipeline-steps";
 import {
   emptyFilters,
   filterEvaluations,
@@ -643,7 +643,9 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
       )}
 
       <div className="document-results">
-        {filterByName(openEvaluation.documents, runDocumentQuery).map((document) => {
+        {(() => {
+          const ocrStandsIn = (openEvaluation.pipeline_definition?.steps ?? []).some(isPdfTextFallback);
+          return filterByName(openEvaluation.documents, runDocumentQuery).map((document) => {
           const correct = document.items.filter((item) => item.matched).length;
           const isOpen = expanded.has(document.name);
           return (
@@ -660,6 +662,9 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
                     <span className={correct === document.items.length ? "good" : "poor"}>{correct}/{document.items.length}</span>
                     <small>correct</small>
                     <small className="document-time">{seconds(document.elapsed_ms)}</small>
+                    {ocrStandsIn && (document.ocr_pages ?? 0) > 0 && (
+                      <small className="document-time" title="Read PDF text found no text in this PDF, so the OCR step read it">Read by OCR</small>
+                    )}
                   </span>
                 )}
                 <button
@@ -700,7 +705,8 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
               )}
             </div>
           );
-        })}
+        });
+        })()}
       </div>
         </div>
       )}

@@ -19,6 +19,9 @@ export type DataFlow = {
 export function describeDataFlow(
   provider: AppSettings["provider"],
   steps: string[],
+  // True when every Document AI step reads only a PDF without text; see
+  // uploadsOnlyScans. Kinds alone cannot say so.
+  onlyScansUploaded = false,
 ): DataFlow {
   const uploaded = readsInTheCloud(steps);
   const callsModel = usesModel(steps);
@@ -34,7 +37,11 @@ export function describeDataFlow(
   }
 
   const destinations: string[] = [];
-  if (uploaded) destinations.push("Google Document AI reads the pages");
+  if (uploaded) {
+    destinations.push(onlyScansUploaded
+      ? "Google Document AI reads the pages of any PDF that carries no text of its own"
+      : "Google Document AI reads the pages");
+  }
   if (modelInTheCloud) destinations.push("the Gemini API extracts the fields");
 
   const closing = !callsModel

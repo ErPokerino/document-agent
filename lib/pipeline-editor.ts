@@ -6,6 +6,7 @@
  * or mutates the list it was handed.
  */
 
+import { OCR_ONLY_WITHOUT_PDF_TEXT } from "./pipeline-steps.ts";
 import type { PipelineStep, StepCatalogueEntry, StepKind } from "./types";
 
 export type RuleSource = "value" | "text";
@@ -86,7 +87,11 @@ export function summarizeStep(step: PipelineStep): string {
     return `Page images at ${scale}× zoom`;
   }
   if (step.kind === "read_pdf_text") return "Text the PDF already carries";
-  if (step.kind === "document_ai_ocr") return "OCR text from Document AI";
+  if (step.kind === "document_ai_ocr") {
+    return step.config[OCR_ONLY_WITHOUT_PDF_TEXT] === true
+      ? "OCR from Document AI, for a PDF without text"
+      : "OCR text from Document AI";
+  }
   if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
   if (step.kind === "document_ai_extract") return "Fields from Custom Extractor";
   if (step.kind === "supplier_rules") return "Supplier-specific rules";

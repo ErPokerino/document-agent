@@ -34,6 +34,14 @@ test("reading the text a PDF carries keeps the document on the machine", () => {
   assert.equal(flow.leavesTheMachine, false);
 });
 
+test("an OCR that reads only PDFs without text still counts as leaving the machine", () => {
+  // One scan in a batch is enough for pages to reach Google.
+  const flow = describeDataFlow("lm_studio", ["read_pdf_text", "document_ai_ocr", "llm_extract"], true);
+
+  assert.equal(flow.leavesTheMachine, true);
+  assert.match(flow.detail, /no text of its own/);
+});
+
 test("the Layout Parser counts as much as OCR does", () => {
   assert.equal(describeDataFlow("lm_studio", ["document_ai_layout"]).leavesTheMachine, true);
 });

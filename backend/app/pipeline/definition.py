@@ -71,7 +71,8 @@ CONTRACTS: dict[StepKind, StepContract] = {
         description=(
             "Read the text a native PDF already carries, with word positions, on "
             "this machine. A scan carries none, and the step says so rather than "
-            "passing an empty reading on."
+            "passing an empty reading on, unless a Document AI OCR step after it "
+            "is set to read such a PDF."
         ),
         requires_all=(Artifact.pdf,),
         produces=(Artifact.text,),
@@ -139,11 +140,23 @@ def contract_for(kind: StepKind) -> StepContract:
     return CONTRACTS[kind]
 
 
+# The OCR step setting that makes it read a document only when Read PDF text
+# found none on it. Chosen in the pipeline rather than done automatically:
+# sending a scan to Google is a decision about where documents go, and a
+# pipeline that reads on this machine must not start uploading on its own.
+OCR_ONLY_WITHOUT_PDF_TEXT = "only_without_pdf_text"
+
+
 class PipelineStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: StepKind
     config: dict[str, Any] = Field(default_factory=dict)
+
+
+def is_pdf_text_fallback(step: PipelineStep) -> bool:
+    """An OCR step that reads only what Read PDF text found no text on."""
+    return step.kind is StepKind.document_ai_ocr and bool(step.config.get(OCR_ONLY_WITHOUT_PDF_TEXT))
 
 
 class PipelineDefinition(BaseModel):
@@ -230,11 +243,50 @@ def describe_warnings(
     more. It is not something to discover from a column of zeroes, either.
     """
     filled = filled_entities(pipeline)
-    return [
+    warnings = [
         f"This pipeline does not fill '{entity.name}'. It will come out empty, "
         f"and a test run will score it as missing on every document."
         for entity in entities or []
         if getattr(entity, "source", "model") == "derived" and entity.name not in filled
+    ]
+    # Measured on Test-Dataset, run 43: OCR left on "Every document" after
+    # Read PDF text billed an OCR page for each of the nine native PDFs, and
+    # the scan was refused at Read PDF text before the OCR was reached.
+    reader = next(
+        (index for index, step in enumerate(pipeline.steps, start=1) if step.kind is StepKind.read_pdf_text),
+        None,
+    )
+    if reader is not None:
+        label = contract_for(StepKind.document_ai_ocr).label
+        warnings.extend(
+            f"Step {index} ({label}) reads every document, including those Read PDF text "
+            f"found text on, and a PDF without text is still refused at step {reader}."
+            for index, step in enumerate(pipeline.steps, start=1)
+            if index > reader and step.kind is StepKind.document_ai_ocr and not is_pdf_text_fallback(step)
+        )
+    return warnings
+
+
+def _fallback_problems(steps: list[PipelineStep], index: int) -> list[str]:
+    """Why an OCR step set to stand in for Read PDF text cannot do so.
+
+    `index` is 1-based, as in every message. The OCR step needs a Read PDF text
+    step before it to learn whether there was text, and nothing that fills
+    entities may sit between the two: on a scan it would run with no text.
+    """
+    label = contract_for(StepKind.document_ai_ocr).label
+    before = steps[: index - 1]
+    readers = [position for position, step in enumerate(before, start=1) if step.kind is StepKind.read_pdf_text]
+    if not readers:
+        return [
+            f"Step {index} ({label}) reads only a PDF without text of its own, "
+            "and no Read PDF text step comes before it."
+        ]
+    return [
+        f"Step {position} ({contract_for(step.kind).label}) comes between Read PDF text and "
+        f"step {index} ({label}), so on a PDF without text it would run before the OCR."
+        for position, step in enumerate(steps[readers[-1] : index - 1], start=readers[-1] + 1)
+        if Artifact.entities in contract_for(step.kind).produces
     ]
 
 
@@ -266,6 +318,8 @@ def describe_problems(
                 "and nothing before it produces either."
             )
         available.update(contract.produces)
+        if is_pdf_text_fallback(step):
+            problems.extend(_fallback_problems(pipeline.steps, index))
 
     if Artifact.entities not in available:
         problems.append("The pipeline produces no entities: nothing would come out of a run.")

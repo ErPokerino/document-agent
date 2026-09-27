@@ -14,9 +14,11 @@ from app.pipeline.definition import (
     PipelineDefinition,
     PipelineStep,
     StepKind,
+    OCR_ONLY_WITHOUT_PDF_TEXT,
     contract_for,
     describe_problems,
     filled_entities,
+    is_pdf_text_fallback,
 )
 from app.pipeline.regex_refine import RegexRule
 from app.pipeline.steps import (
@@ -106,13 +108,14 @@ def _build_one(
     supplier_rules: SupplierRuleStore | None,
     register_rows: list[dict[str, Any]] | None,
     frozen_rules: list[SupplierRule] | None,
+    ocr_follows: bool = False,
 ) -> Any:
     from app.services.processors import binding, KINDS
     config = binding(step, gcp) if step.kind.value in KINDS else step.config
     if step.kind is StepKind.render_pages:
         return RenderPages(scale=float(config.get("scale", DEFAULT_RENDER_SCALE)))
     if step.kind is StepKind.read_pdf_text:
-        return ReadPdfText(feeds_model=bool(config.get("feeds_model", True)))
+        return ReadPdfText(feeds_model=bool(config.get("feeds_model", True)), ocr_follows=ocr_follows)
     if step.kind in (StepKind.document_ai_ocr, StepKind.document_ai_layout):
         # The processor comes from Settings unless the step names its own,
         # which is how a second processor can be tried without changing both.
@@ -128,6 +131,9 @@ def _build_one(
             # existed was added to give the model text.
             feeds_model=bool(config.get("feeds_model", True)),
             project_id=config.get("project_id"), location=config.get("location"),
+            only_without_pdf_text=(
+                step.kind is StepKind.document_ai_ocr and bool(config.get(OCR_ONLY_WITHOUT_PDF_TEXT))
+            ),
         )
     if step.kind is StepKind.llm_extract:
         return ExtractEntities(prompts)
@@ -199,6 +205,9 @@ def build_steps(
                     supplier_rules=supplier_rules,
                     register_rows=register_rows,
                     frozen_rules=frozen_rules,
+                    # describe_problems has already refused a fallback with
+                    # an extraction between it and this reader.
+                    ocr_follows=any(is_pdf_text_fallback(later) for later in definition.steps[index:]),
                 )
             )
         except (ValidationError, ValueError) as exc:

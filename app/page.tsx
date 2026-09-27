@@ -19,7 +19,7 @@ import { api } from "../lib/api";
 import { compactExtractorVersion, engineDetail } from "../lib/extraction-engine";
 import { resolveBootstrap } from "../lib/bootstrap";
 import { describeDataFlow } from "../lib/data-flow";
-import { usesModel } from "../lib/pipeline-steps";
+import { uploadsOnlyScans, usesModel } from "../lib/pipeline-steps";
 import { formatHash, parseHash, type AppRoute, type AppView } from "../lib/route";
 import { Datasets } from "./datasets";
 import { Entities } from "./entities";
@@ -97,6 +97,7 @@ export default function Home() {
   const [draftSettings, setDraftSettings] = useState<AppSettings | null>(null);
   const [pipelineShape, setPipelineShape] = useState<string[]>([]);
   const [pipelineKinds, setPipelineKinds] = useState<string[]>([]);
+  const [onlyScansUploaded, setOnlyScansUploaded] = useState(false);
   const [settingsState, setSettingsState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
@@ -146,6 +147,7 @@ export default function Home() {
         const pipeline = saved.find((candidate) => candidate.name === chosen);
         setPipelineShape(pipeline ? stepLabels(pipeline.steps, catalogue) : []);
         setPipelineKinds(pipeline ? pipeline.steps.map((step) => step.kind) : []);
+        setOnlyScansUploaded(pipeline ? uploadsOnlyScans(pipeline.steps) : false);
       })
       .catch(() => undefined);
     return () => {
@@ -187,7 +189,7 @@ export default function Home() {
   const usingHostedModel = settings?.provider === "gemini";
   // Not only the model: a Document AI step uploads the page whatever answers
   // afterwards, so a pipeline with one is not local processing.
-  const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds);
+  const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds, onlyScansUploaded);
   const configuredEntities = settings?.prompts.entities ?? [];
   const [engineResult, setEngineResult] = useState<{ settings: AppSettings; engine: import("../lib/types").ExtractionEngine | null } | null>(null);
   const extractionEngine = engineResult?.settings === settings ? engineResult?.engine : null;

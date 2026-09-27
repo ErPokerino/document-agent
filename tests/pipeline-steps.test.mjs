@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readsInTheCloud, usesModel } from "../lib/pipeline-steps.ts";
+import { isPdfTextFallback, readsInTheCloud, uploadsOnlyScans, usesModel } from "../lib/pipeline-steps.ts";
 
 test("extraction by a model calls the model", () => {
   assert.equal(usesModel(["render_pages", "llm_extract"]), true);
@@ -30,4 +30,28 @@ test("every Document AI step uploads the pages", () => {
 
 test("rendering pages locally uploads nothing", () => {
   assert.equal(readsInTheCloud(["render_pages", "llm_extract"]), false);
+});
+
+const reader = { kind: "read_pdf_text", config: { feeds_model: true } };
+const fallback = { kind: "document_ai_ocr", config: { processor_ref: "ocr", only_without_pdf_text: true } };
+const ocr = { kind: "document_ai_ocr", config: { processor_ref: "ocr" } };
+
+test("an OCR step is a fallback only when it is set to read PDFs without text", () => {
+  assert.equal(isPdfTextFallback(fallback), true);
+  assert.equal(isPdfTextFallback(ocr), false);
+  assert.equal(isPdfTextFallback({ kind: "document_ai_layout", config: { only_without_pdf_text: true } }), false);
+});
+
+test("a pipeline whose only Document AI step is the fallback uploads only scans", () => {
+  assert.equal(uploadsOnlyScans([reader, fallback, { kind: "llm_extract", config: {} }]), true);
+});
+
+test("any other Document AI step means every document is uploaded", () => {
+  assert.equal(uploadsOnlyScans([reader, fallback, { kind: "document_ai_extract", config: {} }]), false);
+  assert.equal(uploadsOnlyScans([ocr, { kind: "llm_extract", config: {} }]), false);
+});
+
+test("a pipeline with no Document AI step makes no claim about scans", () => {
+  // It uploads nothing at all, which is a stronger statement made elsewhere.
+  assert.equal(uploadsOnlyScans([reader, { kind: "llm_extract", config: {} }]), false);
 });

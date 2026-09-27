@@ -132,8 +132,17 @@ These are proposals awaiting prioritisation, not implemented features.
 Done as the `read_pdf_text` step. A document with no embedded text on any page
 it may read is refused, and a page without text is named in the text the model
 is given. It is a reader to measure against OCR, not a default: reading order,
-stale embedded OCR and tables can all differ from what the page shows. Mixed
-scanned and native files still have no automatic fallback.
+stale embedded OCR and tables can all differ from what the page shows.
+
+Mixed scanned and native files are handled by an OCR fallback the pipeline
+states, never an automatic one: a Document AI OCR step placed after Read PDF
+text and set to *Only a PDF that carries no text of its own*
+(`only_without_pdf_text`) reads, uploads and bills only the documents Read PDF
+text found no text on. Automatic was decided against because it would make a
+pipeline that reads on this machine start sending scans to Google on its own.
+The fallback is per document, not per page: a PDF with text on some pages still
+tells the model which pages carry none. The compiler refuses a fallback with no
+Read PDF text before it, or with a step that fills entities between the two.
 
 ### Further Lab comparison work
 
