@@ -7,6 +7,7 @@ import {
   distinctPipelines,
   emptyFilters,
   filterEvaluations,
+  hiddenRunsNote,
 } from "../lib/run-filters.ts";
 
 const evaluation = (overrides) => ({
@@ -184,6 +185,38 @@ test("runs can be narrowed to one dataset, because scores across datasets do not
   const only = filterEvaluations(runs, { ...emptyFilters, dataset: ["Invoices"] });
   assert.deepEqual(only.map((run) => run.id), [1]);
   assert.equal(filterEvaluations(runs, emptyFilters).length, 2);
+});
+
+test("runs the filters keep out of view are counted rather than silently missing", () => {
+  // Past runs under "OCR then LLM" showed nothing of a finished "Read PDF text"
+  // run, which looked like a run that had never been recorded.
+  const runs = [
+    evaluation({ id: 1, pipeline: "OCR then LLM" }),
+    evaluation({ id: 2, pipeline: "Read PDF text" }),
+    evaluation({ id: 3, pipeline: "Read PDF text" }),
+  ];
+  const visible = filterEvaluations(runs, { ...emptyFilters, pipeline: ["OCR then LLM"] });
+
+  assert.equal(hiddenRunsNote(runs, visible), "2 of 3 runs are hidden by these filters.");
+});
+
+test("a run in progress that the filters hide is named", () => {
+  const runs = [
+    evaluation({ id: 1, provider: "lm_studio" }),
+    evaluation({ id: 41, provider: "gemini", status: "running" }),
+  ];
+  const visible = filterEvaluations(runs, { ...emptyFilters, runsOn: ["lm_studio"] });
+
+  assert.equal(
+    hiddenRunsNote(runs, visible),
+    "1 of 2 runs is hidden by these filters. Run #41, in progress, is among them.",
+  );
+});
+
+test("nothing is said when the filters hide nothing", () => {
+  const runs = [evaluation({ id: 1 }), evaluation({ id: 2 })];
+
+  assert.equal(hiddenRunsNote(runs, filterEvaluations(runs, emptyFilters)), null);
 });
 
 test("the datasets on offer are the ones that were actually run", () => {

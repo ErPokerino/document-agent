@@ -39,7 +39,9 @@ import { labRunTarget } from "../lib/lab-target";
 import { useLatest } from "../lib/latest";
 import { usesModel } from "../lib/pipeline-steps";
 import {
+  emptyFilters,
   filterEvaluations,
+  hiddenRunsNote,
   type EvaluationFilters,
 } from "../lib/run-filters";
 import { runsToCsv } from "../lib/runs-csv";
@@ -122,6 +124,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
     sort.direction,
     runCost,
   );
+  const hiddenNote = hiddenRunsNote(evaluations, visibleEvaluations);
 
   const pageCount = Math.max(1, Math.ceil(visibleEvaluations.length / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -377,6 +380,14 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
           </button>}
         </RunFiltersBar>
 
+        {hiddenNote && (
+          <div className="hidden-runs-note" role="status">
+            <Info size={14} />
+            <span>{hiddenNote}</span>
+            <button type="button" className="link-button" onClick={() => { setPage(1); publish(route.evaluationId, emptyFilters); }}>Show all runs</button>
+          </div>
+        )}
+
         {view === "runs" ? (<>
       <div className="score-without">
           <span>
@@ -406,7 +417,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
         {evaluations.length === 0 ? (
       <div className="models-empty"><AlertCircle size={18} /><span>No test has been run yet.</span></div>
         ) : visibleEvaluations.length === 0 ? (
-      <div className="models-empty"><AlertCircle size={18} /><span>No run matches these filters. {evaluations.length} hidden.</span></div>
+      <div className="models-empty"><AlertCircle size={18} /><span>No run matches these filters.</span></div>
         ) : (
       <>
 
