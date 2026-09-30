@@ -10,6 +10,25 @@ Descriptions refer to the extraction engine when both LLMs and Custom Extractors
 are supported. Pareto explanations follow the selected resource axis; missing
 resource measurements are disclosed rather than silently treated as zero.
 
+## Visual pipeline editor
+
+**Pipelines** opens saved definitions as a connected flow from PDF input to
+extracted fields. Existing pipelines need no migration: the canvas is a view of
+the same ordered steps, with all processor bindings, versions and rules intact.
+Select a node to edit its settings; use a **+** on a connection to insert a step
+there, or search the grouped step picker. **Earlier / Later** changes execution
+order, while dragging nodes only arranges the current canvas. Layout positions
+are temporary and are reset when opening a flow or changing its step order.
+
+The canvas supports pan, zoom, fit and expansion. A compact order strip selects
+and centres any step in a long flow. Conditional OCR carries an explicit badge;
+invalid steps are marked and their compiler messages appear in the inspector.
+Saving and selecting **Use** remain separate actions.
+
+The visual editor uses React Flow, with a pinned version in the npm lockfile.
+Connections follow execution order automatically; arbitrary branches, parallel
+execution and cycles are not supported by the pipeline engine.
+
 ## Processors and models
 
 **Processors** is the local catalog of existing Google Document AI resources,

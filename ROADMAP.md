@@ -12,6 +12,17 @@ Nothing outstanding. The items below are decided and deliberately waiting.
 
 ## Later
 
+### Branches and parallel execution in the pipeline canvas
+
+The visual editor presents the existing sequential engine as a flowchart. Its
+connections come from step order rather than from a separate editable graph, so
+opening and saving an old pipeline preserves its execution contract. A conditional
+OCR node still runs in sequence and skips PDFs with native text when configured.
+
+Free connections and parallel branches would need an execution model, explicit
+input/output contracts and rules for merging results. Keep them out of the canvas
+until the engine supports them; a diagram must describe what will actually run.
+
 ### Several methods per field, and a strategy that picks
 
 The largest architectural idea on this list, and the one that reshapes

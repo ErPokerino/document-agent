@@ -13,20 +13,26 @@ import {
   Plus,
   Save,
   Scissors,
+  Search,
   Trash2,
   Workflow,
+  X,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
 import { OCR_ONLY_WITHOUT_PDF_TEXT, isPdfTextFallback } from "../lib/pipeline-steps";
 import { ProcessorPicker } from "./processor-picker";
 import { InfoHint } from "./info-hint";
+import { PipelineCanvas, STEP_ICONS } from "./pipeline-canvas";
+import { flowCategory, insertFlowStep, stepProblems } from "../lib/pipeline-flow";
+import "./pipeline-flow.css";
 import {
   MAX_PAGES,
   MIN_PAGES,
   DEFAULT_MINIMUM_SIMILARITY,
-  addStep,
   emptyRule,
   groupCatalogue,
   moveStep,
@@ -36,6 +42,7 @@ import {
   setStepConfig,
   patchStepConfig,
   summarizeStep,
+  stepLabel,
   type RegexRule,
 } from "../lib/pipeline-editor";
 import type {
@@ -129,6 +136,13 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
   const [pageLimitInput, setPageLimitInput] = useState("10");
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [insertionAt, setInsertionAt] = useState<number | null>(null);
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(true);
+  const [canvasRevision, setCanvasRevision] = useState(0);
+  const [pendingChange, setPendingChange] = useState<{ perform: () => void } | null>(null);
+  const discardDialog = useRef<HTMLDialogElement>(null);
 
   const inUse = draftSettings.pipeline;
   const entityNames = entities.map((entity) => entity.name);
@@ -136,6 +150,17 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
   const derivedEntityNames = entities
     .filter((entity) => entity.source === "derived")
     .map((entity) => entity.name);
+  const original = pipelines.find(pipeline => pipeline.name === openedAs);
+  const hasChanges = draft !== null && (!original || draft.name !== original.name || draft.description !== original.description || draft.page_limit !== original.page_limit || JSON.stringify(draft.steps) !== JSON.stringify(original.steps));
+
+  function changeEditor(perform: () => void) {
+    if (hasChanges) setPendingChange({ perform });
+    else perform();
+  }
+
+  useEffect(() => {
+    if (pendingChange) discardDialog.current?.showModal();
+  }, [pendingChange]);
 
   async function refresh() {
     setPipelines(await api.pipelines());
@@ -203,6 +228,10 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
     setWarnings(pipeline.warnings);
     setError(null);
     setState("idle");
+    setSelectedIndex(null);
+    setInsertionAt(null);
+    setCanvasRevision(revision => revision + 1);
+    setLibraryOpen(false);
   }
 
   function startNew() {
@@ -222,16 +251,55 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
     setPageLimitInput("10");
     setOpenedAs(null);
     setError(null);
+    setProblems([]);
+    setWarnings([]);
+    setCheckError(null);
+    setState("idle");
+    setSelectedIndex(null);
+    setInsertionAt(null);
+    setCanvasRevision(revision => revision + 1);
+    setLibraryOpen(false);
   }
 
   function manageProcessors() {
-    const saved = pipelines.find(p => p.name === openedAs);
-    const changed = draft && (!saved || draft.name !== saved.name || draft.description !== saved.description || draft.page_limit !== saved.page_limit || JSON.stringify(draft.steps) !== JSON.stringify(saved.steps));
-    if (!changed || window.confirm("Leave the pipeline editor and discard unsaved changes?")) onProcessors();
+    changeEditor(onProcessors);
   }
 
   function setSteps(steps: PipelineStep[]) {
-    if (draft) setDraft({ ...draft, steps });
+    if (draft && state !== "saving") setDraft({ ...draft, steps });
+  }
+
+  function selectStep(index: number | null) {
+    setSelectedIndex(index);
+    setInsertionAt(null);
+  }
+
+  function showPalette(at: number) {
+    setInsertionAt(at);
+    setSelectedIndex(null);
+    setPaletteSearch("");
+  }
+
+  function insertStep(kind: StepKind) {
+    if (!draft || insertionAt === null) return;
+    setSteps(insertFlowStep(draft.steps, insertionAt, kind));
+    setSelectedIndex(insertionAt);
+    setInsertionAt(null);
+    setCanvasRevision(revision => revision + 1);
+  }
+
+  function reorderStep(index: number, offset: number) {
+    if (!draft) return;
+    setSteps(moveStep(draft.steps, index, offset));
+    setSelectedIndex(index + offset);
+    setCanvasRevision(revision => revision + 1);
+  }
+
+  function deleteStep(index: number) {
+    if (!draft) return;
+    setSteps(removeStep(draft.steps, index));
+    setSelectedIndex(null);
+    setCanvasRevision(revision => revision + 1);
   }
 
   function setRules(index: number, rules: RegexRule[]) {
@@ -271,7 +339,11 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
     }
   }
 
-  async function rename(name: string) {
+  async function rename(name: string, discarded = false) {
+    if (openedAs === name && hasChanges && !discarded) {
+      changeEditor(() => void rename(name, true));
+      return;
+    }
     const next = renameValue.trim();
     setRenaming(null);
     if (!next || next === name) return;
@@ -310,12 +382,12 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
   const savedUnderAnotherName = draft !== null && openedAs !== null && draft.name !== openedAs;
 
   return (
-    <section className="settings-layout wide">
+    <section className="settings-layout wide pipeline-page">
       <div className="settings-intro">
         <Workflow size={19} />
         <div>
           <h2>Pipelines</h2>
-          <p>The steps a document goes through, from PDF to extracted fields.</p>
+          <p>Build an extraction flow. Compose document readers, models and rules in execution order.</p>
         </div>
       </div>
 
@@ -326,17 +398,30 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
         </div>
       )}
 
-      <div className="settings-card">
+      {pendingChange && (
+        <dialog className="pipeline-discard-dialog" ref={discardDialog} aria-labelledby="pipeline-discard-title" aria-describedby="pipeline-discard-description" onCancel={() => setPendingChange(null)}>
+          <span className="settings-card-icon"><Workflow size={20} /></span>
+          <h3 id="pipeline-discard-title">Keep your changes?</h3>
+          <p id="pipeline-discard-description">There are unsaved changes to <strong>{draft?.name || "this pipeline"}</strong>. Discard them to leave this flow.</p>
+          <div>
+            <button className="primary-button" onClick={() => setPendingChange(null)}>Keep editing</button>
+            <button className="secondary-button danger" onClick={() => { const perform = pendingChange.perform; setPendingChange(null); perform(); }}>Discard changes</button>
+          </div>
+        </dialog>
+      )}
+
+      <div className="settings-card pipeline-library">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Workflow size={18} /></span>
           <div>
-            <h3>Saved pipelines</h3>
+            <h3>Saved pipelines <span className="pipeline-count">{pipelines.length}</span></h3>
             <p>Extraction, test runs and labelling all use the one marked in use.</p>
           </div>
-          <button className="add-entity-button" onClick={startNew}><Plus size={14} /> New pipeline</button>
+          <button className="secondary-button small" aria-expanded={libraryOpen} aria-controls="pipeline-library-list" onClick={() => setLibraryOpen(!libraryOpen)}>{libraryOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{libraryOpen ? "Hide list" : "Browse"}</button>
+          <button className="add-entity-button" disabled={state === "saving"} onClick={() => changeEditor(startNew)}><Plus size={14} /> New pipeline</button>
         </div>
 
-        <div className="dataset-list">
+        <div className="dataset-list" id="pipeline-library-list" hidden={!libraryOpen}>
           {pipelines.map((pipeline) => (
             <div className={`flow-option ${openedAs === pipeline.name ? "selected" : ""}`} key={pipeline.name}>
               {confirmingDelete === pipeline.name ? (
@@ -360,7 +445,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
               </form>
               ) : (
               <>
-              <button className="flow-open" onClick={() => open(pipeline)}>
+              <button className="flow-open" disabled={state === "saving"} onClick={() => changeEditor(() => open(pipeline))}>
                 <strong>{pipeline.name}</strong>
                 <small>
                   {pipeline.steps.map((step) => summarizeStep(step)).join(" → ")}
@@ -395,7 +480,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                 className="icon-button neutral"
                 aria-label={`Duplicate ${pipeline.name}`}
                 title="Duplicate"
-                onClick={() => duplicate(pipeline)}
+                onClick={() => changeEditor(() => duplicate(pipeline))}
               >
                 <Copy size={15} />
               </button>
@@ -416,12 +501,12 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
       </div>
 
       {draft && (
-        <div className="settings-card">
+        <div className="settings-card pipeline-editor">
           <div className="settings-card-heading">
             <span className="settings-card-icon"><Workflow size={18} /></span>
             <div>
-              <h3>{openedAs ?? "New pipeline"}</h3>
-              <p>Each step reads what the steps before it produced.</p>
+              <h3>{draft.name || "Untitled pipeline"}</h3>
+              <p>Each step reads what the previous steps produced. Saving keeps this flow available for extraction and Lab.</p>
             </div>
           </div>
 
@@ -431,6 +516,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
               <input
                 id="pipeline-name"
                 className="text-input"
+                disabled={state === "saving"}
                 value={draft.name}
                 onChange={(event) => setDraft({ ...draft, name: event.target.value })}
               />
@@ -441,6 +527,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                 id="pipeline-description"
                 className="text-input"
                 placeholder="What this pipeline is for"
+                disabled={state === "saving"}
                 value={draft.description}
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
@@ -452,8 +539,10 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
               </label>
               <input
                 id="pipeline-pages"
+                aria-label="Maximum pages"
                 className="text-input"
                 type="number"
+                disabled={state === "saving"}
                 min={MIN_PAGES}
                 max={MAX_PAGES}
                 step={1}
@@ -474,22 +563,60 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
             <p className="field-help"><Copy size={12} /> Saving now creates a copy called <strong>{draft.name}</strong>; <strong>{openedAs}</strong> stays as it is. To rename instead, use the pencil in the list above.</p>
           )}
 
-          <div className="flow-steps">
+          <div className={`pipeline-workbench ${selectedIndex !== null || insertionAt !== null ? "has-inspector" : ""}`}>
+            <PipelineCanvas
+              key={canvasRevision}
+              steps={draft.steps} catalogue={catalogue} processors={processors}
+              model={draftSettings.model} problems={problems} selectedIndex={selectedIndex}
+              disabled={state === "saving"} onSelect={selectStep} onInsert={showPalette}
+            />
+            <aside className="pipeline-inspector" aria-label="Step configuration" hidden={selectedIndex === null && insertionAt === null}>
+              {insertionAt !== null ? (
+                <>
+                  <div className="pipeline-inspector-heading">
+                    <div><span>BUILD YOUR FLOW</span><h4>Add a step</h4></div>
+                    <button className="icon-button neutral" aria-label="Close step picker" onClick={() => setInsertionAt(null)}><X size={16} /></button>
+                  </div>
+                  <p className="field-help">{insertionAt === 0 ? "Before the first step" : `After step ${insertionAt}: ${stepLabel(draft.steps[insertionAt - 1].kind)}`}</p>
+                  <label className="pipeline-step-search"><Search size={15} /><input aria-label="Search steps" placeholder="Find a step…" value={paletteSearch} onChange={event => setPaletteSearch(event.target.value)} /></label>
+                  <div className="pipeline-palette">
+                    {groupCatalogue(catalogue.filter(entry => `${entry.label} ${entry.description}`.toLowerCase().includes(paletteSearch.toLowerCase().trim()))).map(group => (
+                      <div className="pipeline-palette-group" key={group.title}>
+                        <h5>{group.title}</h5>
+                        {group.entries.map(entry => {
+                          const kind = entry.kind as StepKind;
+                          const Icon = STEP_ICONS[kind] ?? Workflow;
+                          return <button className={`pipeline-palette-entry tone-${flowCategory(kind)}`} key={entry.kind} disabled={state === "saving"} onClick={() => insertStep(kind)}>
+                            <span className="pipeline-node-icon"><Icon size={19} /></span>
+                            <span><strong>{entry.label}</strong><small>{catalogue.find(item => item.kind === entry.kind)?.description}</small></span>
+                            <Plus size={14} />
+                          </button>;
+                        })}
+                      </div>
+                    ))}
+                    {!catalogue.some(entry => `${entry.label} ${entry.description}`.toLowerCase().includes(paletteSearch.toLowerCase().trim())) && <p className="field-help">No steps match this search.</p>}
+                  </div>
+                </>
+              ) : null}
+              <fieldset className="pipeline-config-fields" disabled={state === "saving"}>
+                <legend className="sr-only">Selected step settings</legend>
             {draft.steps.map((step, index) => {
+              if (index !== selectedIndex) return null;
               const contract = catalogue.find((entry) => entry.kind === step.kind);
               const rules = rulesOf(step);
               return (
                 <div className="flow-step" key={`${step.kind}-${index}`}>
-                  <div className="flow-step-head">
-                    <span className="flow-step-index">{index + 1}</span>
-                    <div>
-                      <strong>{contract?.label ?? step.kind}</strong>
-                      <small>{contract?.description ?? ""}</small>
-                    </div>
-                    <button className="icon-button" aria-label="Move up" disabled={index === 0} onClick={() => setSteps(moveStep(draft.steps, index, -1))}><ArrowUp size={14} /></button>
-                    <button className="icon-button" aria-label="Move down" disabled={index === draft.steps.length - 1} onClick={() => setSteps(moveStep(draft.steps, index, 1))}><ArrowDown size={14} /></button>
-                    <button className="icon-button" aria-label="Remove step" onClick={() => setSteps(removeStep(draft.steps, index))}><Trash2 size={14} /></button>
+                  <div className="pipeline-inspector-heading">
+                    <div><span>STEP {index + 1} · SETTINGS</span><h4>{contract?.label ?? stepLabel(step.kind)}</h4></div>
+                    <button className="icon-button neutral" aria-label="Close step settings" onClick={() => selectStep(null)}><X size={16} /></button>
                   </div>
+                  <p className="pipeline-step-description">{contract?.description}</p>
+                  <div className="pipeline-step-actions">
+                    <button className="secondary-button small" title="Move earlier in execution order" disabled={index === 0} onClick={() => reorderStep(index, -1)}><ArrowUp size={13} /> Earlier</button>
+                    <button className="secondary-button small" title="Move later in execution order" disabled={index === draft.steps.length - 1} onClick={() => reorderStep(index, 1)}><ArrowDown size={13} /> Later</button>
+                    <button className="icon-button" title="Remove this step" aria-label="Remove step" onClick={() => deleteStep(index)}><Trash2 size={15} /></button>
+                  </div>
+                  {stepProblems(problems, index).length > 0 && <div className="alert error-alert" role="status"><AlertCircle size={15} /><span>{stepProblems(problems, index).join(" ")}</span></div>}
 
                   {step.kind === "render_pages" && (
                     <div className="flow-step-body">
@@ -497,6 +624,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                         <span>Zoom<InfoHint text="Scale used to render PDF pages as images. 1.35 is about 97 DPI. Larger values produce more pixels and increase image size." /></span>
                         <input
                           type="number"
+                          aria-label="Render zoom"
                           min={0.5}
                           max={4}
                           step={0.05}
@@ -523,6 +651,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                       <label className="flow-field">
                         <span>What this reading is for<InfoHint text="A native PDF carries its text and word positions. Choose positions only to enable document highlighting while keeping page images as the model input." /></span>
                         <select
+                          aria-label="PDF text use"
                           value={feedsModel ? "text_and_positions" : "positions_only"}
                           onChange={(event) =>
                             setSteps(patchStepConfig(draft.steps, index, {
@@ -553,6 +682,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                       <label className="flow-field">
                         <span>Which documents it reads<InfoHint text="Set after Read PDF text, OCR can read only the PDFs that carry no text of their own, such as scans. The others are not sent to Google and not billed." /></span>
                         <select
+                          aria-label="OCR document scope"
                           value={onlyWithoutText ? "without_pdf_text" : "every_document"}
                           onChange={(event) =>
                             setSteps(patchStepConfig(draft.steps, index, {
@@ -567,6 +697,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                       <label className="flow-field">
                         <span>What this reading is for<InfoHint text="OCR returns text and word positions. Choose positions only to enable document highlighting while keeping page images as the model input." /></span>
                         <select
+                          aria-label="OCR text use"
                           value={feedsModel ? "text_and_positions" : "positions_only"}
                           onChange={(event) =>
                             setSteps(patchStepConfig(draft.steps, index, {
@@ -645,7 +776,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                             <span>Match this field
                               <InfoHint text="The extracted value that is compared with the register, usually the supplier name as printed on the document." />
                             </span>
-                            <select value={config.source_entity ?? ""} onChange={(event) => update({ source_entity: event.target.value })}>
+                            <select aria-label="Match this field" value={config.source_entity ?? ""} onChange={(event) => update({ source_entity: event.target.value })}>
                               <option value="">Choose a field…</option>
                               {modelEntities.map((entity) => (
                                 <option key={entity.name} value={entity.name}>{entity.name}</option>
@@ -669,7 +800,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                             <span>Fill this field
                               <InfoHint text="Where the matched row's identifier is written. Only a derived entity can be chosen: an extracted one is the model's answer and this step must not overwrite it." />
                             </span>
-                            <select value={config.target_entity ?? ""} onChange={(event) => update({ target_entity: event.target.value })}>
+                            <select aria-label="Fill this field" value={config.target_entity ?? ""} onChange={(event) => update({ target_entity: event.target.value })}>
                               <option value="">Choose a field…</option>
                               {derivedEntityNames.map((name) => (
                                 <option key={name} value={name}>{name}</option>
@@ -680,7 +811,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                             <span>Compare by
                               <InfoHint text="How close two names have to be counted. Every measure normalizes both first, then scores from 0 to 1; the one you pick is explained under it, and the threshold beside it decides what counts as a match." align="end" />
                             </span>
-                            <select value={config.algorithm ?? "combined"} onChange={(event) => update({ algorithm: event.target.value })}>
+                            <select aria-label="Compare by" value={config.algorithm ?? "combined"} onChange={(event) => update({ algorithm: event.target.value })}>
                               {algorithms.map((algorithm) => (
                                 <option key={algorithm.value} value={algorithm.value}>{algorithm.label}</option>
                               ))}
@@ -692,6 +823,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                             </span>
                             <input
                               type="range"
+                              aria-label="Minimum similarity"
                               min={0}
                               max={1}
                               step={0.01}
@@ -741,12 +873,13 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                               <label><span>Find
                                 <InfoHint text="A regular expression. Round brackets mark a part you can keep on its own, for example Invoice (INV-\d+)." />
                               </span>
-                                <input value={rule.pattern} placeholder="\s*-\s*" onChange={(event) => update({ pattern: event.target.value })} />
+                                <input aria-label="Find pattern" value={rule.pattern} placeholder="\s*-\s*" onChange={(event) => update({ pattern: event.target.value })} />
                               </label>
                               <label><span>Then
                                 <InfoHint text="Replace rewrites the matched text and leaves the rest. Keep throws the rest away and keeps only the match, or the part in brackets you choose." align="end" />
                               </span>
                                 <select
+                                  aria-label="Rule action"
                                   value={rule.group === null ? "replace" : "keep"}
                                   onChange={(event) => update(event.target.value === "replace" ? { group: null } : { group: 1, replacement: "" })}
                                 >
@@ -766,7 +899,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                                 <label><span>Which part
                                   <InfoHint text="0 keeps the whole match. 1 keeps what the first pair of brackets matched, 2 the second, and so on." align="end" />
                                 </span>
-                                  <select value={rule.group} onChange={(event) => update({ group: Number(event.target.value) })}>
+                                  <select aria-label="Capture group" value={rule.group} onChange={(event) => update({ group: Number(event.target.value) })}>
                                     <option value={0}>The whole match</option>
                                     <option value={1}>1st bracket</option>
                                     <option value={2}>2nd bracket</option>
@@ -793,25 +926,8 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                 </div>
               );
             })}
-          </div>
-
-          <div className="flow-add-step">
-            {groupCatalogue(catalogue).map((group) => (
-              <div className="flow-add-group" key={group.title}>
-                <span className="flow-add-title">{group.title}<InfoHint text={group.blurb} /></span>
-                <div className="flow-add-buttons">
-                  {group.entries.map((entry) => (
-                    <button
-                      className="secondary-button small"
-                      key={entry.kind}
-                      onClick={() => setSteps(addStep(draft.steps, entry.kind as StepKind))}
-                    >
-                      <Plus size={13} /> {entry.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+              </fieldset>
+            </aside>
           </div>
 
           {problems.length > 0 && (
@@ -836,7 +952,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
           )}
 
           <div className="settings-actions">
-            <p><Workflow size={14} /> {inUse === draft.name ? "This is the pipeline in use." : "Save it, then press Use to run documents through it."}</p>
+            <p><Workflow size={14} /> {hasChanges ? "Unsaved changes" : "All changes saved"} · {inUse === draft.name ? "Pipeline in use" : "Use the saved pipeline from the list above"}</p>
             <button className="primary-button save-button" disabled={state === "saving" || problems.length > 0 || !draft.name.trim()} onClick={() => void save()}>
               {state === "saving" ? <LoaderCircle className="spin" size={15} /> : state === "saved" ? <CheckCircle2 size={15} /> : <Save size={15} />}
               {state === "saving" ? "Saving…" : state === "saved" ? "Saved" : savedUnderAnotherName ? "Save as copy" : "Save pipeline"}
