@@ -1,5 +1,10 @@
 import type {
   AppSettings,
+  ArtifactSummary,
+  KnnTrainingRequest,
+  ReadingCacheStatus,
+  TrainingJobModel,
+  TrainingProvider,
   Dataset,
   DatasetDocument,
   DocumentLabels,
@@ -74,6 +79,7 @@ async function history<T extends { id: number }>(path: string): Promise<T[]> {
 export const apiUrls = {
   documentFile: (dataset: string, document: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/documents/${segment(document)}/file`,
+  artifactZip: (id: string) => `${API_BASE}/api/artifacts/${segment(id)}/export.zip`,
   evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
   evaluationDocument: (id: number, document: string) =>
     `${API_BASE}/api/evaluations/${id}/documents/${segment(document)}/file`,
@@ -223,6 +229,15 @@ export const api = {
   activity: () => request<PipelineActivity>("/api/activity"),
   evaluations: () => history<Evaluation>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
+  artifacts: () => request<ArtifactSummary[]>("/api/artifacts"),
+  deleteArtifact: (id: string) => request<void>(`/api/artifacts/${segment(id)}`, { method: "DELETE" }),
+  importArtifact: (file: File) => request<ArtifactSummary>("/api/artifacts/import", upload(file)),
+  trainKnn: (body: KnnTrainingRequest) => request<TrainingJobModel>("/api/training/knn", json("POST", body)),
+  trainingJobs: () => request<TrainingJobModel[]>("/api/training/jobs"),
+  cancelTrainingJob: (id: number) => request<TrainingJobModel>(`/api/training/jobs/${id}/cancel`, { method: "POST" }),
+  trainingProviders: () => request<TrainingProvider[]>("/api/training/providers"),
+  readingCache: () => request<ReadingCacheStatus>("/api/reading-cache"),
+  clearReadingCache: () => request<void>("/api/reading-cache", { method: "DELETE" }),
   labelValues: (entity: string) => request<LabelValue[]>(`/api/label-values/${segment(entity)}`),
   startEvaluation: (dataset: string, reuseReadings = false) =>
     request<Evaluation>("/api/evaluations", json("POST", { dataset, reuse_readings: reuseReadings })),

@@ -15,6 +15,7 @@ export const VIEWS = [
   "master-data",
   "datasets",
   "lab",
+  "models",
   "llm",
   "processors",
   "settings",

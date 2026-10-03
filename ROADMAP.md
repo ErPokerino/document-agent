@@ -72,9 +72,11 @@ one use of the prediction rather than the point of it.
 Preferred over a threshold on model-stated confidence, which is not calibrated:
 whether *high* means high depends on the model.
 
-Postponed until there is enough processed history for a neighbour search to
-mean anything, and best built after the multi-method shape above, since it is a
-method rather than a step.
+Built as the first kind of trained model (README, *Models trained on the
+datasets*), and as a step for now. It becomes one method among several once
+candidates exist. Test-Dataset has one document per supplier, so its
+leave-one-out accuracy is 0 for `id_subject` by construction: a neighbour
+search needs several labelled documents per class before it can mean anything.
 
 
 ### Document types and flows

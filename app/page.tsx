@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   Braces,
+  BrainCircuit,
   Cloud,
   Cpu,
   Database,
@@ -24,6 +25,7 @@ import { formatHash, parseHash, type AppRoute, type AppView } from "../lib/route
 import { Datasets } from "./datasets";
 import { Entities } from "./entities";
 import { MasterData } from "./master-data";
+import { Models } from "./models";
 import { Lab } from "./lab";
 import { modelDisplayName, modelStatusLabel } from "../lib/format";
 import { LanguageModels } from "./llm";
@@ -49,6 +51,7 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
   pipelines: { eyebrow: "How a document is processed", title: "Pipelines" },
   datasets: { eyebrow: "Ground truth", title: "Datasets" },
   lab: { eyebrow: "Extraction quality", title: "Lab" },
+  models: { eyebrow: "Learned from labelled datasets", title: "Models" },
   llm: { eyebrow: "Where extraction runs", title: "LLM" },
   processors: { eyebrow: "Document AI resources", title: "Processors" },
   settings: { eyebrow: "Preferences", title: "Settings" },
@@ -332,6 +335,9 @@ export default function Home() {
           <button className={`nav-item ${view === "lab" ? "active" : ""}`} onClick={() => setView("lab")} title={sectionCopy["lab"].title}>
             <FlaskConical size={17} /> Lab
           </button>
+          <button className={`nav-item ${view === "models" ? "active" : ""}`} onClick={() => setView("models")} title={sectionCopy["models"].title}>
+            <BrainCircuit size={17} /> Models
+          </button>
           <button className={`nav-item ${view === "llm" ? "active" : ""}`} onClick={() => setView("llm")} title={sectionCopy["llm"].title}>
             <Cpu size={17} /> LLM
           </button>
@@ -422,6 +428,7 @@ export default function Home() {
             entities={configuredEntities}
             onUse={usePipeline}
             onProcessors={() => setView("processors")}
+            onModels={() => setView("models")}
           />
         ) : view === "processors" ? (
           <Processors draftSettings={draftSettings} setDraftSettings={setDraftSettings} onSave={saveSettings} settingsState={settingsState} settingsError={settingsError} onPipelines={() => setView("pipelines")}/>
@@ -440,6 +447,8 @@ export default function Home() {
             dataset={route.dataset}
             onDataset={(name) => navigate({ ...routeRef.current, view: "datasets", dataset: name })}
           />
+        ) : view === "models" ? (
+          <Models entities={configuredEntities} onPipelines={() => setView("pipelines")} />
         ) : view === "lab" ? (
           <Lab
             settings={settings}

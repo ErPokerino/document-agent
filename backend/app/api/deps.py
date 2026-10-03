@@ -62,6 +62,8 @@ from app.services.migrations import (
 )
 from app.services.processors import migrate_processor_catalog
 from app.services.reading_cache import ReadingCache
+from app.training.artifacts import ArtifactStore, UnknownArtifact, InvalidArtifact, training_hashes
+from app.training.jobs import TrainingJobs
 from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
 from app.services.supplier_rules import SupplierRule, SupplierRuleStore
@@ -80,6 +82,7 @@ PIPELINES_PATH = DATA_DIR / "pipelines"
 # One fixed location, so the instructions in Settings can name a real path.
 GCP_CREDENTIALS_PATH = DATA_DIR / "gcp-service-account.json"
 READING_CACHE_PATH = DATA_DIR / "reading-cache"
+ARTIFACTS_PATH = DATA_DIR / "artifacts"
 settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
@@ -89,6 +92,8 @@ master_data_store = MasterDataStore(DATABASE_PATH)
 supplier_rule_store = SupplierRuleStore(DATABASE_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
 reading_cache = ReadingCache(READING_CACHE_PATH)
+artifact_store = ArtifactStore(ARTIFACTS_PATH)
+training_jobs = TrainingJobs()
 # The page limit used to be one number for the whole app; carry an existing
 # install's value into the pipeline that inherits the job, then write the
 # starting point out so it is an ordinary editable file.
@@ -420,6 +425,7 @@ def document_pipeline(settings: AppSettings) -> DocumentPipeline:
                 gcp=settings.gcp,
                 master_data=master_data_store,
                 supplier_rules=supplier_rule_store,
+                artifacts=artifact_store,
             )
         )
     except (UnknownPipeline, InvalidPipelineName, PipelineError) as exc:
@@ -503,8 +509,20 @@ def saved_pipeline(definition: PipelineDefinition) -> SavedPipeline:
         page_limit=definition.page_limit,
         steps=definition.steps,
         problems=problems,
-        warnings=describe_warnings(definition, settings_store.read().prompts.entities),
+        warnings=[
+            *describe_warnings(definition, settings_store.read().prompts.entities),
+            *reading_warnings(resolved_for_reading(definition, settings.gcp)),
+        ],
     )
+
+
+def resolved_for_reading(definition: PipelineDefinition, gcp: Any) -> PipelineDefinition:
+    from app.services.processors import resolved_pipeline
+
+    try:
+        return resolved_pipeline(definition, gcp)
+    except ValueError:
+        return definition
 
 
 def refuse_unusable(definition: PipelineDefinition) -> None:
@@ -523,9 +541,74 @@ def refuse_unusable(definition: PipelineDefinition) -> None:
             gcp=settings.gcp,
             master_data=master_data_store,
             supplier_rules=supplier_rule_store,
+            artifacts=artifact_store,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def trained_models_in(definition: PipelineDefinition) -> list[Any]:
+    """The stored models a pipeline's steps name, those that still exist."""
+    found = []
+    for step in definition.steps:
+        if step.kind.value != "artifact_predict":
+            continue
+        try:
+            found.append(artifact_store.get(str(step.config.get("artifact_id") or "")))
+        except (UnknownArtifact, InvalidArtifact):
+            continue
+    return found
+
+
+def refuse_seen_documents(definition: PipelineDefinition, dataset: str, dataset_snapshot: dict[str, Any]) -> None:
+    """A model is not scored on the documents it learned from.
+
+    A nearest-neighbour model asked about a document it was trained on finds
+    that very document at similarity 1 and copies its labels, so the run would
+    report the labels back as accuracy.
+    """
+    hashes = {str(entry["sha256"]) for entry in dataset_snapshot.values()}
+    for stored in trained_models_in(definition):
+        seen = hashes & training_hashes(stored.manifest)
+        if seen:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{len(seen)} of the {len(hashes)} documents in '{dataset}' were used to train "
+                    f"'{stored.manifest.get('name') or stored.id}'. A run over them would score the "
+                    "model on documents it has already seen."
+                ),
+            )
+
+
+def reading_warnings(definition: PipelineDefinition) -> list[str]:
+    """A trained model served text read another way than the text it learned from."""
+    from app.training.corpus import reader_signature, same_reading, READER_KINDS
+    from app.pipeline.definition import Artifact, contract_for
+
+    warnings = []
+    for index, step in enumerate(definition.steps, start=1):
+        if step.kind.value != "artifact_predict":
+            continue
+        try:
+            stored = artifact_store.get(str(step.config.get("artifact_id") or ""))
+        except (UnknownArtifact, InvalidArtifact):
+            continue
+        before = []
+        for earlier in definition.steps[: index - 1]:
+            if Artifact.entities in contract_for(earlier.kind).produces:
+                break
+            if earlier.kind in READER_KINDS:
+                before.append(earlier)
+        recorded = (stored.manifest.get("training") or {}).get("reader") or []
+        if recorded and not same_reading(recorded, reader_signature(before)):
+            learned = " → ".join(entry["kind"] for entry in recorded)
+            served = " → ".join(earlier.kind.value for earlier in before) or "nothing"
+            warnings.append(
+                f"Step {index} uses '{stored.manifest.get('name') or stored.id}', which learned from text read by "
+                f"{learned}; here the text is read by {served}. Its similarities are then measured on another kind of text."
+            )
+    return warnings
 
 
 def gcp_status(settings: AppSettings) -> GcpKeyStatus:

@@ -44,6 +44,7 @@ class StepKind(str, Enum):
     regex_refine = "regex_refine"
     master_data_lookup = "master_data_lookup"
     supplier_rules = "supplier_rules"
+    artifact_predict = "artifact_predict"
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,16 @@ CONTRACTS: dict[StepKind, StepContract] = {
             "turned out to be from. Needs the supplier to have been identified first."
         ),
         requires_all=(Artifact.entities,),
+        produces=(Artifact.entities,),
+    ),
+    StepKind.artifact_predict: StepContract(
+        kind=StepKind.artifact_predict,
+        label="Trained model",
+        description=(
+            "Predict fields with a model trained in Models on labelled datasets, from "
+            "the text a reading step left. Runs on this machine."
+        ),
+        requires_all=(Artifact.text,),
         produces=(Artifact.entities,),
     ),
 }
@@ -229,6 +240,8 @@ def filled_entities(pipeline: PipelineDefinition) -> set[str]:
             target = str(step.config.get("target_entity") or "").strip()
             if target:
                 filled.add(target)
+        if step.kind is StepKind.artifact_predict:
+            filled.update(str(name) for name in step.config.get("entities") or [])
     return filled
 
 

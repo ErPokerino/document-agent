@@ -28,3 +28,9 @@ def never_touch_real_data(tmp_path, monkeypatch):
 
     monkeypatch.setattr(deps, "READING_CACHE_PATH", isolated / "reading-cache")
     monkeypatch.setattr(deps, "reading_cache", ReadingCache(isolated / "reading-cache"))
+    from app.training.artifacts import ArtifactStore
+    from app.training.jobs import TrainingJobs
+
+    monkeypatch.setattr(deps, "ARTIFACTS_PATH", isolated / "artifacts")
+    monkeypatch.setattr(deps, "artifact_store", ArtifactStore(isolated / "artifacts"))
+    monkeypatch.setattr(deps, "training_jobs", TrainingJobs())

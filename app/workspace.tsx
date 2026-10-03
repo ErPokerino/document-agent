@@ -439,11 +439,12 @@ export function Workspace({
                       onChange={(event) => workspace.updateReviewValue(entity, event.target.value)}
                     />
                     <div className="value-controls">
-                      <span className={`confidence-pill ${field.confidence}`} title={field.score === null || field.score === undefined ? "Original extraction confidence" : `Match quality: ${field.score.toFixed(2)} similarity to the register`}><i /> {confidenceLabels[field.confidence]}{field.score !== null && field.score !== undefined && <em>{field.score.toFixed(2)}</em>}</span>
+                      <span className={`confidence-pill ${field.confidence}`} title={field.score === null || field.score === undefined ? "Original extraction confidence" : field.evidence ? `Similarity ${field.score.toFixed(2)} to the nearest labelled document` : `Match quality: ${field.score.toFixed(2)} similarity to the register`}><i /> {confidenceLabels[field.confidence]}{field.score !== null && field.score !== undefined && <em>{field.score.toFixed(2)}</em>}</span>
                       {edited && <span className="manual-pill"><Pencil size={9} /> Edited</span>}
                       {edited && <button className="revert-value" onClick={() => workspace.revertReviewValue(entity.name)} aria-label={`Revert ${prettyName(entity.name)}`} title="Restore extracted value"><RotateCcw size={11} /></button>}
                     </div>
                     {field.warning && !edited && <span className="field-warning"><AlertCircle size={11} /> {field.warning}</span>}
+                    {field.evidence && !edited && <span className="field-evidence">{field.evidence}</span>}
                   </div>
                 ) : (
                   <span className="empty-value">—</span>

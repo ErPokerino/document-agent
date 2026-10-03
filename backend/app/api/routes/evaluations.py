@@ -161,6 +161,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
             identity = await resolve_extractor(client, config["processor_id"])
             if identity["version"]:
                 config["processor_id"] = identity["processor_id"] + "/processorVersions/" + identity["version"]
+    deps.refuse_seen_documents(pipeline_definition, request.dataset, dataset_snapshot)
     register_rows = deps.master_data_store.rows("suppliers")
     rule_list = deps.supplier_rule_store.all()
     rule_records = [rule_record(rule) for rule in rule_list]
@@ -172,6 +173,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
             gcp=settings.gcp,
             register_rows=register_rows,
             frozen_rules=rule_list,
+            artifacts=deps.artifact_store,
         )
     except PipelineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -311,6 +313,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 gcp=settings.gcp,
                 register_rows=detail.register_snapshot,
                 frozen_rules=rules_from_records(detail.rules_snapshot),
+                artifacts=deps.artifact_store,
             )
         else:
             steps = build_steps(
@@ -320,6 +323,7 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 gcp=settings.gcp,
                 master_data=deps.master_data_store,
                 supplier_rules=deps.supplier_rule_store,
+                artifacts=deps.artifact_store,
             )
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(

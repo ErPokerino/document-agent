@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer" | "category";
 
-export type StepKind = "render_pages" | "read_pdf_text" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
+export type StepKind = "render_pages" | "read_pdf_text" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules" | "artifact_predict";
 
 export type Confidence = FieldExtraction["confidence"];
 
@@ -22,6 +22,37 @@ export type AppSettings = {
   pipeline: string;
   theme: "system" | "light" | "dark";
   prompts: PromptConfiguration;
+};
+
+export type ArtifactEntityValidation = {
+  documents: number;
+  accuracy: number | null;
+  macro_f1: number | null;
+  classes: number;
+};
+
+export type ArtifactSummary = {
+  id: string;
+  name: string;
+  kind: string;
+  created_at: string;
+  entities: string[];
+  input: string;
+  parameters: Record<string, unknown>;
+  libraries: Record<string, string>;
+  datasets: string[];
+  pipeline: string | null;
+  reader: string[];
+  documents: number;
+  cutoff_entity: string | null;
+  cutoff_before: string | null;
+  excluded_by_cutoff: number;
+  unreadable: number;
+  validation_method: string | null;
+  validation: Record<string, ArtifactEntityValidation>;
+  imported: boolean;
+  size_bytes: number;
+  used_by: string[];
 };
 
 export type ClassScoreResult = {
@@ -283,6 +314,7 @@ export type FieldExtraction = {
   confidence: "low" | "medium" | "high";
   warning: string | null;
   score: number | null;
+  evidence: string | null;
 };
 
 export type FieldLocation = {
@@ -334,6 +366,29 @@ export type HealthStatus = {
   lm_studio: boolean;
   active_model: string;
   lm_studio_error: string | null;
+};
+
+export type KnnParameters = {
+  analyzer: "char_wb" | "word";
+  ngram_min: number;
+  ngram_max: number;
+  sublinear_tf: boolean;
+  min_df: number;
+  max_df: number;
+  max_features: number | null;
+  max_characters: number;
+  k: number;
+  weighting: "distance" | "uniform";
+};
+
+export type KnnTrainingRequest = {
+  name: string;
+  datasets: string[];
+  pipeline: string;
+  entities: string[];
+  parameters: KnnParameters;
+  cutoff_entity: string | null;
+  cutoff_before: string | null;
 };
 
 export type LabelValue = {
@@ -588,4 +643,26 @@ export type SupplierRuleUpdate = {
   pattern: string | null;
   prompt: string | null;
   note: string | null;
+};
+
+export type TrainingJobModel = {
+  id: number;
+  kind: string;
+  name: string;
+  created_at: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  total: number;
+  done: number;
+  artifact_id: string | null;
+  error: string | null;
+  skipped: string[];
+};
+
+export type TrainingProvider = {
+  id: string;
+  name: string;
+  platform: string;
+  trains: string;
+  status: "available" | "not_connected";
+  description: string;
 };

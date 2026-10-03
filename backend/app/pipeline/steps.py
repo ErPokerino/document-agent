@@ -14,6 +14,7 @@ from app.services.document_ai import (
     text_from_ocr,
 )
 from app.services.extraction_provider import ExtractionProvider
+from app.services.field_validation import normalize_field
 from app.services.gemini import GeminiClient
 from app.services.similarity import DEFAULT_ALGORITHM, similarity
 from app.services.supplier_rules import (
@@ -481,6 +482,87 @@ class LookUpInMasterData:
                 warning=None,
             )
         context.artifacts["extraction"] = extraction
+
+
+# What a TF-IDF cosine similarity is called in the three words the rest of the
+# app speaks. A display convention, not a calibration: nothing has measured
+# where these bands fall on real documents, so a threshold belongs on the score
+# itself, which the Lab's coverage curve sets against accuracy.
+KNN_HIGH = 0.8
+KNN_MEDIUM = 0.5
+
+
+class PredictWithArtifact:
+    """Fill fields with a model trained on labelled datasets.
+
+    It reads the text a reading step left, whether or not a model is shown
+    that text, and never leaves the machine.
+    """
+
+    kind = "artifact_predict"
+
+    def __init__(
+        self,
+        *,
+        model: Any,
+        entities: list[EntityDefinition],
+        minimum_similarity: float,
+        artifact_id: str,
+        artifact_name: str,
+    ) -> None:
+        self.model = model
+        self.entities = entities
+        self.minimum_similarity = minimum_similarity
+        self.artifact_id = artifact_id
+        self.artifact_name = artifact_name
+
+    async def run(self, context: PipelineContext) -> None:
+        extraction: dict[str, FieldExtraction] = dict(context.artifacts.get("extraction") or {})
+        text = str(context.artifacts.get("document_text") or context.artifacts.get("text") or "")
+        if not text.strip():
+            for entity in self.entities:
+                extraction[entity.name] = FieldExtraction(
+                    value=None, confidence="low",
+                    warning="No text was read from this document, so there was nothing to compare.",
+                )
+            context.artifacts["extraction"] = extraction
+            return
+
+        predictions = await asyncio.to_thread(self.model.predict_all, text, [entity.name for entity in self.entities])
+        for entity in self.entities:
+            extraction[entity.name] = self._field(entity, predictions.get(entity.name))
+        context.artifacts["extraction"] = extraction
+
+    def _field(self, entity: EntityDefinition, prediction: Any) -> FieldExtraction:
+        if prediction is None:
+            return FieldExtraction(
+                value=None, confidence="low",
+                warning=f"No document the model learned from is labelled for '{entity.name}'.",
+            )
+        nearest = f"{prediction.nearest.dataset}/{prediction.nearest.document}" if prediction.nearest else "a training document"
+        evidence = (
+            f"{self.artifact_name}: nearest {nearest}, similarity {prediction.score:.2f}"
+            + (f", {round(prediction.agreement * 100)}% of the vote" if self.model.parameters.k > 1 else "")
+        )
+        if prediction.score < self.minimum_similarity:
+            return FieldExtraction(
+                value=None, confidence="low", score=prediction.score, evidence=evidence,
+                warning=(
+                    f"The nearest labelled document ({nearest}) is {prediction.score:.2f} similar, "
+                    f"below the {self.minimum_similarity:.2f} this pipeline asks for."
+                ),
+            )
+        if prediction.value is None:
+            return FieldExtraction(value=None, confidence="low", score=prediction.score, evidence=evidence)
+        confidence = "high" if prediction.score >= KNN_HIGH else "medium" if prediction.score >= KNN_MEDIUM else "low"
+        try:
+            field = normalize_field({"value": prediction.value, "confidence": confidence}, entity)
+        except ValueError as exc:
+            return FieldExtraction(
+                value=None, confidence="low", score=prediction.score, evidence=evidence,
+                warning=f"The label {prediction.value!r} of {nearest} was discarded: {exc}.",
+            )
+        return field.model_copy(update={"score": prediction.score, "evidence": evidence})
 
 
 class MarkUnfilledDerivedEntities:

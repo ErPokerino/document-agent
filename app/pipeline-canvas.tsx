@@ -7,7 +7,7 @@ import {
   type Edge, type EdgeProps, type Node, type NodeChange, type NodeProps,
 } from "@xyflow/react";
 import {
-  AlertCircle, ArrowRight, Braces, Database, FileInput, FileOutput, FileText,
+  AlertCircle, ArrowRight, Braces, BrainCircuit, Database, FileInput, FileOutput, FileText,
   Focus, Grip, Image, LayoutTemplate, Maximize2, Minimize2, Plus, ScanText,
   SlidersHorizontal, Sparkles, WandSparkles, ZoomIn, ZoomOut,
   type LucideIcon,
@@ -16,14 +16,14 @@ import "@xyflow/react/dist/style.css";
 
 import { pipelineFlow, stepProblems, type FlowCategory } from "../lib/pipeline-flow";
 import { summarizeStep } from "../lib/pipeline-editor";
-import type { PipelineStep, ProcessorRecord, StepCatalogueEntry, StepKind } from "../lib/types";
+import type { ArtifactSummary, PipelineStep, ProcessorRecord, StepCatalogueEntry, StepKind } from "../lib/types";
 import { InfoHint } from "./info-hint";
 
 export const STEP_ICONS: Record<StepKind, LucideIcon> = {
   render_pages: Image, read_pdf_text: FileText, document_ai_ocr: ScanText,
   document_ai_layout: LayoutTemplate, document_ai_extract: Sparkles,
   llm_extract: WandSparkles, regex_refine: Braces, master_data_lookup: Database,
-  supplier_rules: SlidersHorizontal,
+  supplier_rules: SlidersHorizontal, artifact_predict: BrainCircuit,
 };
 
 type CardData = {
@@ -75,11 +75,11 @@ const edgeTypes = { insert: InsertEdge };
 
 type Props = {
   steps: PipelineStep[]; catalogue: StepCatalogueEntry[]; processors: ProcessorRecord[];
-  model: string; problems: string[]; selectedIndex: number | null; disabled: boolean;
+  artifacts: ArtifactSummary[]; model: string; problems: string[]; selectedIndex: number | null; disabled: boolean;
   onSelect: (index: number | null) => void; onInsert: (at: number) => void;
 };
 
-function Canvas({ steps, catalogue, processors, model, problems, selectedIndex, disabled, onSelect, onInsert }: Props) {
+function Canvas({ steps, catalogue, processors, artifacts, model, problems, selectedIndex, disabled, onSelect, onInsert }: Props) {
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [measurements, setMeasurements] = useState<Record<string, { width: number; height: number }>>({});
   const [expanded, setExpanded] = useState(false);
@@ -93,6 +93,10 @@ function Canvas({ steps, catalogue, processors, model, problems, selectedIndex, 
     const processor = step ? processors.find(p => p.id === step.config.processor_ref) : null;
     let detail: string | undefined;
     if (step?.kind === "llm_extract") detail = model || "Choose a model in LLM";
+    if (step?.kind === "artifact_predict") {
+      const chosen = artifacts.find(artifact => artifact.id === step.config.artifact_id);
+      detail = chosen ? `${chosen.name} · ${chosen.id.slice(0, 8)}` : step.config.artifact_id ? "Unavailable model" : "Choose a trained model";
+    }
     if (step?.kind.startsWith("document_ai_")) {
       const name = processor?.name || (step.config.processor_ref ? "Unavailable processor" : "Existing processor binding");
       detail = `${name} · ${String(step.config.processor_version || "Processor default")}`;

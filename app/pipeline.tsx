@@ -47,6 +47,7 @@ import {
 } from "../lib/pipeline-editor";
 import type {
   AppSettings,
+  ArtifactSummary,
   EntityDefinition,
   PipelineDefinition,
   PipelineStep,
@@ -60,7 +61,71 @@ type Props = {
   entities: EntityDefinition[];
   onUse: (name: string) => Promise<void>;
   onProcessors: () => void;
+  onModels: () => void;
 };
+
+type TrainedModelConfig = { artifact_id?: string; entities?: string[]; minimum_similarity?: number };
+
+/** Which trained model a step uses, which of its fields it fills, and from what similarity. */
+function TrainedModelSettings({ config, artifacts, onChange, onModels }: {
+  config: TrainedModelConfig;
+  artifacts: ArtifactSummary[];
+  onChange: (config: TrainedModelConfig) => void;
+  onModels: () => void;
+}) {
+  const chosen = artifacts.find((artifact) => artifact.id === config.artifact_id);
+  const fields = config.entities ?? [];
+  const threshold = Number(config.minimum_similarity ?? 0);
+  return (
+    <div className="flow-step-body">
+      <label className="flow-field">
+        <span>Model<InfoHint text="A model trained in Models. The step names it by its id, which changes whenever the model does, so a Lab run records exactly which one it used." /></span>
+        <select
+          aria-label="Trained model"
+          value={config.artifact_id ?? ""}
+          onChange={(event) => {
+            const next = artifacts.find((artifact) => artifact.id === event.target.value);
+            onChange({ ...config, artifact_id: event.target.value, entities: next ? next.entities : [] });
+          }}
+        >
+          <option value="">Choose a trained model…</option>
+          {artifacts.map((artifact) => (
+            <option key={artifact.id} value={artifact.id}>{artifact.name} · {artifact.id.slice(0, 8)}</option>
+          ))}
+          {config.artifact_id && !chosen && <option value={config.artifact_id}>Unavailable · {config.artifact_id.slice(0, 8)}</option>}
+        </select>
+      </label>
+      {chosen && (
+        <fieldset className="flow-field trained-fields">
+          <legend>Fields it fills</legend>
+          {chosen.entities.map((name) => (
+            <label key={name}>
+              <input
+                type="checkbox"
+                checked={fields.includes(name)}
+                onChange={() => onChange({ ...config, entities: fields.includes(name) ? fields.filter((field) => field !== name) : [...fields, name] })}
+              />
+              <span>{name}</span>
+              {chosen.validation[name]?.accuracy != null && <small>{Math.round((chosen.validation[name].accuracy ?? 0) * 100)}% leave-one-out</small>}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <label className="flow-threshold">
+        <span>Accept from<InfoHint text="Below this similarity to the nearest labelled document, the field is left empty with the reason. 0 accepts every prediction. The Lab's coverage curve shows what each threshold would keep and how often it is right." align="end" /></span>
+        <input type="range" aria-label="Minimum similarity to the nearest document" min={0} max={1} step={0.01} value={threshold}
+          onChange={(event) => onChange({ ...config, minimum_similarity: Number(event.target.value) })} />
+        <output>{threshold.toFixed(2)}</output>
+      </label>
+      <p className="field-help">
+        {chosen
+          ? `Learned from ${chosen.documents} documents of ${chosen.datasets.join(", ")}, read by ${chosen.reader.map(stepLabel).join(" → ")}. Serve it text read the same way. Runs on this machine.`
+          : artifacts.length ? "Choose the model this step predicts with." : "No model has been trained yet."}
+        {" "}<button type="button" className="link-button" onClick={onModels}>Open Models</button>
+      </p>
+    </div>
+  );
+}
 
 const whenLabels: Record<RegexRule["when"], string> = {
   always: "Always",
@@ -120,8 +185,9 @@ function algorithmFor(value: string | undefined) {
 }
 
 /** Compose the steps a document goes through, and save that as a pipeline. */
-export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Props) {
+export function Pipelines({ draftSettings, entities, onUse, onProcessors, onModels }: Props) {
   const [processors, setProcessors] = useState<import("../lib/types").ProcessorRecord[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
   const [pipelines, setPipelines] = useState<SavedPipeline[]>([]);
   const [catalogue, setCatalogue] = useState<StepCatalogueEntry[]>([]);
   const [draft, setDraft] = useState<PipelineDefinition | null>(null);
@@ -170,15 +236,17 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
     let active = true;
     async function load() {
       try {
-        const [saved, steps, found, resources] = await Promise.all([
+        const [saved, steps, found, resources, trained] = await Promise.all([
           api.pipelines(),
           api.pipelineSteps(),
           api.masterDataTables(),
           api.processors(),
+          api.artifacts(),
         ]);
         if (!active) return;
         setPipelines(saved);
         setProcessors(resources);
+        setArtifacts(trained);
         setCatalogue(steps);
         setTables(found);
       } catch (cause) {
@@ -566,7 +634,7 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
           <div className={`pipeline-workbench ${selectedIndex !== null || insertionAt !== null ? "has-inspector" : ""}`}>
             <PipelineCanvas
               key={canvasRevision}
-              steps={draft.steps} catalogue={catalogue} processors={processors}
+              steps={draft.steps} catalogue={catalogue} processors={processors} artifacts={artifacts}
               model={draftSettings.model} problems={problems} selectedIndex={selectedIndex}
               disabled={state === "saving"} onSelect={selectStep} onInsert={showPalette}
             />
@@ -745,6 +813,15 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors }: Prop
                         and keeps the headings, tables and lists around the text.
                       </p>
                     </div>
+                  )}
+
+                  {step.kind === "artifact_predict" && (
+                    <TrainedModelSettings
+                      config={step.config as TrainedModelConfig}
+                      artifacts={artifacts}
+                      onChange={(config) => setSteps(setStepConfig(draft.steps, index, config))}
+                      onModels={onModels}
+                    />
                   )}
 
                   {step.kind === "supplier_rules" && (

@@ -39,6 +39,7 @@ export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
   }
   if (kind.startsWith("document_ai_")) return { processor_ref: "", processor_version: "" };
   if (kind === "read_pdf_text") return { feeds_model: true };
+  if (kind === "artifact_predict") return { artifact_id: "", entities: [], minimum_similarity: 0 };
   return {};
 }
 
@@ -95,6 +96,11 @@ export function summarizeStep(step: PipelineStep): string {
   if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
   if (step.kind === "document_ai_extract") return "Fields from Custom Extractor";
   if (step.kind === "supplier_rules") return "Supplier-specific rules";
+  if (step.kind === "artifact_predict") {
+    const fields = (step.config as { entities?: string[] }).entities ?? [];
+    if (!(step.config as { artifact_id?: string }).artifact_id) return "No model chosen";
+    return fields.length ? `Predicts ${fields.join(", ")}` : "No field chosen";
+  }
   if (step.kind === "llm_extract") return "One call to the configured model";
   if (step.kind === "master_data_lookup") {
     const config = step.config as { source_entity?: string; target_entity?: string };
@@ -145,6 +151,11 @@ const GROUPS: { title: string; blurb: string; kinds: string[] }[] = [
   },
   { title: "Ask a model", blurb: "One call that fills the extracted fields.", kinds: ["llm_extract"] },
   {
+    title: "Predict from history",
+    blurb: "Fill fields with a model trained in Models on labelled datasets.",
+    kinds: ["artifact_predict"],
+  },
+  {
     title: "Derived",
     blurb: "Work out a field the document never carried, from the ones it did.",
     kinds: ["master_data_lookup"],
@@ -191,6 +202,7 @@ const STEP_LABELS: Record<StepKind, string> = {
   regex_refine: "Regex refinement",
   master_data_lookup: "Master data lookup",
   supplier_rules: "Supplier rules",
+  artifact_predict: "Trained model",
 };
 
 /** Takes any string, because a recorded run may name a step that is now gone. */

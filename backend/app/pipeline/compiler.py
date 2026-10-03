@@ -28,6 +28,7 @@ from app.pipeline.steps import (
     InspectPdf,
     LookUpInMasterData,
     MarkUnfilledDerivedEntities,
+    PredictWithArtifact,
     ReadPdfText,
     ReadWithDocumentAi,
     RefineWithRegex,
@@ -108,6 +109,7 @@ def _build_one(
     supplier_rules: SupplierRuleStore | None,
     register_rows: list[dict[str, Any]] | None,
     frozen_rules: list[SupplierRule] | None,
+    artifacts: Any = None,
     ocr_follows: bool = False,
 ) -> Any:
     from app.services.processors import binding, KINDS
@@ -173,7 +175,50 @@ def _build_one(
             algorithm=_algorithm(config),
             minimum_similarity=_threshold(config),
         )
+    if step.kind is StepKind.artifact_predict:
+        return _predictor(config, entities, artifacts)
     raise PipelineError(f"No runnable step exists for '{step.kind.value}'")
+
+
+def _predictor(config: dict[str, Any], entities: list[EntityDefinition], artifacts: Any) -> PredictWithArtifact:
+    """A trained model, and the fields of it this step is to fill.
+
+    The model is read here, so an artefact that was deleted or damaged stops
+    the pipeline before the first document rather than on it.
+    """
+    from app.training.artifacts import InvalidArtifact, UnknownArtifact
+
+    if artifacts is None:
+        raise PipelineError("No trained models are available to predict with")
+    identity = str(config.get("artifact_id") or "").strip()
+    if not identity:
+        raise ValueError("no trained model is chosen")
+    try:
+        stored = artifacts.get(identity)
+        model = artifacts.load(identity)
+    except (UnknownArtifact, InvalidArtifact) as exc:
+        raise ValueError(str(exc)) from exc
+    wanted = [str(name) for name in config.get("entities") or []]
+    if not wanted:
+        raise ValueError("no field is chosen for it to fill")
+    learned = set(stored.manifest.get("entities") or [])
+    unlearned = [name for name in wanted if name not in learned]
+    if unlearned:
+        raise ValueError(f"the model was not trained on: {', '.join(unlearned)}")
+    by_name = {entity.name: entity for entity in entities}
+    missing = [name for name in wanted if name not in by_name]
+    if missing:
+        raise ValueError(f"these fields are not configured in Extraction: {', '.join(missing)}")
+    threshold = float(config.get("minimum_similarity", 0.0))
+    if not 0 <= threshold <= 1:
+        raise ValueError("the minimum similarity must be between 0 and 1")
+    return PredictWithArtifact(
+        model=model,
+        entities=[by_name[name] for name in wanted],
+        minimum_similarity=threshold,
+        artifact_id=identity,
+        artifact_name=str(stored.manifest.get("name") or identity),
+    )
 
 
 def build_steps(
@@ -186,6 +231,7 @@ def build_steps(
     supplier_rules: SupplierRuleStore | None = None,
     register_rows: list[dict[str, Any]] | None = None,
     frozen_rules: list[SupplierRule] | None = None,
+    artifacts: Any = None,
 ) -> list[Any]:
     """The executable steps, with the PDF inspection the engine always needs first."""
     problems = describe_problems(definition)
@@ -205,6 +251,7 @@ def build_steps(
                     supplier_rules=supplier_rules,
                     register_rows=register_rows,
                     frozen_rules=frozen_rules,
+                    artifacts=artifacts,
                     # describe_problems has already refused a fallback with
                     # an extraction between it and this reader.
                     ocr_follows=any(is_pdf_text_fallback(later) for later in definition.steps[index:]),

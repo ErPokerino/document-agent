@@ -454,6 +454,50 @@ follows the step's own score when every answer has one (a similarity does) and
 the confidence band otherwise, which gives at most three points. Scores are
 stored per field and exported in the CSV.
 
+## Models trained on the datasets
+
+**Models** trains models from labelled datasets, keeps them in a registry and
+offers them to pipelines as the **Trained model** step.
+
+The first kind is a **nearest neighbour over TF-IDF**: the text of every
+labelled document becomes a TF-IDF vector (character n-grams by default, which
+tolerate OCR noise), and a new document takes the labels of the most similar
+one — or the similarity-weighted vote of the *k* nearest. The similarity is
+kept as the field's score, so the Lab's coverage curve shows what a threshold
+on it buys, and the Workspace shows which labelled document a value came from.
+It suits categorical fields that repeat with the sender; it cannot answer with
+a class no labelled document carries.
+
+- **Text read the same way.** Training reads each document with the reading
+  steps of a chosen pipeline — those before its first step that fills fields —
+  and records them. Pipelines warns when a step serves the model text read by
+  other steps. Stored Document AI readings are reused, and the form states
+  before training whether any document will be sent to Google.
+- **No scoring on seen documents.** A model records the hash of every document
+  it learned from, and a Lab run over a dataset containing any of them is
+  refused. A temporal split learns only from documents whose own date label
+  falls before a chosen day, leaving the later ones for a Lab dataset.
+- **Validation** is leave-one-out over the training documents, copies of one
+  file left out together: accuracy and macro F1 per field. It describes
+  documents like the training ones; a Lab run over a separate dataset is the
+  measurement.
+- **Artefacts are immutable and addressed by content.** The id hashes the
+  manifest and the files, so the pipeline step, and therefore the Lab
+  fingerprint, changes whenever the model does. A model in use by a pipeline
+  cannot be deleted.
+- **Declarative files only.** A model is a manifest, the vocabulary as JSON,
+  IDF weights and the document matrix as NumPy arrays read with
+  `allow_pickle=False`, and the training labels as JSON. Export and import move
+  it as a zip; an archive with any other file is refused, since a pickle would
+  run its own code when loaded.
+
+Training jobs run in the background and are kept in memory; a backend restart
+forgets the jobs, never the models. **Training elsewhere** lists the remote
+targets — Gemini supervised tuning on Vertex AI, Document AI custom processors,
+Bedrock, Azure OpenAI — as not connected: tuning Gemini is offered on Vertex AI
+rather than through the Gemini API key used in LLM, and needs a project, a
+Cloud Storage bucket and a service account allowed to run tuning jobs.
+
 ## Stored Document AI readings
 
 Every OCR and Layout Parser reading made by a step that names a **pinned

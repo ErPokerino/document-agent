@@ -7,7 +7,7 @@ export type FlowCategory = "document" | "reader" | "model" | "transform" | "refe
 export function flowCategory(kind: StepKind): FlowCategory {
   if (kind === "render_pages" || kind === "read_pdf_text") return "document";
   if (kind === "document_ai_ocr" || kind === "document_ai_layout") return "reader";
-  if (kind === "llm_extract" || kind === "document_ai_extract") return "model";
+  if (kind === "llm_extract" || kind === "document_ai_extract" || kind === "artifact_predict") return "model";
   if (kind === "master_data_lookup") return "reference";
   return "transform";
 }
