@@ -352,6 +352,13 @@ export type FieldRule = {
   minimum_score: number | null;
 };
 
+export type FineTuningExportRequest = {
+  name: string;
+  datasets: string[];
+  pipeline: string;
+  format: "vertex_gemini" | "openai_chat";
+};
+
 export type GcpKeyStatus = {
   configured: boolean;
   path: string;
@@ -702,6 +709,8 @@ export type TrainingJobModel = {
   artifact_id: string | null;
   error: string | null;
   skipped: string[];
+  output: string | null;
+  examples: number;
 };
 
 export type TrainingProvider = {

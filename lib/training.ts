@@ -76,6 +76,7 @@ export function dateFields(entities: EntityDefinition[]): EntityDefinition[] {
 
 export function jobProgress(job: TrainingJobModel): string {
   if (job.status === "running") return job.total ? `Reading ${job.done} of ${job.total} documents` : "Starting";
+  if (job.status === "completed" && job.kind === "fine_tuning_export") return `${job.examples} examples from ${job.total} documents`;
   if (job.status === "completed") return `Trained on ${job.total - job.skipped.length} of ${job.total} documents`;
   if (job.status === "cancelled") return "Cancelled";
   return job.error ?? "Failed";

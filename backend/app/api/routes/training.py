@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import json
+import re
 from datetime import date
 from typing import Any
 
@@ -10,6 +12,7 @@ from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from app.api import deps
 from app.domain.models import (
     ArtifactSummary,
+    FineTuningExportRequest,
     KnnTrainingRequest,
     ReadingCacheStatus,
     TrainingJobModel,
@@ -193,6 +196,7 @@ def _job_model(job: TrainingJob) -> TrainingJobModel:
     return TrainingJobModel(
         id=job.id, kind=job.kind, name=job.name, created_at=job.created_at, status=job.status,  # type: ignore[arg-type]
         total=job.total, done=job.done, artifact_id=job.artifact_id, error=job.error, skipped=job.skipped,
+        output=job.output, examples=job.examples,
     )
 
 
@@ -257,15 +261,7 @@ async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="The cutoff is not a YYYY-MM-DD date.") from exc
 
-    try:
-        from app.services.processors import resolved_pipeline
-
-        definition = resolved_pipeline(deps.pipeline_store.read(request.pipeline), settings.gcp)
-        readers = reading_steps(definition)
-    except (UnknownPipeline, InvalidPipelineName) as exc:
-        raise HTTPException(status_code=404, detail=f"No pipeline named {request.pipeline}") from exc
-    except (PipelineError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    definition, readers = _reading_plan(request.pipeline, settings)
     await _pin_reader_versions(readers, settings)
 
     documents = await asyncio.to_thread(_labelled_documents, request.datasets)
@@ -327,6 +323,96 @@ async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
 
     job.task = asyncio.create_task(drive())
     return _job_model(job)
+
+
+def _reading_plan(pipeline: str, settings: Any) -> tuple[Any, list[Any]]:
+    """The pipeline, and the reading steps a corpus is read with."""
+    from app.services.processors import resolved_pipeline
+
+    try:
+        definition = resolved_pipeline(deps.pipeline_store.read(pipeline), settings.gcp)
+        return definition, reading_steps(definition)
+    except (UnknownPipeline, InvalidPipelineName) as exc:
+        raise HTTPException(status_code=404, detail=f"No pipeline named {pipeline}") from exc
+    except (PipelineError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/training/exports", response_model=TrainingJobModel, status_code=202)
+async def start_fine_tuning_export(request: FineTuningExportRequest) -> TrainingJobModel:
+    """Write the labelled datasets as supervised fine-tuning examples, one JSON per line."""
+    from app.training.sft import example
+
+    if deps.training_jobs.running() is not None:
+        raise HTTPException(status_code=409, detail="A training job is already running.")
+    for dataset in request.datasets:
+        deps.require_dataset(dataset)
+    settings = deps.settings_store.read()
+    definition, readers = _reading_plan(request.pipeline, settings)
+    await _pin_reader_versions(readers, settings)
+    documents = await asyncio.to_thread(_labelled_documents, request.datasets)
+    if not documents:
+        raise HTTPException(status_code=400, detail="These datasets hold no labelled document.")
+
+    job = deps.training_jobs.start("fine_tuning_export", request.name)
+    job.total = len(documents)
+    steps = executable_readers(readers, definition.page_limit)
+    prompts = settings.prompts
+
+    async def drive() -> None:
+        try:
+            read, skipped = await read_corpus(
+                documents,
+                steps,
+                lambda name, content: deps.pipeline_context(settings, name, content, reuse_readings=True),
+                on_progress=progress_callback(job),
+                cancelled=job.cancelled,
+            )
+            lines = []
+            for item in read:
+                try:
+                    lines.append(json.dumps(
+                        example(request.format, prompts, item.document.labels, item.text,
+                                total_pages=item.total_pages, processed_pages=item.processed_pages),
+                        ensure_ascii=False,
+                    ))
+                except ValueError as exc:
+                    skipped.append((f"{item.document.dataset}/{item.document.name}", str(exc)))
+            job.skipped = [f"{name}: {reason}" for name, reason in skipped]
+            if not lines:
+                raise ValueError("No document could be written as an example.")
+            deps.EXPORTS_PATH.mkdir(parents=True, exist_ok=True)
+            output = f"{job.id}-{safe_file_name(request.name)}-{request.format}.jsonl"
+            (deps.EXPORTS_PATH / output).write_text("\n".join(lines) + "\n", encoding="utf-8")
+            job.output = output
+            job.examples = len(lines)
+            job.status = "completed"
+        except asyncio.CancelledError:
+            job.status = "cancelled"
+        except Exception as exc:  # noqa: BLE001 - a job must never end silently
+            job.status = "failed"
+            job.error = str(exc)
+
+    job.task = asyncio.create_task(drive())
+    return _job_model(job)
+
+
+@router.get("/api/training/exports/{output}", response_class=Response)
+async def download_fine_tuning_export(output: str) -> Response:
+    if not re.fullmatch(r"[0-9]+-[A-Za-z0-9._-]+\.jsonl", output):
+        raise HTTPException(status_code=404, detail="No such export")
+    path = deps.EXPORTS_PATH / output
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No such export")
+    return Response(
+        content=path.read_bytes(),
+        media_type="application/jsonl",
+        headers={"Content-Disposition": content_disposition("attachment", output)},
+    )
+
+
+def safe_file_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")[:60] or "export"
 
 
 async def _pin_reader_versions(readers: list[Any], settings: Any) -> None:

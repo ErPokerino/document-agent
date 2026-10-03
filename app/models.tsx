@@ -6,6 +6,7 @@ import {
   Cloud,
   Database,
   Download,
+  FileDown,
   GraduationCap,
   HardDrive,
   LoaderCircle,
@@ -38,6 +39,7 @@ import type {
   ArtifactSummary,
   Dataset,
   EntityDefinition,
+  FineTuningExportRequest,
   KnnParameters,
   ReadingCacheStatus,
   SavedPipeline,
@@ -62,6 +64,7 @@ export function Models({ entities, onPipelines }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [exportForm, setExportForm] = useState<FineTuningExportRequest>({ name: "", datasets: [], pipeline: "", format: "vertex_gemini" });
   const importInput = useRef<HTMLInputElement>(null);
 
   const running = jobs.find((job) => job.status === "running") ?? null;
@@ -266,7 +269,7 @@ export function Models({ entities, onPipelines }: Props) {
           )}
         </div>
 
-        {jobs.filter((job) => job.status !== "running").slice(0, 3).map((job) => (
+        {jobs.filter((job) => job.status !== "running" && job.kind !== "fine_tuning_export").slice(0, 3).map((job) => (
           <div className={`training-job ${job.status}`} key={job.id}>
             <strong>{job.name}</strong> <span>{jobProgress(job)}</span>
             {job.skipped.length > 0 && (
@@ -368,9 +371,56 @@ export function Models({ entities, onPipelines }: Props) {
           <span className="settings-card-icon"><Cloud size={18} /></span>
           <div>
             <h3>Training elsewhere</h3>
-            <p>Where models will be trained once DocuFlow is connected to them. None is reachable from this app yet.</p>
+            <p>Where models will be trained once DocuFlow is connected to them. None is reachable from this app yet; the examples they train on can already be written here.</p>
           </div>
         </div>
+        <div className="training-export">
+          <h4>Fine-tuning examples<InfoHint text="Labelled documents written as supervised tuning examples, one JSON object per line, worded exactly as DocuFlow asks Gemini at run time: the same system instruction, page note and document text, with the labels as the answer. Text only, read by the pipeline's reading steps. A document missing a label for a field the model is asked for is left out rather than written with null." /></h4>
+          <div className="training-form">
+            <label className="flow-field"><span>Name</span>
+              <input aria-label="Export name" value={exportForm.name} placeholder="Invoices 2025" onChange={(event) => setExportForm({ ...exportForm, name: event.target.value })} />
+            </label>
+            <fieldset className="flow-field training-choices">
+              <legend>From</legend>
+              {datasets.map((dataset) => (
+                <label key={dataset.name}>
+                  <input type="checkbox" checked={exportForm.datasets.includes(dataset.name)} onChange={() => setExportForm({ ...exportForm, datasets: toggle(exportForm.datasets, dataset.name) })} />
+                  <span>{dataset.name}</span><small>{dataset.labelled_count} labelled</small>
+                </label>
+              ))}
+            </fieldset>
+            <label className="flow-field"><span>Text read as the pipeline</span>
+              <select aria-label="Pipeline that reads the export text" value={exportForm.pipeline || form.pipeline} onChange={(event) => setExportForm({ ...exportForm, pipeline: event.target.value })}>
+                {pipelines.map((pipeline) => <option key={pipeline.name} value={pipeline.name}>{pipeline.name}</option>)}
+              </select>
+            </label>
+            <label className="flow-field"><span>Format</span>
+              <select aria-label="Export format" value={exportForm.format} onChange={(event) => setExportForm({ ...exportForm, format: event.target.value as FineTuningExportRequest["format"] })}>
+                <option value="vertex_gemini">Gemini on Vertex AI (contents)</option>
+                <option value="openai_chat">Chat messages (system, user, assistant)</option>
+              </select>
+            </label>
+          </div>
+          <div className="run-controls training-actions">
+            <button
+              className="secondary-button"
+              disabled={busy || !!running || !exportForm.name.trim() || !exportForm.datasets.length}
+              onClick={() => guard(async () => { await api.exportFineTuning({ ...exportForm, name: exportForm.name.trim(), pipeline: exportForm.pipeline || form.pipeline }); await refresh(); })}
+            >
+              <FileDown size={14} /> Write examples
+            </button>
+          </div>
+          {jobs.filter((job) => job.kind === "fine_tuning_export" && job.status !== "running").slice(0, 3).map((job) => (
+            <div className={`training-job ${job.status}`} key={job.id}>
+              <strong>{job.name}</strong> <span>{jobProgress(job)}</span>
+              {job.output && <a className="secondary-button small" href={apiUrls.fineTuningExport(job.output)} download><Download size={13} /> {job.output}</a>}
+              {job.skipped.length > 0 && (
+                <details><summary>{job.skipped.length} left out</summary><ul>{job.skipped.map((line) => <li key={line}>{line}</li>)}</ul></details>
+              )}
+            </div>
+          ))}
+        </div>
+
         <div className="provider-list">
           {providers.map((provider) => (
             <div className="provider-card" key={provider.id}>

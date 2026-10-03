@@ -28,6 +28,9 @@ class TrainingJob:
     artifact_id: str | None = None
     error: str | None = None
     skipped: list[str] = field(default_factory=list)
+    # The file an export job wrote, under the exports folder.
+    output: str | None = None
+    examples: int = 0
     task: asyncio.Task[Any] | None = None
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
 

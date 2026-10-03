@@ -521,8 +521,18 @@ a class no labelled document carries.
   it as a zip; an archive with any other file is refused, since a pickle would
   run its own code when loaded.
 
+**Fine-tuning examples** writes labelled datasets as supervised tuning data,
+one JSON object per line, in the Gemini-on-Vertex `contents` format or as chat
+messages. Each example is built by the code that builds Gemini's request at run
+time — system instruction with entity lines and confidence rubric, user text
+with page note and document text — and answers with the labels as the JSON
+Gemini is asked for, so a tuned model learns the question DocuFlow actually
+asks. Examples carry text read by a pipeline's reading steps, not page images.
+A document without a label for a field the model is asked for is left out and
+listed, rather than written with `null`.
+
 Training jobs run in the background and are kept in memory; a backend restart
-forgets the jobs, never the models. **Training elsewhere** lists the remote
+forgets the jobs, never the models or the exported files. **Training elsewhere** lists the remote
 targets — Gemini supervised tuning on Vertex AI, Document AI custom processors,
 Bedrock, Azure OpenAI — as not connected: tuning Gemini is offered on Vertex AI
 rather than through the Gemini API key used in LLM, and needs a project, a

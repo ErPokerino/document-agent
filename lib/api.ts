@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   ArtifactSummary,
+  FineTuningExportRequest,
   KnnTrainingRequest,
   ReadingCacheStatus,
   ResolutionConfig,
@@ -81,6 +82,7 @@ async function history<T extends { id: number }>(path: string): Promise<T[]> {
 export const apiUrls = {
   documentFile: (dataset: string, document: string) =>
     `${API_BASE}/api/datasets/${segment(dataset)}/documents/${segment(document)}/file`,
+  fineTuningExport: (output: string) => `${API_BASE}/api/training/exports/${segment(output)}`,
   artifactZip: (id: string) => `${API_BASE}/api/artifacts/${segment(id)}/export.zip`,
   evaluationCsv: (id: number) => `${API_BASE}/api/evaluations/${id}/export.csv`,
   evaluationDocument: (id: number, document: string) =>
@@ -237,6 +239,7 @@ export const api = {
   trainKnn: (body: KnnTrainingRequest) => request<TrainingJobModel>("/api/training/knn", json("POST", body)),
   trainingJobs: () => request<TrainingJobModel[]>("/api/training/jobs"),
   cancelTrainingJob: (id: number) => request<TrainingJobModel>(`/api/training/jobs/${id}/cancel`, { method: "POST" }),
+  exportFineTuning: (body: FineTuningExportRequest) => request<TrainingJobModel>("/api/training/exports", json("POST", body)),
   trainingProviders: () => request<TrainingProvider[]>("/api/training/providers"),
   readingCache: () => request<ReadingCacheStatus>("/api/reading-cache"),
   clearReadingCache: () => request<void>("/api/reading-cache", { method: "DELETE" }),

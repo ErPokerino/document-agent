@@ -327,3 +327,48 @@ def test_remote_training_targets_are_listed_as_not_connected(api) -> None:
 
     assert {provider["id"] for provider in providers} >= {"vertex_gemini_sft", "document_ai_custom"}
     assert all(provider["status"] == "not_connected" for provider in providers)
+
+
+# -- fine-tuning examples ------------------------------------------------------------
+
+
+def test_an_example_is_worded_as_gemini_is_asked_at_run_time() -> None:
+    """A tuned model learns the question it was trained on."""
+    from app.services.gemini import GeminiClient
+    from app.training.sft import example
+
+    prompts = PromptConfiguration()
+    labels = {entity.name: "x" for entity in prompts.entities}
+
+    line = example("vertex_gemini", prompts, labels, "ACME invoice", total_pages=2, processed_pages=2)
+
+    assert line["systemInstruction"]["parts"][0]["text"] == GeminiClient._system_prompt(prompts)
+    assert "ACME invoice" in line["contents"][0]["parts"][0]["text"]
+    answer = json.loads(line["contents"][1]["parts"][0]["text"])
+    assert answer["confidence"]["currency"] == "high"
+
+
+def test_a_document_missing_a_label_the_model_is_asked_for_is_not_an_example() -> None:
+    """Writing null in its place would teach the model to answer nothing."""
+    from app.training.sft import example
+
+    with pytest.raises(ValueError, match="not labelled for"):
+        example("openai_chat", PromptConfiguration(), {"currency": "EUR"}, "text", total_pages=1, processed_pages=1)
+
+
+def test_an_export_writes_one_example_per_fully_labelled_document(api) -> None:
+    seed(api, "train", ["acme-1.pdf", "globex-1.pdf"])
+    complete = {entity.name: None for entity in PromptConfiguration().entities}
+    api.put("/api/datasets/train/documents/acme-1.pdf/labels", json={"labels": {**complete, "currency": "EUR"}})
+    reading_pipeline()
+
+    job = wait_for(api, api.post("/api/training/exports", json={
+        "name": "invoices", "datasets": ["train"], "pipeline": "Local text", "format": "openai_chat",
+    }).json()["id"])
+
+    assert job["status"] == "completed", job
+    assert job["examples"] == 1
+    assert any("globex-1.pdf: not labelled for" in line for line in job["skipped"])
+    exported = api.get(f"/api/training/exports/{job['output']}")
+    [line] = exported.text.strip().splitlines()
+    assert json.loads(line)["messages"][2]["role"] == "assistant"

@@ -45,6 +45,8 @@ class LabelledDocument:
 class ReadDocument:
     document: LabelledDocument
     text: str
+    total_pages: int = 0
+    processed_pages: int = 0
 
 
 def reading_steps(definition: PipelineDefinition) -> list[PipelineStep]:
@@ -138,7 +140,14 @@ async def read_corpus(
         else:
             text = str(context.artifacts.get("document_text") or "").strip()
             if text:
-                read.append(ReadDocument(document, text))
+                read.append(
+                    ReadDocument(
+                        document,
+                        text,
+                        total_pages=int(context.artifacts.get("page_count") or 0),
+                        processed_pages=int(context.artifacts.get("processed_pages") or 0),
+                    )
+                )
             else:
                 skipped.append((label, "No text was read from it."))
         if on_progress is not None:

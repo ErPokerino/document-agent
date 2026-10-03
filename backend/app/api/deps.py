@@ -83,6 +83,7 @@ PIPELINES_PATH = DATA_DIR / "pipelines"
 GCP_CREDENTIALS_PATH = DATA_DIR / "gcp-service-account.json"
 READING_CACHE_PATH = DATA_DIR / "reading-cache"
 ARTIFACTS_PATH = DATA_DIR / "artifacts"
+EXPORTS_PATH = DATA_DIR / "training-exports"
 settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)

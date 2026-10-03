@@ -891,6 +891,17 @@ class TrainingJobModel(BaseModel):
     artifact_id: str | None = None
     error: str | None = None
     skipped: list[str] = Field(default_factory=list)
+    output: str | None = None
+    examples: int = 0
+
+
+class FineTuningExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=80)]
+    datasets: Annotated[list[str], Field(min_length=1)]
+    pipeline: Annotated[str, Field(min_length=1)]
+    format: Literal["vertex_gemini", "openai_chat"] = "vertex_gemini"
 
 
 class ArtifactEntityValidation(BaseModel):

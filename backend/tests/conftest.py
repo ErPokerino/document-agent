@@ -32,5 +32,6 @@ def never_touch_real_data(tmp_path, monkeypatch):
     from app.training.jobs import TrainingJobs
 
     monkeypatch.setattr(deps, "ARTIFACTS_PATH", isolated / "artifacts")
+    monkeypatch.setattr(deps, "EXPORTS_PATH", isolated / "training-exports")
     monkeypatch.setattr(deps, "artifact_store", ArtifactStore(isolated / "artifacts"))
     monkeypatch.setattr(deps, "training_jobs", TrainingJobs())
