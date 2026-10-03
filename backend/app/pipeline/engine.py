@@ -15,6 +15,11 @@ class PipelineContext:
     gcp_credentials_path: str = ""
     gcp_project_id: str = ""
     gcp_location: str = "eu"
+    # Where pinned Document AI readings are kept. Every reading is written to
+    # it; one is read back only when the run chose to reuse readings, since a
+    # reused reading costs neither the time nor the pages the pipeline costs.
+    reading_cache: Any = None
+    reuse_readings: bool = False
     artifacts: dict[str, Any] = field(default_factory=dict)
 
 

@@ -45,6 +45,8 @@ COLUMNS = (
     "ocr_pages",
     "layout_pages",
     "custom_extractor_pages",
+    # Pages read back from stored readings: not sent, not billed, not timed.
+    "cached_pages",
     "usage_complete",
     "entity",
     "expected",
@@ -129,6 +131,7 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
             "ocr_pages": document.ocr_pages,
             "layout_pages": document.layout_pages,
             "custom_extractor_pages": document.custom_extractor_pages,
+            "cached_pages": document.cached_pages,
             "error": document.error,
         }
         if not document.items:

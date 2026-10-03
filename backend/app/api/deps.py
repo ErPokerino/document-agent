@@ -61,6 +61,7 @@ from app.services.migrations import (
     clear_inherited_model_default,
 )
 from app.services.processors import migrate_processor_catalog
+from app.services.reading_cache import ReadingCache
 from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
 from app.services.supplier_rules import SupplierRule, SupplierRuleStore
@@ -78,6 +79,7 @@ DATASETS_PATH = DATA_DIR / "datasets"
 PIPELINES_PATH = DATA_DIR / "pipelines"
 # One fixed location, so the instructions in Settings can name a real path.
 GCP_CREDENTIALS_PATH = DATA_DIR / "gcp-service-account.json"
+READING_CACHE_PATH = DATA_DIR / "reading-cache"
 settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
@@ -86,6 +88,7 @@ master_data_store = MasterDataStore(DATABASE_PATH)
 # Beside the register the rules key on, in the same database.
 supplier_rule_store = SupplierRuleStore(DATABASE_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
+reading_cache = ReadingCache(READING_CACHE_PATH)
 # The page limit used to be one number for the whole app; carry an existing
 # install's value into the pipeline that inherits the job, then write the
 # starting point out so it is an ordinary editable file.
@@ -309,7 +312,9 @@ def recorded_model(settings: AppSettings, pipeline: PipelineDefinition) -> tuple
     return settings.model, settings.provider
 
 
-def pipeline_context(settings: AppSettings, filename: str, content: bytes) -> PipelineContext:
+def pipeline_context(
+    settings: AppSettings, filename: str, content: bytes, *, reuse_readings: bool = False
+) -> PipelineContext:
     return PipelineContext(
         filename=filename,
         content=content,
@@ -321,6 +326,8 @@ def pipeline_context(settings: AppSettings, filename: str, content: bytes) -> Pi
         gcp_credentials_path=str(GCP_CREDENTIALS_PATH),
         gcp_project_id=settings.gcp.project_id,
         gcp_location=settings.gcp.location,
+        reading_cache=reading_cache,
+        reuse_readings=reuse_readings,
     )
 
 
@@ -467,6 +474,8 @@ def evaluation_model(detail: Any) -> Evaluation:
                 "extraction_engine",
                 "fingerprint",
                 "current_step",
+                "reuse_readings",
+                "cached_pages",
             )
         },
         metrics=metrics_model(detail.metrics),

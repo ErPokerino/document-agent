@@ -107,6 +107,8 @@ export type Evaluation = {
   usage_complete: boolean;
   fingerprint: string | null;
   current_step: string | null;
+  reuse_readings: boolean;
+  cached_pages: number;
   metrics: Metrics;
 };
 
@@ -140,6 +142,8 @@ export type EvaluationDetail = {
   usage_complete: boolean;
   fingerprint: string | null;
   current_step: string | null;
+  reuse_readings: boolean;
+  cached_pages: number;
   metrics: Metrics;
   prompts: PromptConfiguration;
   pipeline_definition: PipelineDefinition | null;
@@ -158,6 +162,7 @@ export type EvaluationDocumentResult = {
   ocr_pages: number | null;
   layout_pages: number | null;
   custom_extractor_pages: number | null;
+  cached_pages: number | null;
   items: EvaluationFieldResult[];
 };
 
@@ -171,6 +176,7 @@ export type EvaluationFieldResult = {
 
 export type EvaluationRequest = {
   dataset: string;
+  reuse_readings: boolean;
 };
 
 export type ExtractionEngine = {
@@ -483,6 +489,11 @@ export type PromptPreview = {
 export type PromptPreviewRequest = {
   prompts: PromptConfiguration;
   provider: "lm_studio" | "gemini";
+};
+
+export type ReadingCacheStatus = {
+  entries: number;
+  size_bytes: number;
 };
 
 export type RuntimeEngineInfo = {

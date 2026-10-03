@@ -428,6 +428,23 @@ for calls that may have been billed without reporting usage. Recorded usage is
 still available in CSV. A changed expected label is shown separately in the
 run comparison and excluded from its net fixes/regressions.
 
+## Stored Document AI readings
+
+Every OCR and Layout Parser reading made by a step that names a **pinned
+processor version** is kept in `backend/data/reading-cache`, keyed by the
+original PDF, the number of pages sent, the processor and its version. A step
+that calls a processor's default version has no key, because Google can move
+the default and a stored reading would outlive the processor that made it. Lab
+runs pin versions when metadata allows; Workspace runs pin only what the
+pipeline names explicitly.
+
+Storing is always on; reading back is a per-run choice in Lab (**Reuse stored
+Document AI readings**), off by default. A run that reuses readings records it,
+counts the reused pages as `cached_pages` rather than as OCR or layout pages,
+and is left out of the time and cost figures in Analytics while still counting
+for accuracy. A retry replays the choice its run started with. The cache is
+also what training reads its corpus from.
+
 ## Why Outlines is not required
 
 LM Studio directly supports `response_format.type = json_schema`. The backend supplies the dynamic schema in every `/v1/chat/completions` extraction request, so the Structured Output field in the LM Studio desktop UI does not need to be configured manually. Pydantic provides a second application-level validation layer. Outlines remains a useful future adapter for direct Transformers or MLX inference, but would duplicate the structured-output layer in this setup.

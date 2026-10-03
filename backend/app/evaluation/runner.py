@@ -120,6 +120,7 @@ async def run_evaluation(
             # The extraction step leaves whatever the provider reported here.
             stats = result.artifacts.get("inference_stats") or {}
             pages = result.artifacts.get("document_ai_pages") or {}
+            cached = result.artifacts.get("cached_pages") or {}
             # Off the event loop: the UI polls this run while it writes.
             await asyncio.to_thread(
                 evaluations.record_document,
@@ -133,6 +134,7 @@ async def run_evaluation(
                 layout_pages=pages.get("document_ai_layout"),
                 custom_extractor_pages=pages.get("document_ai_extract", 0),
                 usage_complete=not resumed and result.artifacts.get("usage_complete", True),
+                cached_pages=sum(cached.values()),
             )
             if run_store is not None:
                 await asyncio.to_thread(

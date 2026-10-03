@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Python packages ship their own JavaScript: scikit-learn's HTML repr
+    // failed this lint the moment it was installed into the virtualenv.
+    ".venv/**",
+    ".runtime/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

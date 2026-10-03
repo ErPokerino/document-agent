@@ -24,3 +24,7 @@ def never_touch_real_data(tmp_path, monkeypatch):
     monkeypatch.setattr(deps, "SETTINGS_PATH", isolated / "settings.json")
     monkeypatch.setattr(deps, "DATABASE_PATH", isolated / "docuflow.db")
     monkeypatch.setattr(deps, "DATASETS_PATH", isolated / "datasets")
+    from app.services.reading_cache import ReadingCache
+
+    monkeypatch.setattr(deps, "READING_CACHE_PATH", isolated / "reading-cache")
+    monkeypatch.setattr(deps, "reading_cache", ReadingCache(isolated / "reading-cache"))

@@ -110,6 +110,9 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Off unless chosen for this run: a Lab run measures time and pages, and a
+  // reused reading costs neither.
+  const [reuseReadings, setReuseReadings] = useState(false);
   const listRequests = useLatest();
   const detailRequests = useLatest();
 
@@ -322,11 +325,16 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
           <Square size={14} /> Cancel
         </button>
       ) : (
-        <button className="primary-button" disabled={!selectedDataset || busy || modelBlocks} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!); await refreshEvaluations(); await refreshValidatedRuns(); })}>
+        <button className="primary-button" disabled={!selectedDataset || busy || modelBlocks} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!, reuseReadings); await refreshEvaluations(); await refreshValidatedRuns(); })}>
           <Play size={14} /> Run test
         </button>
       )}
         </div>
+        <label className="run-option">
+          <input type="checkbox" checked={reuseReadings} disabled={!!running} onChange={(event) => setReuseReadings(event.target.checked)} />
+          <span>Reuse stored Document AI readings</span>
+          <InfoHint text="OCR and Layout Parser readings from earlier runs are read back instead of sent again, when the step names a pinned processor version. Time and pages are then not what the pipeline costs, so Analytics leaves this run out of its time and cost figures. Readings are stored by every run either way." />
+        </label>
         {modelBlocks && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
         {runNote && (
           <div className="alert warning-alert" role="status">
@@ -575,6 +583,11 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
         )}
         {(openEvaluation.custom_extractor_pages ?? 0) > 0 && (
           <span className="pages-tag">{openEvaluation.custom_extractor_pages} Custom Extractor pages</span>
+        )}
+        {openEvaluation.reuse_readings && (
+          <span className="pages-tag" title="Pages read back from stored readings were not sent to Google, billed, or waited for">
+            Reused readings · {openEvaluation.cached_pages} pages not sent
+          </span>
         )}
         {runCost(openEvaluation) === null && (
           <span className="pages-tag">Cost unavailable · usage or rates incomplete</span>

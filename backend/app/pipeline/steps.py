@@ -28,6 +28,7 @@ from app.services.custom_extractor import (
     locations_from_response,
     schema_override,
 )
+from app.services.reading_cache import reading_key
 from app.services.text_boxes import Box, TextToken, tokens_from_ocr
 from app.services.lm_studio import LMStudioClient
 
@@ -218,11 +219,15 @@ class ReadPdfText:
             )
 
         context.artifacts["ocr_tokens"] = tokens
+        reading = "\n\n".join(
+            f"[Page {index + 1}]\n{text}" if text else f"[Page {index + 1} carries no embedded text.]"
+            for index, text in enumerate(texts)
+        )
+        # What was read, whether or not the model is shown it: a step that
+        # predicts from the text of the document needs it either way.
+        context.artifacts["document_text"] = reading
         if self.feeds_model:
-            context.artifacts["text"] = "\n\n".join(
-                f"[Page {index + 1}]\n{text}" if text else f"[Page {index + 1} carries no embedded text.]"
-                for index, text in enumerate(texts)
-            )
+            context.artifacts["text"] = reading
 
 
 class ExtractEntities:
@@ -330,7 +335,26 @@ class ReadWithDocumentAi:
         # applied before the document leaves this machine, not after.
         content = await asyncio.to_thread(_first_pages, context.content, processed_pages)
 
-        answer = await self._client(context).process(self.processor_id, content)
+        cache = context.reading_cache
+        key = (
+            reading_key(
+                kind=self.kind,
+                project_id=self.project_id or context.gcp_project_id,
+                location=self.location or context.gcp_location,
+                processor_id=self.processor_id,
+                api_version="v1",
+                content=context.content,
+                pages=processed_pages,
+            )
+            if cache is not None
+            else None
+        )
+        answer = await asyncio.to_thread(cache.get, key) if key and context.reuse_readings else None
+        reused = answer is not None
+        if answer is None:
+            answer = await self._client(context).process(self.processor_id, content)
+            if key:
+                await asyncio.to_thread(cache.put, key, answer)
         document = answer.get("document") or {}
 
         if self.kind == "document_ai_layout":
@@ -338,16 +362,21 @@ class ReadWithDocumentAi:
             context.artifacts["layout"] = layout
             if self.feeds_model:
                 context.artifacts["text"] = markdown_from_layout(layout)
+            context.artifacts["document_text"] = markdown_from_layout(layout)
         else:
             # Kept whether or not the model is shown the text: this is what
             # locates an extracted value on the page afterwards.
             context.artifacts["ocr_tokens"] = tokens_from_ocr(document)
             if self.feeds_model:
                 context.artifacts["text"] = text_from_ocr(document)
+            context.artifacts["document_text"] = text_from_ocr(document)
 
-        counted = dict(context.artifacts.get("document_ai_pages") or {})
+        # A reused reading was neither sent nor billed, and saying it was
+        # would put a page on the run's bill that Google never charged.
+        tally = "cached_pages" if reused else "document_ai_pages"
+        counted = dict(context.artifacts.get(tally) or {})
         counted[self.kind] = counted.get(self.kind, 0) + processed_pages
-        context.artifacts["document_ai_pages"] = counted
+        context.artifacts[tally] = counted
 
 
 def _first_pages(content: bytes, pages: int) -> bytes:
@@ -649,6 +678,7 @@ class ExtractWithCustomExtractor:
         # there for anything that wants to locate a value it did not return.
         context.artifacts["ocr_tokens"] = tokens_from_ocr(document)
         context.artifacts["text"] = text_from_ocr(document)
+        context.artifacts["document_text"] = context.artifacts["text"]
 
         counted = dict(context.artifacts.get("document_ai_pages") or {})
         counted["document_ai_extract"] = counted.get("document_ai_extract", 0) + processed_pages

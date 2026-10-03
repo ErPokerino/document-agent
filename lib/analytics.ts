@@ -88,11 +88,14 @@ export function approachPoints(evaluations: Evaluation[], costOf: CostOf): Appro
       { model: engineLabel(evaluation), pipeline: evaluation.pipeline, dataset: evaluation.dataset, detail, accuracy: [], seconds: [], cost: [], tokens: [] };
 
     group.accuracy.push(accuracy);
-    if (evaluation.average_elapsed_ms) group.seconds.push(evaluation.average_elapsed_ms / 1000);
+    // A page read back from the cache was neither waited for nor billed, so a
+    // run that reused readings measured the answers, not what they cost.
+    const measuredCost = !evaluation.cached_pages;
+    if (measuredCost && evaluation.average_elapsed_ms) group.seconds.push(evaluation.average_elapsed_ms / 1000);
 
     const documents = evaluation.succeeded_documents || evaluation.total_documents || 0;
     if (documents) {
-      const cost = costOf(evaluation);
+      const cost = measuredCost ? costOf(evaluation) : null;
       if (cost !== null && cost !== undefined) group.cost.push(cost / documents);
       const tokens = (evaluation.prompt_tokens ?? 0) + (evaluation.completion_tokens ?? 0);
       if (tokens) group.tokens.push(tokens / documents);

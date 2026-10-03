@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.services.errors import ProviderError
-from app.api.routes import models, settings, documents, pipelines, master_data, datasets, runs, evaluations, processors
+from app.api.routes import models, settings, documents, pipelines, master_data, datasets, runs, evaluations, processors, training
 
 app = FastAPI(title="DocuFlow API", version="0.1.0")
 
@@ -42,3 +42,4 @@ app.include_router(datasets.router)
 app.include_router(runs.router)
 app.include_router(evaluations.router)
 app.include_router(processors.router)
+app.include_router(training.router)

@@ -534,6 +534,9 @@ class EvaluationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dataset: Annotated[str, Field(min_length=1, max_length=128)]
+    # Off by default: a Lab run measures what the pipeline costs in time and
+    # pages, and a reused reading costs neither.
+    reuse_readings: bool = False
 
 
 class ExtractorProcessor(BaseModel):
@@ -584,6 +587,11 @@ class Evaluation(BaseModel):
     # The pipeline step in flight while status is running. Empty once the
     # document that was being scored has finished.
     current_step: str | None = None
+    # Whether Document AI readings stored by earlier runs were reused, and how
+    # many pages were read back rather than sent. Neither is in the time or
+    # the page counts above.
+    reuse_readings: bool = False
+    cached_pages: int = 0
     metrics: Metrics
 
 
@@ -606,6 +614,7 @@ class EvaluationDocumentResult(BaseModel):
     ocr_pages: int | None = None
     layout_pages: int | None = None
     custom_extractor_pages: int | None = None
+    cached_pages: int | None = None
     items: list[EvaluationFieldResult]
 
 
@@ -688,3 +697,10 @@ class MasterDataRowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     values: dict[str, str]
+
+
+class ReadingCacheStatus(BaseModel):
+    """How many Document AI readings are kept, and the room they take."""
+
+    entries: int
+    size_bytes: int

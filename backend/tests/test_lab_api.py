@@ -764,3 +764,42 @@ def test_evaluation_preview_uses_the_snapshot_after_dataset_removal(api) -> None
     assert response.status_code == 200
     assert response.content == original
     assert api.get(f"/api/evaluations/{eid}/documents/unknown.pdf/file").status_code == 404
+
+
+def test_a_lab_run_records_whether_it_reused_readings(api, monkeypatch) -> None:
+    """A reused reading costs no time or pages, so the run has to say it used them."""
+    from threading import Event
+
+    seed_document(api)
+    api.put("/api/datasets/invoices/documents/invoice21.pdf/labels", json={"labels": {"currency": "EUR"}})
+    deps.model_runtime_states["vision-model"] = "ready"
+    contexts = []
+    executed = Event()
+
+    async def run(**kwargs):
+        contexts.append(kwargs["make_context"]("invoice21.pdf", b"%PDF"))
+        deps.evaluation_store.finish(kwargs["evaluation_id"], "completed")
+        executed.set()
+
+    monkeypatch.setattr(deps, "run_evaluation", run)
+    response = api.post("/api/evaluations", json={"dataset": "invoices", "reuse_readings": True})
+
+    assert response.status_code == 202
+    assert response.json()["reuse_readings"] is True
+    assert executed.wait(2), "The evaluation worker did not start"
+    assert contexts[0].reuse_readings is True
+    assert contexts[0].reading_cache is deps.reading_cache
+
+
+def test_a_lab_run_measures_fresh_readings_unless_told_otherwise(api, monkeypatch) -> None:
+    seed_document(api)
+    api.put("/api/datasets/invoices/documents/invoice21.pdf/labels", json={"labels": {"currency": "EUR"}})
+    deps.model_runtime_states["vision-model"] = "ready"
+
+    async def run(**kwargs):
+        deps.evaluation_store.finish(kwargs["evaluation_id"], "completed")
+
+    monkeypatch.setattr(deps, "run_evaluation", run)
+    response = api.post("/api/evaluations", json={"dataset": "invoices"})
+
+    assert response.json()["reuse_readings"] is False

@@ -222,7 +222,8 @@ export const api = {
   activity: () => request<PipelineActivity>("/api/activity"),
   evaluations: () => history<Evaluation>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
-  startEvaluation: (dataset: string) => request<Evaluation>("/api/evaluations", json("POST", { dataset })),
+  startEvaluation: (dataset: string, reuseReadings = false) =>
+    request<Evaluation>("/api/evaluations", json("POST", { dataset, reuse_readings: reuseReadings })),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),
   retryEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/retry`, { method: "POST" }),
   deleteEvaluation: (id: number) => request<void>(`/api/evaluations/${id}`, { method: "DELETE" }),

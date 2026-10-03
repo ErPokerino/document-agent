@@ -166,6 +166,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         fingerprint=fingerprint,
         register_snapshot=register_rows,
         rules_snapshot=rule_records,
+        reuse_readings=request.reuse_readings,
     )
     deps.evaluation_cancelled = asyncio.Event()
 
@@ -186,7 +187,9 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
                 pipeline_name=settings.pipeline,
                 pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
                 execution_profile=execution_profile,
-                make_context=lambda name, content: deps.pipeline_context(settings, name, content),
+                make_context=lambda name, content: deps.pipeline_context(
+                    settings, name, content, reuse_readings=request.reuse_readings
+                ),
                 cancelled=cancelled,
                 read_document=lambda name: deps.evaluation_store.read_snapshot_document(dataset_snapshot[name]["sha256"]),
             )
@@ -343,8 +346,10 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
                 pipeline_name=detail.pipeline,
                 pipeline_steps=detail.steps,
                 execution_profile=detail.execution_profile,
+                # The retry finishes the run on the terms it started with,
+                # cached readings included.
                 make_context=lambda name, content: deps.pipeline_context(
-                    retry_settings, name, content
+                    retry_settings, name, content, reuse_readings=detail.reuse_readings
                 ),
                 cancelled=cancelled,
                 read_document=lambda name: deps.evaluation_store.read_snapshot_document(detail.dataset_snapshot[name]["sha256"]),

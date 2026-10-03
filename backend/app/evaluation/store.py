@@ -94,6 +94,7 @@ class EvaluationDocument:
     ocr_pages: int | None = None
     layout_pages: int | None = None
     custom_extractor_pages: int | None = None
+    cached_pages: int | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,8 @@ class EvaluationSummary:
     fingerprint: str | None = None
     # The step in flight, cleared when the document finishes. Not a duration.
     current_step: str | None = None
+    reuse_readings: bool = False
+    cached_pages: int = 0
 
 
 @dataclass(frozen=True)
@@ -213,6 +216,7 @@ class EvaluationStore:
                 "register_snapshot_json": "TEXT",
                 "rules_snapshot_json": "TEXT",
                 "current_step": "TEXT",
+                "reuse_readings": "INTEGER NOT NULL DEFAULT 0",
             },
         )
         # Runs recorded before the column exists still happened somewhere. The
@@ -246,6 +250,7 @@ class EvaluationStore:
                     "layout_pages",
                     "custom_extractor_pages",
                     "usage_complete",
+                    "cached_pages",
                 )
             },
         )
@@ -289,6 +294,7 @@ class EvaluationStore:
         fingerprint: str | None = None,
         register_snapshot: list[dict[str, Any]] | None = None,
         rules_snapshot: list[dict[str, Any]] | None = None,
+        reuse_readings: bool = False,
     ) -> int:
         if dataset_snapshot is not None and len(dataset_snapshot) != total_documents:
             raise ValueError("The document snapshot does not match the evaluation total")
@@ -299,8 +305,8 @@ class EvaluationStore:
                     (created_at, dataset, model, prompts_json, status, total_documents,
                      max_pages, pipeline, steps, provider, pipeline_json,
                      execution_profile_json, dataset_snapshot_json, extraction_engine_json,
-                     fingerprint, register_snapshot_json, rules_snapshot_json)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     fingerprint, register_snapshot_json, rules_snapshot_json, reuse_readings)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -327,6 +333,7 @@ class EvaluationStore:
                     fingerprint,
                     json.dumps(register_snapshot, ensure_ascii=False) if register_snapshot is not None else None,
                     json.dumps(rules_snapshot, ensure_ascii=False) if rules_snapshot is not None else None,
+                    int(reuse_readings),
                 ),
             )
             return int(cursor.lastrowid)
@@ -444,14 +451,16 @@ class EvaluationStore:
         layout_pages: int | None = None,
         custom_extractor_pages: int = 0,
         usage_complete: bool = True,
+        cached_pages: int | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO evaluation_documents
                     (evaluation_id, document, status, elapsed_ms, prompt_tokens,
-                     completion_tokens, ocr_pages, layout_pages, custom_extractor_pages, usage_complete)
-                VALUES (?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?)
+                     completion_tokens, ocr_pages, layout_pages, custom_extractor_pages, usage_complete,
+                     cached_pages)
+                VALUES (?, ?, 'ok', ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(evaluation_id, document) DO UPDATE SET
                     status = 'ok',
                     elapsed_ms = excluded.elapsed_ms,
@@ -461,6 +470,7 @@ class EvaluationStore:
                     layout_pages = excluded.layout_pages,
                     custom_extractor_pages = excluded.custom_extractor_pages,
                     usage_complete = excluded.usage_complete,
+                    cached_pages = excluded.cached_pages,
                     error = NULL
                 """,
                 (
@@ -473,6 +483,7 @@ class EvaluationStore:
                     layout_pages,
                     custom_extractor_pages,
                     int(usage_complete),
+                    cached_pages,
                 ),
             )
             connection.executemany(
@@ -514,7 +525,8 @@ class EvaluationStore:
                     SET status = 'failed', error = excluded.error,
                         elapsed_ms = NULL, prompt_tokens = NULL, completion_tokens = NULL,
                         ocr_pages = NULL, layout_pages = NULL,
-                        custom_extractor_pages = NULL, usage_complete = NULL
+                        custom_extractor_pages = NULL, usage_complete = NULL,
+                        cached_pages = NULL
                 """,
                 (evaluation_id, document, error),
             )
@@ -614,6 +626,7 @@ class EvaluationStore:
                     ocr_pages=document["ocr_pages"],
                     layout_pages=document["layout_pages"],
                     custom_extractor_pages=document["custom_extractor_pages"],
+                    cached_pages=document["cached_pages"],
                 )
                 for document in documents
             ],
@@ -633,7 +646,8 @@ class EvaluationStore:
                    COALESCE(SUM(ocr_pages), 0) AS ocr_pages,
                    COALESCE(SUM(layout_pages), 0) AS layout_pages,
                    SUM(custom_extractor_pages) AS custom_extractor_pages,
-                   MIN(COALESCE(usage_complete, 0)) AS usage_complete
+                   MIN(COALESCE(usage_complete, 0)) AS usage_complete,
+                   COALESCE(SUM(cached_pages), 0) AS cached_pages
             FROM evaluation_documents WHERE evaluation_id = ?
             """,
             (row["id"],),
@@ -687,4 +701,6 @@ class EvaluationStore:
             extraction_engine=json.loads(row["extraction_engine_json"]) if row["extraction_engine_json"] else None,
             fingerprint=row["fingerprint"],
             current_step=row["current_step"],
+            reuse_readings=bool(row["reuse_readings"]),
+            cached_pages=int(progress["cached_pages"] or 0),
         )

@@ -206,3 +206,17 @@ test("different recorded OCR versions remain distinct approaches", () => {
   assert.deepEqual(points.map(p => p.runs).sort(), [1, 2]);
   assert.ok(points.every(p => p.detail.includes("OCR:")));
 });
+
+test("a run that reused stored readings counts for accuracy but not for time or cost", () => {
+  const [point] = approachPoints(
+    [
+      run({ fingerprint: "abc", average_elapsed_ms: 10_000 }),
+      run({ id: 2, fingerprint: "abc", average_elapsed_ms: 1_000, cached_pages: 10, reuse_readings: true }),
+    ],
+    () => 1,
+  );
+
+  assert.equal(point.runs, 2);
+  assert.equal(point.secondsPerDocument, 10);
+  assert.equal(point.costPerDocument, 0.1);
+});

@@ -45,6 +45,8 @@ const COLUMNS = [
   "ocr_pages",
   "layout_pages",
   "custom_extractor_pages",
+  // Pages read back from stored readings: not sent, not billed, not timed.
+  "cached_pages",
   "usage_complete",
   "cost_usd",
   "extractor_name",
@@ -133,6 +135,7 @@ export function runsToCsv(
         run.ocr_pages,
         run.layout_pages,
         run.custom_extractor_pages,
+        run.cached_pages,
         run.usage_complete === undefined ? null : Number(run.usage_complete),
         cost === null ? null : cost.toFixed(4),
         run.extraction_engine?.display_name,
