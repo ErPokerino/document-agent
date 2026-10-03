@@ -515,6 +515,9 @@ class PredictWithArtifact:
         self.minimum_similarity = minimum_similarity
         self.artifact_id = artifact_id
         self.artifact_name = artifact_name
+        # Named after the model, so two trained models in one pipeline are
+        # two methods, and the same model is the same method across runs.
+        self.method = f"trained: {artifact_name}"
 
     async def run(self, context: PipelineContext) -> None:
         extraction: dict[str, FieldExtraction] = dict(context.artifacts.get("extraction") or {})
@@ -565,6 +568,25 @@ class PredictWithArtifact:
         return field.model_copy(update={"score": prediction.score, "evidence": evidence})
 
 
+class ResolveCandidates:
+    """Choose each field's value among the candidates the steps before proposed."""
+
+    kind = "resolve_candidates"
+    # Choosing is not proposing: the chosen value is already a candidate.
+    proposes = False
+
+    def __init__(self, entities: list[EntityDefinition], config: Any) -> None:
+        self.entities = entities
+        self.config = config
+
+    async def run(self, context: PipelineContext) -> None:
+        from app.pipeline.resolution import resolve_all
+
+        extraction = context.artifacts.get("extraction")
+        if extraction:
+            context.artifacts["extraction"] = resolve_all(self.entities, extraction, self.config)
+
+
 class MarkUnfilledDerivedEntities:
     """Say, in the result, which derived fields this pipeline never produces.
 
@@ -572,6 +594,9 @@ class MarkUnfilledDerivedEntities:
     what happened: nothing here was asked to produce them. Every run then
     carries the same set of fields, which is what makes two runs comparable.
     """
+
+    # Saying a field is empty is not a method's answer.
+    proposes = False
 
     def __init__(self, names: list[str]) -> None:
         self.names = names

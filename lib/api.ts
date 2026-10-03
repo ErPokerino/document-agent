@@ -3,6 +3,8 @@ import type {
   ArtifactSummary,
   KnnTrainingRequest,
   ReadingCacheStatus,
+  ResolutionConfig,
+  ResolutionTrial,
   TrainingJobModel,
   TrainingProvider,
   Dataset,
@@ -241,6 +243,8 @@ export const api = {
   labelValues: (entity: string) => request<LabelValue[]>(`/api/label-values/${segment(entity)}`),
   startEvaluation: (dataset: string, reuseReadings = false) =>
     request<Evaluation>("/api/evaluations", json("POST", { dataset, reuse_readings: reuseReadings })),
+  tryResolution: (id: number, config: ResolutionConfig) =>
+    request<ResolutionTrial>(`/api/evaluations/${id}/resolve`, json("POST", config)),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),
   retryEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/retry`, { method: "POST" }),
   deleteEvaluation: (id: number) => request<void>(`/api/evaluations/${id}`, { method: "DELETE" }),

@@ -30,6 +30,8 @@ class FieldOutcome:
     # The number a step computed for its answer — a similarity, a vote — when
     # it computed one. It is what a coverage curve is drawn along.
     score: float | None = None
+    # What each method proposed, when the run recorded it.
+    candidates: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,7 @@ def score_document(
                 confidence=extracted.confidence if extracted else "low",
                 matched=bool(extracted) and values_match(expected, actual, entity),
                 score=extracted.score if extracted else None,
+                candidates=tuple(extracted.candidates) if extracted else (),
             )
         )
     return outcomes

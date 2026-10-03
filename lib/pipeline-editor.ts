@@ -40,6 +40,7 @@ export function defaultConfigFor(kind: StepKind): Record<string, unknown> {
   if (kind.startsWith("document_ai_")) return { processor_ref: "", processor_version: "" };
   if (kind === "read_pdf_text") return { feeds_model: true };
   if (kind === "artifact_predict") return { artifact_id: "", entities: [], minimum_similarity: 0 };
+  if (kind === "resolve_candidates") return { default: { strategy: "last", priority: [], minimum_score: null }, fields: {} };
   return {};
 }
 
@@ -96,6 +97,11 @@ export function summarizeStep(step: PipelineStep): string {
   if (step.kind === "document_ai_layout") return "Text and layout from Document AI";
   if (step.kind === "document_ai_extract") return "Fields from Custom Extractor";
   if (step.kind === "supplier_rules") return "Supplier-specific rules";
+  if (step.kind === "resolve_candidates") {
+    const config = step.config as { default?: { strategy?: string }; fields?: Record<string, unknown> };
+    const own = Object.keys(config.fields ?? {}).length;
+    return `${config.default?.strategy ?? "last"}${own ? ` · ${own} field rule${own === 1 ? "" : "s"}` : ""}`;
+  }
   if (step.kind === "artifact_predict") {
     const fields = (step.config as { entities?: string[] }).entities ?? [];
     if (!(step.config as { artifact_id?: string }).artifact_id) return "No model chosen";
@@ -165,6 +171,11 @@ const GROUPS: { title: string; blurb: string; kinds: string[] }[] = [
     blurb: "Tidy up values that are already there, extracted or derived alike.",
     kinds: ["regex_refine"],
   },
+  {
+    title: "Choose between methods",
+    blurb: "Pick each field's value among what earlier steps proposed.",
+    kinds: ["resolve_candidates"],
+  },
 ];
 
 export function groupCatalogue(
@@ -203,6 +214,7 @@ const STEP_LABELS: Record<StepKind, string> = {
   master_data_lookup: "Master data lookup",
   supplier_rules: "Supplier rules",
   artifact_predict: "Trained model",
+  resolve_candidates: "Resolve candidates",
 };
 
 /** Takes any string, because a recorded run may name a step that is now gone. */

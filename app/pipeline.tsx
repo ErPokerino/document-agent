@@ -25,6 +25,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { OCR_ONLY_WITHOUT_PDF_TEXT, isPdfTextFallback } from "../lib/pipeline-steps";
 import { ProcessorPicker } from "./processor-picker";
+import { ResolveSettings } from "./resolve-settings";
+import { resolutionOf, upstreamMethods } from "../lib/resolution";
 import { InfoHint } from "./info-hint";
 import { PipelineCanvas, STEP_ICONS } from "./pipeline-canvas";
 import { flowCategory, insertFlowStep, stepProblems } from "../lib/pipeline-flow";
@@ -821,6 +823,15 @@ export function Pipelines({ draftSettings, entities, onUse, onProcessors, onMode
                       artifacts={artifacts}
                       onChange={(config) => setSteps(setStepConfig(draft.steps, index, config))}
                       onModels={onModels}
+                    />
+                  )}
+
+                  {step.kind === "resolve_candidates" && (
+                    <ResolveSettings
+                      config={resolutionOf(step.config)}
+                      methods={upstreamMethods(draft.steps, index, artifacts)}
+                      fields={entityNames}
+                      onChange={(config) => setSteps(setStepConfig(draft.steps, index, config as unknown as Record<string, unknown>))}
                     />
                   )}
 

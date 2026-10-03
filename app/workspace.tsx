@@ -445,6 +445,11 @@ export function Workspace({
                     </div>
                     {field.warning && !edited && <span className="field-warning"><AlertCircle size={11} /> {field.warning}</span>}
                     {field.evidence && !edited && <span className="field-evidence">{field.evidence}</span>}
+                    {(field.candidates?.length ?? 0) > 1 && !edited && (
+                      <span className="field-evidence" title="What each step proposed, in the order the steps ran">
+                        {field.candidates!.map((candidate) => `${candidate.method}: ${candidate.value ?? "—"}`).join(" · ")}
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <span className="empty-value">—</span>

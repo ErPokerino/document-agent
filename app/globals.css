@@ -1108,3 +1108,23 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 }
 .field-evidence { display: block; margin-top: 3px; font-size: 10.5px; color: var(--muted); }
 .training-flow { grid-column: 1 / -1; margin: -4px 0 0; }
+
+/* Candidates: the Resolve step and the Lab's methods panel. */
+.resolve-rule { display: grid; gap: 6px; }
+.priority-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
+.priority-list li { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; font-size: 11.5px; }
+.priority-list li label { flex: 1; display: flex; align-items: center; gap: 6px; }
+.priority-list li.excluded code { color: var(--muted); text-decoration: line-through; }
+.priority-list .icon-button { width: 24px; height: 24px; align-self: center; }
+.resolve-fields { margin: 6px 0 10px; }
+.resolve-fields summary { cursor: pointer; font-size: 11.5px; color: var(--muted); }
+.resolve-field { border-top: 1px solid var(--line); padding: 8px 0; display: grid; gap: 6px; }
+.methods-panel { border-top: 1px solid var(--line); padding-top: 14px; margin: 4px 0 18px; display: grid; gap: 12px; }
+.methods-panel h4 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 4px; }
+.methods-panel td.better { color: #1d7a56; font-weight: 700; }
+.methods-panel td.worse { color: #9c3b2e; font-weight: 700; }
+.methods-trial { display: grid; gap: 8px; max-width: 460px; }
+.methods-trial .flow-field { max-width: none; }
+.methods-trial .flow-field > span { font-size: 11px; font-weight: 600; color: var(--ink); text-transform: none; letter-spacing: 0; display: flex; gap: 4px; align-items: center; }
+.methods-trial select, .methods-trial input[type="number"] { height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); padding: 0 10px; font: inherit; font-size: 12px; }
+.methods-trial .secondary-button { justify-self: start; }

@@ -146,6 +146,20 @@ class PromptConfiguration(BaseModel):
         return self
 
 
+class FieldCandidate(BaseModel):
+    """One method's proposal for a field, kept beside the value that was chosen."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The step that proposed it: its kind, or the trained model it used.
+    method: str
+    value: str | float | int | None
+    confidence: Literal["low", "medium", "high"]
+    score: float | None = None
+    warning: str | None = None
+    evidence: str | None = None
+
+
 class FieldExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -159,6 +173,9 @@ class FieldExtraction(BaseModel):
     # What the value rests on, when a step can say: the labelled document a
     # nearest-neighbour model took it from, and how close that document was.
     evidence: str | None = None
+    # Every value a step proposed for this field, in the order the steps ran.
+    # The value above is the last of them unless a Resolve step chose another.
+    candidates: list[FieldCandidate] = Field(default_factory=list)
 
 
 class RuntimeEngineInfo(BaseModel):
@@ -648,6 +665,35 @@ class EvaluationFieldResult(BaseModel):
     confidence: Literal["low", "medium", "high"]
     matched: bool
     score: float | None = None
+    candidates: list[FieldCandidate] | None = None
+
+
+class MethodScore(BaseModel):
+    method: str
+    documents: int
+    answered: int
+    correct: int
+    accuracy: float | None = None
+
+
+class FieldMethods(BaseModel):
+    """One field: how each method did, how the chosen value did, and the ceiling."""
+
+    entity: str
+    documents: int
+    resolved_accuracy: float | None = None
+    # Share of documents where at least one method proposed the right value.
+    oracle_accuracy: float | None = None
+    methods: list[MethodScore]
+
+
+class ResolutionTrial(BaseModel):
+    """A stored run resolved again under another strategy."""
+
+    matched: int
+    total: int
+    accuracy: float | None = None
+    per_entity: dict[str, MetricTally]
 
 
 class ClassScoreResult(BaseModel):
@@ -712,6 +758,8 @@ class EvaluationDetail(Evaluation):
     documents: list[EvaluationDocumentResult]
     # One per categorical field the run scored.
     classification: list[ClassificationResult] = Field(default_factory=list)
+    # One per field that recorded candidates. Empty on runs from before them.
+    methods: list[FieldMethods] = Field(default_factory=list)
 
 
 class PipelineRenameRequest(BaseModel):

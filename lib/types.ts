@@ -6,7 +6,7 @@
 
 export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer" | "category";
 
-export type StepKind = "render_pages" | "read_pdf_text" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules" | "artifact_predict";
+export type StepKind = "render_pages" | "read_pdf_text" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules" | "artifact_predict" | "resolve_candidates";
 
 export type Confidence = FieldExtraction["confidence"];
 
@@ -212,6 +212,7 @@ export type EvaluationDetail = {
   has_register_snapshot: boolean;
   documents: EvaluationDocumentResult[];
   classification: ClassificationResult[];
+  methods: FieldMethods[];
 };
 
 export type EvaluationDocumentResult = {
@@ -235,6 +236,7 @@ export type EvaluationFieldResult = {
   confidence: "low" | "medium" | "high";
   matched: boolean;
   score: number | null;
+  candidates: FieldCandidate[] | null;
 };
 
 export type EvaluationRequest = {
@@ -309,12 +311,22 @@ export type ExtractorProcessor = {
   base_model: string | null;
 };
 
+export type FieldCandidate = {
+  method: string;
+  value: string | number | null;
+  confidence: "low" | "medium" | "high";
+  score: number | null;
+  warning: string | null;
+  evidence: string | null;
+};
+
 export type FieldExtraction = {
   value: string | number | null;
   confidence: "low" | "medium" | "high";
   warning: string | null;
   score: number | null;
   evidence: string | null;
+  candidates: FieldCandidate[];
 };
 
 export type FieldLocation = {
@@ -324,6 +336,20 @@ export type FieldLocation = {
   top: number;
   right: number;
   bottom: number;
+};
+
+export type FieldMethods = {
+  entity: string;
+  documents: number;
+  resolved_accuracy: number | null;
+  oracle_accuracy: number | null;
+  methods: MethodScore[];
+};
+
+export type FieldRule = {
+  strategy: "last" | "priority" | "best_confidence" | "agreement";
+  priority: string[];
+  minimum_score: number | null;
 };
 
 export type GcpKeyStatus = {
@@ -427,6 +453,14 @@ export type MasterDataTable = {
   seed_entity: string;
   match_column: string;
   columns: MasterDataColumn[];
+};
+
+export type MethodScore = {
+  method: string;
+  documents: number;
+  answered: number;
+  correct: number;
+  accuracy: number | null;
 };
 
 export type MetricTally = {
@@ -586,6 +620,18 @@ export type PromptPreviewRequest = {
 export type ReadingCacheStatus = {
   entries: number;
   size_bytes: number;
+};
+
+export type ResolutionConfig = {
+  default: FieldRule;
+  fields: Record<string, FieldRule>;
+};
+
+export type ResolutionTrial = {
+  matched: number;
+  total: number;
+  accuracy: number | null;
+  per_entity: Record<string, MetricTally>;
 };
 
 export type RuntimeEngineInfo = {

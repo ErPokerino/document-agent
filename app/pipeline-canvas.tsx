@@ -8,7 +8,7 @@ import {
 } from "@xyflow/react";
 import {
   AlertCircle, ArrowRight, Braces, BrainCircuit, Database, FileInput, FileOutput, FileText,
-  Focus, Grip, Image, LayoutTemplate, Maximize2, Minimize2, Plus, ScanText,
+  Focus, Grip, Image, LayoutTemplate, Maximize2, Minimize2, Plus, Scale, ScanText,
   SlidersHorizontal, Sparkles, WandSparkles, ZoomIn, ZoomOut,
   type LucideIcon,
 } from "lucide-react";
@@ -23,7 +23,7 @@ export const STEP_ICONS: Record<StepKind, LucideIcon> = {
   render_pages: Image, read_pdf_text: FileText, document_ai_ocr: ScanText,
   document_ai_layout: LayoutTemplate, document_ai_extract: Sparkles,
   llm_extract: WandSparkles, regex_refine: Braces, master_data_lookup: Database,
-  supplier_rules: SlidersHorizontal, artifact_predict: BrainCircuit,
+  supplier_rules: SlidersHorizontal, artifact_predict: BrainCircuit, resolve_candidates: Scale,
 };
 
 type CardData = {

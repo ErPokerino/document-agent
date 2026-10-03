@@ -45,6 +45,7 @@ class StepKind(str, Enum):
     master_data_lookup = "master_data_lookup"
     supplier_rules = "supplier_rules"
     artifact_predict = "artifact_predict"
+    resolve_candidates = "resolve_candidates"
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,17 @@ CONTRACTS: dict[StepKind, StepContract] = {
             "the text a reading step left. Runs on this machine."
         ),
         requires_all=(Artifact.text,),
+        produces=(Artifact.entities,),
+    ),
+    StepKind.resolve_candidates: StepContract(
+        kind=StepKind.resolve_candidates,
+        label="Resolve candidates",
+        description=(
+            "Choose each field's value among what the steps before it proposed: by "
+            "priority between methods, by confidence, or by agreement. Without it, "
+            "the last step to write a field decides."
+        ),
+        requires_all=(Artifact.entities,),
         produces=(Artifact.entities,),
     ),
 }

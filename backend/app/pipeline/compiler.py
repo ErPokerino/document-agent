@@ -21,6 +21,7 @@ from app.pipeline.definition import (
     is_pdf_text_fallback,
 )
 from app.pipeline.regex_refine import RegexRule
+from app.pipeline.resolution import ResolutionConfig
 from app.pipeline.steps import (
     ApplySupplierRules,
     ExtractWithCustomExtractor,
@@ -30,6 +31,7 @@ from app.pipeline.steps import (
     MarkUnfilledDerivedEntities,
     PredictWithArtifact,
     ReadPdfText,
+    ResolveCandidates,
     ReadWithDocumentAi,
     RefineWithRegex,
     RenderPages,
@@ -177,6 +179,8 @@ def _build_one(
         )
     if step.kind is StepKind.artifact_predict:
         return _predictor(config, entities, artifacts)
+    if step.kind is StepKind.resolve_candidates:
+        return ResolveCandidates(entities, ResolutionConfig.model_validate(config))
     raise PipelineError(f"No runnable step exists for '{step.kind.value}'")
 
 

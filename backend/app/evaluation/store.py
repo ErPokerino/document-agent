@@ -81,6 +81,8 @@ class EvaluationItem:
     confidence: str
     matched: bool
     score: float | None = None
+    # Null on a run from before candidates were recorded.
+    candidates: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -256,7 +258,7 @@ class EvaluationStore:
             },
         )
         # A run from before scores were kept has none, which is what it says.
-        db.add_missing_columns(connection, "evaluation_items", {"score": "REAL"})
+        db.add_missing_columns(connection, "evaluation_items", {"score": "REAL", "candidates_json": "TEXT"})
 
         # Runs finished before "partial" existed were all stored as "completed",
         # including ones where most documents never reached the model. Their
@@ -492,14 +494,16 @@ class EvaluationStore:
             connection.executemany(
                 """
                 INSERT INTO evaluation_items
-                    (evaluation_id, document, entity, expected_json, actual_json, confidence, matched, score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (evaluation_id, document, entity, expected_json, actual_json, confidence, matched, score,
+                     candidates_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(evaluation_id, document, entity) DO UPDATE SET
                     expected_json = excluded.expected_json,
                     actual_json = excluded.actual_json,
                     confidence = excluded.confidence,
                     matched = excluded.matched,
-                    score = excluded.score
+                    score = excluded.score,
+                    candidates_json = excluded.candidates_json
                 """,
                 [
                     (
@@ -511,6 +515,9 @@ class EvaluationStore:
                         outcome.confidence,
                         int(outcome.matched),
                         outcome.score,
+                        json.dumps([candidate.model_dump(mode="json") for candidate in outcome.candidates], ensure_ascii=False)
+                        if outcome.candidates
+                        else None,
                     )
                     for outcome in outcomes
                 ],
@@ -604,6 +611,7 @@ class EvaluationStore:
                     confidence=item["confidence"],
                     matched=bool(item["matched"]),
                     score=item["score"],
+                    candidates=json.loads(item["candidates_json"]) if item["candidates_json"] else None,
                 )
             )
 

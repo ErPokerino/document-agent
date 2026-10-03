@@ -454,6 +454,36 @@ follows the step's own score when every answer has one (a similarity does) and
 the confidence band otherwise, which gives at most three points. Scores are
 stored per field and exported in the CSV.
 
+## Several methods per field
+
+Every step that writes a field leaves a **candidate**: its method (the step
+kind, or `trained: <model>` for a trained model, numbered when a pipeline
+repeats a kind), the value, its confidence and score. The engine records them
+by comparing each field before and after a step: a field the step wrote is a
+new object even when the value is unchanged, so a second method that agrees is
+recorded as agreement rather than lost. Steps that only choose or only mark a
+field empty propose nothing.
+
+Without further steps the last candidate is the value, which is what step order
+always meant. A **Resolve candidates** step states the choice instead, for every
+field or per field:
+
+- *last* — the old rule, explicitly;
+- *priority* — the first listed method with a usable value; an unlisted method
+  is not consulted, and an optional score floor passes over a weak prediction;
+- *most confident* — highest confidence band, then score, later steps winning
+  ties;
+- *agreement* — the value most methods proposed, each counted once; an even
+  split leaves the field empty with the reason, and a unanimous answer from two
+  or more methods is high confidence.
+
+A Lab run stores each field's candidates and reports, per field, every
+method's accuracy, the chosen value's accuracy and the **oracle** — the share
+of documents where at least one method was right, the ceiling for any rule over
+these methods. **Try a rule on this run** resolves the stored candidates again
+under another rule and scores it without reading a document or calling
+anything; the run itself is not changed.
+
 ## Models trained on the datasets
 
 **Models** trains models from labelled datasets, keeps them in a registry and

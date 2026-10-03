@@ -47,10 +47,11 @@ today overwrites; a method would *propose*. What it buys:
   was right, how often, per field. That is the same question Lab already asks
   about whole approaches, asked one level down.
 
-The pipeline vocabulary would need candidates alongside values: a step writes
-into a field's candidate list rather than over its value, and one final step
-resolves them. Existing steps become single-candidate methods, so nothing has
-to change at once.
+Built (README, *Several methods per field*): candidates are recorded by the
+engine, a Resolve candidates step chooses, and the Lab scores each method and
+the oracle and can re-resolve a stored run. Still open: candidates from steps
+that run side by side rather than in sequence, which needs the branching
+engine described above, and a strategy learned from Lab history instead of written.
 
 ### Nearest neighbour as one of those methods
 

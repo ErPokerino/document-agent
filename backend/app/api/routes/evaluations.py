@@ -14,8 +14,14 @@ from app.domain.models import (
     Evaluation,
     EvaluationDetail,
     EvaluationRequest,
+    FieldMethods,
+    MethodScore,
+    MetricTally,
+    ResolutionTrial,
 )
 from app.evaluation.classification import classification_report
+from app.evaluation.methods import method_report, resimulate
+from app.pipeline.resolution import ResolutionConfig
 from app.evaluation.scoring import FieldOutcome
 from app.evaluation.fingerprint import configuration_fingerprint, rule_record, rules_from_records
 from app.evaluation.export import evaluation_to_csv
@@ -50,6 +56,37 @@ async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
         has_register_snapshot=detail.register_snapshot is not None,
         documents=[asdict(document) for document in detail.documents],
         classification=classification_results(detail),
+        methods=[
+            FieldMethods(
+                entity=tally.entity,
+                documents=tally.documents,
+                resolved_accuracy=tally.resolved_accuracy,
+                oracle_accuracy=tally.oracle_accuracy,
+                methods=[
+                    MethodScore(method=m.method, documents=m.documents, answered=m.answered, correct=m.correct, accuracy=m.accuracy)
+                    for m in tally.methods.values()
+                ],
+            )
+            for tally in method_report(detail.prompts.entities, detail.documents)
+        ],
+    )
+
+
+@router.post("/api/evaluations/{evaluation_id}/resolve", response_model=ResolutionTrial)
+async def try_resolution(evaluation_id: int, config: ResolutionConfig) -> ResolutionTrial:
+    """Score a stored run as if its candidates had been resolved under `config`."""
+    detail = deps.evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
+    trial = resimulate(detail.prompts.entities, detail.documents, config)
+    return ResolutionTrial(
+        matched=trial.matched,
+        total=trial.total,
+        accuracy=trial.matched / trial.total if trial.total else None,
+        per_entity={
+            name: MetricTally(matched=matched, total=total, accuracy=matched / total if total else None)
+            for name, (matched, total) in trial.per_entity.items()
+        },
     )
 
 
