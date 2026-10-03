@@ -428,6 +428,32 @@ for calls that may have been billed without reporting usage. Recorded usage is
 still available in CSV. A changed expected label is shown separately in the
 run comparison and excluded from its net fixes/regressions.
 
+## Categorical fields
+
+A field of format **Category** holds one class: a document type, a cost centre,
+an internal supplier id. Its vocabulary is either:
+
+- **closed** — the classes are listed in Extraction. A local model and Gemini
+  receive the list as an `enum`, so they cannot answer outside it; the Custom
+  Extractor is asked to `DERIVE` the class, since a class is decided about the
+  document rather than quoted from it. An answer or a label that differs only
+  in case or spacing takes the vocabulary's spelling; anything else is refused.
+- **open** — no list. Any well-formed class is accepted, and the values already
+  labelled in any dataset are offered while typing (`/api/label-values/{field}`).
+  This is the shape a nearest-neighbour model needs: it answers with classes
+  the labelled history contains.
+
+Fields can be added at any time; nothing assumes a fixed set.
+
+A Lab run scores each categorical field as a classifier as well as by accuracy:
+precision, recall and F1 per class, their macro average (accuracy can be high
+while a rare class is never found), a confusion matrix in which `(none)` is an
+answer withheld, and a coverage curve — accepting only answers at or above a
+threshold, how many documents pass and how many of those are right. The curve
+follows the step's own score when every answer has one (a similarity does) and
+the confidence band otherwise, which gives at most three points. Scores are
+stored per field and exported in the CSV.
+
 ## Stored Document AI readings
 
 Every OCR and Layout Parser reading made by a step that names a **pinned

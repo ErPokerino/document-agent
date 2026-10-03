@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.pipeline.definition import DEFAULT_PIPELINE_NAME, PipelineDefinition, PipelineStep
 
@@ -36,6 +36,22 @@ class EntityFormat(str, Enum):
     currency = "currency"
     decimal = "decimal"
     integer = "integer"
+    # One value out of a set of classes: a document type, a cost centre, a
+    # supplier id. The set may be written down (closed) or left to whatever
+    # the labelled documents say (open), which is what a nearest-neighbour
+    # prediction needs: it can only answer with a class it has seen.
+    category = "category"
+
+
+# A closed vocabulary sent to a model becomes an enum in its grammar, and every
+# label is one more branch in it. Large enough for a register of suppliers.
+MAX_CATEGORIES = 1000
+MAX_CATEGORY_LENGTH = 200
+
+
+def category_key(value: Any) -> str:
+    """What two spellings of one class have in common: case and spacing aside."""
+    return " ".join(str(value).split()).casefold()
 
 
 class EntityDefinition(BaseModel):
@@ -48,6 +64,28 @@ class EntityDefinition(BaseModel):
     # it is worked out from the others, or from the document text, by a step in
     # the pipeline. It is still labelled and scored like any other field.
     source: Literal["model", "derived"] = "model"
+    # Only for a category. Empty means open: the classes are whatever the
+    # labelled documents say, and anything well formed is accepted.
+    categories: Annotated[list[str], Field(max_length=MAX_CATEGORIES)] = Field(default_factory=list)
+
+    @field_validator("categories")
+    @classmethod
+    def categories_are_distinct_labels(cls, value: list[str]) -> list[str]:
+        cleaned = [" ".join(label.split()) for label in value]
+        if any(not label for label in cleaned):
+            raise ValueError("A category cannot be empty")
+        if any(len(label) > MAX_CATEGORY_LENGTH for label in cleaned):
+            raise ValueError(f"A category can be at most {MAX_CATEGORY_LENGTH} characters long")
+        keys = [category_key(label) for label in cleaned]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Two categories differ only in case or spacing")
+        return cleaned
+
+    @model_validator(mode="after")
+    def only_a_category_has_categories(self) -> "EntityDefinition":
+        if self.categories and self.format is not EntityFormat.category:
+            raise ValueError(f"'{self.name}' is not a category, so it cannot list categories")
+        return self
 
 
 def model_entities(entities: list["EntityDefinition"]) -> list["EntityDefinition"]:
@@ -455,6 +493,11 @@ class DatasetDocument(BaseModel):
     label_error: str | None = None
 
 
+class LabelValue(BaseModel):
+    value: str
+    documents: int
+
+
 class DatasetCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -601,6 +644,38 @@ class EvaluationFieldResult(BaseModel):
     actual: str | float | int | bool | None
     confidence: Literal["low", "medium", "high"]
     matched: bool
+    score: float | None = None
+
+
+class ClassScoreResult(BaseModel):
+    label: str
+    support: int
+    predicted: int
+    true_positive: int
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
+
+
+class CoveragePointResult(BaseModel):
+    threshold: float
+    answered: int
+    coverage: float
+    accuracy: float
+
+
+class ClassificationResult(BaseModel):
+    """One categorical field, scored as a classifier rather than a string."""
+
+    entity: str
+    documents: int
+    accuracy: float | None = None
+    macro_f1: float | None = None
+    classes: list[ClassScoreResult]
+    labels: list[str]
+    confusion: list[list[int]]
+    ranked_by: Literal["score", "confidence", "none"]
+    coverage: list[CoveragePointResult]
 
 
 class EvaluationDocumentResult(BaseModel):
@@ -632,6 +707,8 @@ class EvaluationDetail(Evaluation):
     # A retry of that run uses whatever those tables hold today.
     has_register_snapshot: bool = False
     documents: list[EvaluationDocumentResult]
+    # One per categorical field the run scored.
+    classification: list[ClassificationResult] = Field(default_factory=list)
 
 
 class PipelineRenameRequest(BaseModel):

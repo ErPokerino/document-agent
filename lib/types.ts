@@ -4,7 +4,7 @@
 // Every property is emitted as required: FastAPI serializes response models in
 // full, defaults included, and the frontend always sends complete objects back.
 
-export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer";
+export type EntityFormat = "text" | "date" | "currency" | "decimal" | "integer" | "category";
 
 export type StepKind = "render_pages" | "read_pdf_text" | "document_ai_ocr" | "document_ai_layout" | "document_ai_extract" | "llm_extract" | "regex_refine" | "master_data_lookup" | "supplier_rules";
 
@@ -24,8 +24,37 @@ export type AppSettings = {
   prompts: PromptConfiguration;
 };
 
+export type ClassScoreResult = {
+  label: string;
+  support: number;
+  predicted: number;
+  true_positive: number;
+  precision: number | null;
+  recall: number | null;
+  f1: number | null;
+};
+
+export type ClassificationResult = {
+  entity: string;
+  documents: number;
+  accuracy: number | null;
+  macro_f1: number | null;
+  classes: ClassScoreResult[];
+  labels: string[];
+  confusion: number[][];
+  ranked_by: "score" | "confidence" | "none";
+  coverage: CoveragePointResult[];
+};
+
 export type CorrectionsRequest = {
   corrections: Record<string, unknown>;
+};
+
+export type CoveragePointResult = {
+  threshold: number;
+  answered: number;
+  coverage: number;
+  accuracy: number;
 };
 
 export type Dataset = {
@@ -75,6 +104,7 @@ export type EntityDefinition = {
   format: EntityFormat;
   description: string;
   source: "model" | "derived";
+  categories: string[];
 };
 
 export type Evaluation = {
@@ -150,6 +180,7 @@ export type EvaluationDetail = {
   has_dataset_snapshot: boolean;
   has_register_snapshot: boolean;
   documents: EvaluationDocumentResult[];
+  classification: ClassificationResult[];
 };
 
 export type EvaluationDocumentResult = {
@@ -172,6 +203,7 @@ export type EvaluationFieldResult = {
   actual: string | number | boolean | null;
   confidence: "low" | "medium" | "high";
   matched: boolean;
+  score: number | null;
 };
 
 export type EvaluationRequest = {
@@ -302,6 +334,11 @@ export type HealthStatus = {
   lm_studio: boolean;
   active_model: string;
   lm_studio_error: string | null;
+};
+
+export type LabelValue = {
+  value: string;
+  documents: number;
 };
 
 export type LabelsRequest = {

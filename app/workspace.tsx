@@ -26,21 +26,14 @@ import { ChangeEvent, DragEvent, Fragment, KeyboardEvent, useEffect, useRef, use
 
 import { api } from "../lib/api";
 import type { DataFlow } from "../lib/data-flow";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatLabels } from "../lib/format";
+import { CategoryOptions, categoryListId } from "./category-options";
 import { progressLabel } from "../lib/pipeline-editor";
 import { buildReviewedExport } from "../lib/review";
-import type { AppSettings, Confidence, EntityDefinition, EntityFormat, ExtractionResponse } from "../lib/types";
+import type { AppSettings, Confidence, EntityDefinition, ExtractionResponse } from "../lib/types";
 import { PageHighlight } from "./page-highlight";
 
 export type ProcessState = "idle" | "ready" | "processing" | "cancelling" | "complete" | "error";
-
-const formatLabels: Record<EntityFormat, string> = {
-  text: "Text",
-  date: "Date · YYYY-MM-DD",
-  currency: "Currency · ISO 4217",
-  decimal: "Decimal number",
-  integer: "Integer number",
-};
 
 const confidenceLabels: Record<Confidence, string> = {
   low: "Low",
@@ -440,6 +433,7 @@ export function Workspace({
                       type={inputType}
                       step={entity.format === "integer" ? "1" : entity.format === "decimal" ? "any" : undefined}
                       maxLength={entity.format === "currency" ? 3 : undefined}
+                      list={entity.format === "category" ? categoryListId(entity) : undefined}
                       placeholder="Enter value"
                       value={editableValue}
                       onChange={(event) => workspace.updateReviewValue(entity, event.target.value)}
@@ -460,6 +454,8 @@ export function Workspace({
           );
         })}
       </div>
+
+      <CategoryOptions entities={configuredEntities} />
 
       <div className="confidence-legend">
         {/* Who judged it depends on the pipeline: a model rates its own

@@ -56,6 +56,7 @@ _VALUE_TYPES = {
     EntityFormat.date: "datetime",
     EntityFormat.decimal: "number",
     EntityFormat.integer: "number",
+    EntityFormat.category: "string",
 }
 
 # How the processor is to arrive at each value, and the single most consequential
@@ -78,6 +79,9 @@ _METHODS = {
     EntityFormat.text: "EXTRACT",
     EntityFormat.decimal: "EXTRACT",
     EntityFormat.integer: "EXTRACT",
+    # A class is decided about the document, not quoted from it: "Credit
+    # note" may be printed nowhere on a credit note.
+    EntityFormat.category: "DERIVE",
 }
 
 

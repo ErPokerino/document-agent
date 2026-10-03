@@ -30,6 +30,7 @@ import { useEffect, useState } from "react";
 import { api, apiUrls } from "../lib/api";
 import { engineLabel, engineDetail, versionLabel } from "../lib/extraction-engine";
 import { Analytics } from "./analytics";
+import { ClassificationPanel } from "./classification-panel";
 import { InfoHint } from "./info-hint";
 import { RunFiltersBar } from "./run-filters-bar";
 import { formatUsd, totalCost } from "../lib/cost";
@@ -637,6 +638,8 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
         {tallyRows("Accuracy per field", openEvaluation.metrics.per_entity)}
         {tallyRows("How often each confidence level was right", openEvaluation.metrics.per_confidence)}
       </div>
+
+      {(openEvaluation.classification ?? []).map((report) => <ClassificationPanel report={report} key={report.entity} />)}
 
       {openEvaluation.documents.length > 1 && (
         <div className="name-filter">

@@ -80,6 +80,7 @@ class EvaluationItem:
     actual: Any
     confidence: str
     matched: bool
+    score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -254,6 +255,8 @@ class EvaluationStore:
                 )
             },
         )
+        # A run from before scores were kept has none, which is what it says.
+        db.add_missing_columns(connection, "evaluation_items", {"score": "REAL"})
 
         # Runs finished before "partial" existed were all stored as "completed",
         # including ones where most documents never reached the model. Their
@@ -489,13 +492,14 @@ class EvaluationStore:
             connection.executemany(
                 """
                 INSERT INTO evaluation_items
-                    (evaluation_id, document, entity, expected_json, actual_json, confidence, matched)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (evaluation_id, document, entity, expected_json, actual_json, confidence, matched, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(evaluation_id, document, entity) DO UPDATE SET
                     expected_json = excluded.expected_json,
                     actual_json = excluded.actual_json,
                     confidence = excluded.confidence,
-                    matched = excluded.matched
+                    matched = excluded.matched,
+                    score = excluded.score
                 """,
                 [
                     (
@@ -506,6 +510,7 @@ class EvaluationStore:
                         json.dumps(outcome.actual, ensure_ascii=False),
                         outcome.confidence,
                         int(outcome.matched),
+                        outcome.score,
                     )
                     for outcome in outcomes
                 ],
@@ -598,6 +603,7 @@ class EvaluationStore:
                     actual=json.loads(item["actual_json"]),
                     confidence=item["confidence"],
                     matched=bool(item["matched"]),
+                    score=item["score"],
                 )
             )
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction
+from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, category_key
 
 
 # Invoice totals are rounded to cents; anything closer than half a cent is the
@@ -27,6 +27,9 @@ class FieldOutcome:
     actual: Any
     confidence: str
     matched: bool
+    # The number a step computed for its answer — a similarity, a vote — when
+    # it computed one. It is what a coverage curve is drawn along.
+    score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,9 @@ def values_match(expected: Any, actual: Any, entity: EntityDefinition) -> bool:
             return False
         return expected.strip().upper() == actual.strip().upper()
 
+    if entity.format is EntityFormat.category:
+        return category_key(expected) == category_key(actual)
+
     if entity.format in {EntityFormat.decimal, EntityFormat.integer}:
         # A number the model returned as unparsed text is a real failure, not a
         # formatting detail, so it is never coerced here.
@@ -126,6 +132,7 @@ def score_document(
                 actual=actual,
                 confidence=extracted.confidence if extracted else "low",
                 matched=bool(extracted) and values_match(expected, actual, entity),
+                score=extracted.score if extracted else None,
             )
         )
     return outcomes

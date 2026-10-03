@@ -12,6 +12,7 @@ ceiling on a value at all.
 from abc import ABC, abstractmethod
 from typing import Any
 
+from app.services.field_wording import category_rider
 from app.domain.models import (
     EntityDefinition,
     EntityFormat,
@@ -95,6 +96,7 @@ class ExtractionProvider(ABC):
         """The fields the model is asked for. A derived one is never among them."""
         return "\n".join(
             f"- {entity.name} [{entity.format.value}]: {entity.description}"
+            + (f" {category_rider(entity)}" if category_rider(entity) else "")
             for entity in model_entities(prompts.entities)
         )
 

@@ -12,11 +12,14 @@ from app.domain.models import (
     DatasetDocument,
     DocumentLabels,
     DraftLabels,
+    EntityFormat,
     LabelsRequest,
+    LabelValue,
     PromoteRunRequest,
 )
 from app.evaluation.dataset_archive import ArchiveError, read_archive, write_archive
 from app.evaluation.datasets import DuplicateDocument, InvalidName
+from app.services.field_validation import canonical_category
 from app.services.spreadsheet import content_disposition
 
 router = APIRouter()
@@ -56,6 +59,12 @@ async def delete_dataset(name: str) -> Response:
     except InvalidName as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
+
+
+@router.get("/api/label-values/{entity}", response_model=list[LabelValue])
+async def label_values(entity: str) -> list[LabelValue]:
+    """The values labelled for one field across every dataset: an open category's classes."""
+    return [LabelValue(value=value, documents=count) for value, count in deps.dataset_store.label_values(entity)]
 
 
 @router.get("/api/datasets/{name}/documents", response_model=list[DatasetDocument])
@@ -171,15 +180,26 @@ async def get_document_labels(name: str, document: str) -> DocumentLabels:
 @router.put("/api/datasets/{name}/documents/{document}/labels", response_model=DocumentLabels)
 async def set_document_labels(name: str, document: str, request: LabelsRequest) -> DocumentLabels:
     deps.require_dataset(name)
-    configured = {entity.name for entity in deps.settings_store.read().prompts.entities}
-    unknown = sorted(set(request.labels) - configured)
+    entities = {entity.name: entity for entity in deps.settings_store.read().prompts.entities}
+    unknown = sorted(set(request.labels) - set(entities))
     if unknown:
         raise HTTPException(
             status_code=400,
             detail="These labels name entities that are not configured: " + ", ".join(unknown),
         )
+    labels = dict(request.labels)
+    for key, value in request.labels.items():
+        entity = entities[key]
+        # A closed category's label is one of its classes, spelled as the
+        # vocabulary spells it; a label outside it would be a class that no
+        # reader is allowed to answer.
+        if entity.format is EntityFormat.category and entity.categories and value is not None:
+            try:
+                labels[key] = canonical_category(value, entity)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"{value!r} is not a label for '{key}': {exc}.") from exc
     try:
-        label_file = deps.dataset_store.set_labels(name, document, request.labels, source="manual")
+        label_file = deps.dataset_store.set_labels(name, document, labels, source="manual")
     except InvalidName as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return DocumentLabels(

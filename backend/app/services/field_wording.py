@@ -58,6 +58,17 @@ PAGE_READER_RIDERS = {
 }
 
 
+def category_rider(entity: EntityDefinition) -> str:
+    """The classes a closed category may take, said once for every reader.
+
+    An open category says nothing: its classes are whatever the labelled
+    documents hold, and naming none is the honest instruction.
+    """
+    if entity.format is not EntityFormat.category or not entity.categories:
+        return ""
+    return "Answer with exactly one of: " + "; ".join(entity.categories) + "."
+
+
 def described_for_reader(entity: EntityDefinition, reads_from_page: bool = False) -> str:
     """The field's description, with what its format requires if it is missing.
 
@@ -65,6 +76,8 @@ def described_for_reader(entity: EntityDefinition, reads_from_page: bool = False
     Google's Custom Extractor — as against one that writes the value itself.
     """
     written = (entity.description or "").strip()
+    if entity.format is EntityFormat.category:
+        return f"{written} {category_rider(entity)}".strip()
     riders = PAGE_READER_RIDERS if reads_from_page else FORMAT_RIDERS
     rider = riders.get(entity.format, "")
     if not rider:

@@ -52,6 +52,8 @@ COLUMNS = (
     "expected",
     "actual",
     "confidence",
+    # A step's own number for its answer, such as a similarity; empty otherwise.
+    "score",
     "matched",
     "error",
 )
@@ -146,6 +148,7 @@ def evaluation_to_csv(detail: EvaluationDetail) -> str:
                 "expected": item.expected,
                 "actual": item.actual,
                 "confidence": item.confidence,
+                "score": item.score,
                 "matched": item.matched,
             }
             writer.writerow({column: _cell(row.get(column)) for column in COLUMNS})

@@ -7,7 +7,16 @@ from typing import Annotated, Any
 from fastapi import HTTPException, Query, Response, APIRouter
 
 from app.api import deps
-from app.domain.models import Evaluation, EvaluationDetail, EvaluationRequest
+from app.domain.models import (
+    ClassificationResult,
+    ClassScoreResult,
+    EntityFormat,
+    Evaluation,
+    EvaluationDetail,
+    EvaluationRequest,
+)
+from app.evaluation.classification import classification_report
+from app.evaluation.scoring import FieldOutcome
 from app.evaluation.fingerprint import configuration_fingerprint, rule_record, rules_from_records
 from app.evaluation.export import evaluation_to_csv
 from app.pipeline.compiler import PipelineError, build_steps
@@ -40,7 +49,49 @@ async def get_evaluation(evaluation_id: int) -> EvaluationDetail:
         has_dataset_snapshot=detail.dataset_snapshot is not None,
         has_register_snapshot=detail.register_snapshot is not None,
         documents=[asdict(document) for document in detail.documents],
+        classification=classification_results(detail),
     )
+
+
+def classification_results(detail: Any) -> list[ClassificationResult]:
+    """Every categorical field the run scored, judged as a classifier."""
+    outcomes = [
+        FieldOutcome(
+            entity=item.entity,
+            expected=item.expected,
+            actual=item.actual,
+            confidence=item.confidence,
+            matched=item.matched,
+            score=item.score,
+        )
+        for document in detail.documents
+        for item in document.items
+    ]
+    scored = {outcome.entity for outcome in outcomes}
+    reports = []
+    for entity in detail.prompts.entities:
+        if entity.format is not EntityFormat.category or entity.name not in scored:
+            continue
+        report = classification_report(entity.name, outcomes)
+        reports.append(
+            ClassificationResult(
+                **{key: getattr(report, key) for key in ("entity", "documents", "accuracy", "macro_f1", "labels", "confusion", "ranked_by")},
+                classes=[
+                    ClassScoreResult(
+                        label=score.label,
+                        support=score.support,
+                        predicted=score.predicted,
+                        true_positive=score.true_positive,
+                        precision=score.precision,
+                        recall=score.recall,
+                        f1=score.f1,
+                    )
+                    for score in report.classes
+                ],
+                coverage=[asdict(point) for point in report.coverage],
+            )
+        )
+    return reports
 
 
 @router.get("/api/evaluations/{evaluation_id}/export.csv", response_class=Response)

@@ -12,6 +12,7 @@ import type {
   GcpKeyStatus,
   GeminiKeyStatus,
   HealthStatus,
+  LabelValue,
   ModelInfo,
   ModelLoadResponse,
   RuntimeEngineInfo,
@@ -222,6 +223,7 @@ export const api = {
   activity: () => request<PipelineActivity>("/api/activity"),
   evaluations: () => history<Evaluation>("/api/evaluations"),
   evaluation: (id: number) => request<EvaluationDetail>(`/api/evaluations/${id}`),
+  labelValues: (entity: string) => request<LabelValue[]>(`/api/label-values/${segment(entity)}`),
   startEvaluation: (dataset: string, reuseReadings = false) =>
     request<Evaluation>("/api/evaluations", json("POST", { dataset, reuse_readings: reuseReadings })),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),

@@ -23,6 +23,7 @@ import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { api, apiUrls } from "../lib/api";
 import { filterByName } from "../lib/document-filter";
 import { formatLabels, labelModes } from "../lib/format";
+import { CategoryOptions, categoryListId } from "./category-options";
 import { draftFromModel, draftToLabels, labelsToDraft, type LabelDraft, type LabelMode } from "../lib/labels";
 import { useLatest } from "../lib/latest";
 import type { Dataset, DatasetDocument, EntityDefinition, ExtractionRun } from "../lib/types";
@@ -478,11 +479,12 @@ export function Datasets({ savedEntities, isModelReady, dataset = null, onDatase
                 <select value={entry.mode} onChange={(event) => editLabel(entity.name, { ...entry, mode: event.target.value as LabelMode })}>
                   {Object.entries(labelModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
-                <input disabled={entry.mode !== "value"} placeholder={entry.mode === "value" ? "Correct value" : "—"} value={entry.text} onChange={(event) => editLabel(entity.name, { mode: "value", text: event.target.value })} />
+                <input disabled={entry.mode !== "value"} placeholder={entry.mode === "value" ? "Correct value" : "—"} list={entity.format === "category" ? categoryListId(entity) : undefined} value={entry.text} onChange={(event) => editLabel(entity.name, { mode: "value", text: event.target.value })} />
                 {hint ? <span className={`confidence-pill ${hint}`}><i /> {hint}</span> : <span />}
               </div>
             );
           })}
+          <CategoryOptions entities={savedEntities} />
           <div className="label-editor-actions">
             <p className="field-help">Fields left as <em>Not labelled</em> are excluded from the score. <em>Absent in document</em> means the model must return nothing.</p>
             <button className="primary-button" disabled={busy} onClick={saveLabels}><Save size={14} /> Save ground truth</button>

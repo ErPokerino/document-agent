@@ -100,6 +100,8 @@ class GeminiClient(ExtractionProvider):
                 "nullable": True,
                 "description": description,
             }
+            if entity.format is EntityFormat.category and entity.categories:
+                properties[entity.name].update(format="enum", enum=list(entity.categories))
 
         names = [entity.name for entity in entities]
         properties["confidence"] = {

@@ -7,6 +7,7 @@ export const formatLabels: Record<EntityFormat, string> = {
   currency: "Currency · ISO 4217",
   decimal: "Decimal number",
   integer: "Integer number",
+  category: "Category",
 };
 
 export const labelModes: Record<LabelMode, string> = {

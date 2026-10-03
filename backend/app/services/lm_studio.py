@@ -1082,6 +1082,10 @@ Return only JSON that conforms to the supplied schema.
                 }
             elif entity.format is EntityFormat.currency:
                 value_schema = {"type": "string", "pattern": "^[A-Z]{3}$"}
+            elif entity.format is EntityFormat.category and entity.categories:
+                # A closed vocabulary is the grammar: the model cannot write a
+                # class that is not on the list.
+                value_schema = {"type": "string", "enum": list(entity.categories)}
             else:
                 # Dates and currency codes are bounded by their own pattern
                 # above; free text is the only value that could run on.

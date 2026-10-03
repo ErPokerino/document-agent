@@ -2,6 +2,8 @@
 
 import { Braces, CheckCircle2, LoaderCircle, Plus, Save, Sparkles, Trash2, Workflow } from "lucide-react";
 
+import { useState } from "react";
+
 import { InfoHint } from "./info-hint";
 import { SystemPrompts } from "./system-prompts";
 import { formatLabels } from "../lib/format";
@@ -34,6 +36,36 @@ const groups: { source: Source; title: string; blurb: string; hint: string; icon
   },
 ];
 
+/**
+ * A category's classes, one per line. None is an open vocabulary: the classes
+ * are whatever the labelled documents say.
+ */
+function CategoryEditor({ entity, onChange }: { entity: EntityDefinition; onChange: (categories: string[]) => void }) {
+  // The text is kept as typed — a trailing newline is how the next class is
+  // started — and only the lines with something on them are saved.
+  const [text, setText] = useState(() => (entity.categories ?? []).join("\n"));
+  return (
+    <label className="entity-description">
+      <span>
+        Categories
+        <InfoHint text="One class per line. A model is then held to this list, and a label outside it is refused. Leave it empty for an open vocabulary: any class is accepted, and the ones already labelled in Datasets are offered while typing — which is what a nearest-neighbour model trained on the datasets can answer with." />
+      </span>
+      <textarea
+        aria-label={`Categories of ${entity.name}`}
+        placeholder={"Open vocabulary: learned from labelled documents.\nOr write one class per line."}
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          onChange(event.target.value.split("\n").map((line) => line.trim()).filter(Boolean));
+        }}
+      />
+      <small className="field-help">
+        {entity.categories?.length ? `Closed: ${entity.categories.length} classes.` : "Open: learned from the labelled documents."}
+      </small>
+    </label>
+  );
+}
+
 /** Everything a document produces, and where each value comes from. */
 export function Entities({ draftSettings, setDraftSettings, onSave, settingsState, settingsError }: Props) {
   const entities = draftSettings.prompts.entities;
@@ -57,6 +89,7 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
       {
         name,
         format: "text",
+        categories: [],
         source,
         description:
           source === "derived"
@@ -131,7 +164,8 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
                           <span>Format</span>
                           <select
                             value={entity.format}
-                            onChange={(event) => updateEntity(entity, { format: event.target.value as EntityFormat })}
+                            // Only a category lists categories; the backend refuses a list on anything else.
+                            onChange={(event) => updateEntity(entity, { format: event.target.value as EntityFormat, categories: event.target.value === "category" ? entity.categories ?? [] : [] })}
                           >
                             {Object.entries(formatLabels).map(([value, label]) => (
                               <option value={value} key={value}>{label}</option>
@@ -149,6 +183,12 @@ export function Entities({ draftSettings, setDraftSettings, onSave, settingsStat
                           </select>
                         </label>
                       </div>
+                      {entity.format === "category" && (
+                        <CategoryEditor
+                          entity={entity}
+                          onChange={(categories) => updateEntity(entity, { categories })}
+                        />
+                      )}
                       <label className="entity-description">
                         <span>{group.source === "derived" ? "What this value is" : "Description for the model"}</span>
                         <textarea

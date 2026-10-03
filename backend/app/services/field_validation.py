@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction
+from app.domain.models import EntityDefinition, EntityFormat, FieldExtraction, category_key
 
 
 def parse_named_value(value: Any, entity: EntityDefinition) -> Any:
@@ -114,6 +114,8 @@ def normalize_field(payload: Any, entity: EntityDefinition) -> FieldExtraction:
         if not re.fullmatch(r"[A-Z]{3}", normalized_currency):
             raise ValueError("expected an ISO 4217 currency code")
         return FieldExtraction(value=normalized_currency, confidence=field.confidence)
+    if entity.format is EntityFormat.category:
+        return FieldExtraction(value=canonical_category(value, entity), confidence=field.confidence, score=field.score)
     if entity.format is EntityFormat.decimal:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("expected a decimal number")
@@ -122,6 +124,26 @@ def normalize_field(payload: Any, entity: EntityDefinition) -> FieldExtraction:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError("expected an integer")
     return field
+
+def canonical_category(value: Any, entity: EntityDefinition) -> str:
+    """The class as the vocabulary spells it, or the value itself when it is open.
+
+    A closed vocabulary is the list of answers there are, so "credit NOTE" is
+    the category "Credit note" and anything not on the list is refused rather
+    than kept as a class nobody defined.
+    """
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError("expected a category")
+    spaced = " ".join(str(value).split())
+    if not spaced:
+        raise ValueError("expected a category")
+    if not entity.categories:
+        return spaced
+    for label in entity.categories:
+        if category_key(label) == category_key(spaced):
+            return label
+    raise ValueError(f"expected one of the {len(entity.categories)} categories of '{entity.name}'")
+
 
 def normalize_date(value: str) -> str:
     cleaned = value.strip()

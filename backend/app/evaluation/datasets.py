@@ -221,6 +221,29 @@ class DatasetStore:
             updated_at=payload.get("updated_at"),
         )
 
+    def label_values(self, entity: str) -> list[tuple[str, int]]:
+        """Every value labelled for `entity` in any dataset, with how often.
+
+        What an open category's classes are: whatever the labelled documents
+        say. Spellings that differ only in case or spacing are one class, shown
+        as it was first met.
+        """
+        from app.domain.models import category_key
+
+        counted: dict[str, list[Any]] = {}
+        for dataset in self.list_datasets():
+            for document in self.list_documents(dataset.name):
+                if not document.labelled or entity not in document.labelled_entities:
+                    continue
+                label_file = self.read_labels(dataset.name, document.name)
+                value = label_file.labels.get(entity) if label_file else None
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    continue
+                shown = " ".join(str(value).split())
+                entry = counted.setdefault(category_key(shown), [shown, 0])
+                entry[1] += 1
+        return sorted(((shown, count) for shown, count in counted.values()), key=lambda pair: (-pair[1], pair[0].casefold()))
+
     def set_labels(
         self,
         dataset: str,
