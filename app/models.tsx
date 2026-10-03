@@ -90,7 +90,9 @@ export function Models({ entities, onPipelines }: Props) {
         setArtifacts(nextArtifacts);
         setJobs(nextJobs);
         setCache(nextCache);
-        setForm((current) => current.pipeline ? current : { ...current, pipeline: nextPipelines[0]?.name ?? "" });
+        // The first pipeline that reads text: one that does not cannot train.
+        const reading = nextPipelines.find((pipeline) => readingKinds(pipeline.steps.map((step) => step.kind)).length) ?? nextPipelines[0];
+        setForm((current) => current.pipeline ? current : { ...current, pipeline: reading?.name ?? "" });
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : String(cause));
       }
