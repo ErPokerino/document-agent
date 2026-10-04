@@ -44,6 +44,7 @@ LIST_TIMEOUT_SECONDS = 120
 # The largest model read from object storage takes minutes to load.
 LOAD_TIMEOUT_SECONDS = 20 * 60
 LOAD_POLL_SECONDS = 2.0
+UNLOAD_WAIT_SECONDS = 30
 
 _ROUTER_STATES = {
     "loaded": "ready",
@@ -288,10 +289,17 @@ class ModelServerClient(LMStudioClient):
         return _load_report(model, already=False, load_ms=load_ms, warmup_ms=warmup_ms, started=started, unloaded=others_loaded, mode=mode)
 
     async def _unload(self, model: str) -> None:
+        """Ask the server to let `model` go, and wait until it has: unloading is not instant."""
         try:
             async with httpx.AsyncClient(timeout=LIST_TIMEOUT_SECONDS) as client:
                 await client.post(f"{self.base_url}/models/unload", json={"model": model}, headers=await self._headers())
-        except httpx.HTTPError:
+            deadline = time.monotonic() + UNLOAD_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                current = next((info for info in await self.list_models() if info.id == model), None)
+                if current is None or not current.loaded:
+                    return
+                await asyncio.sleep(LOAD_POLL_SECONDS)
+        except (httpx.HTTPError, LMStudioError):
             # The failure being reported matters more than this one.
             pass
 
