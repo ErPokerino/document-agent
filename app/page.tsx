@@ -58,9 +58,11 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
 };
 
 export default function Home() {
-  const [route, setRoute] = useState<AppRoute>(() =>
-    typeof window === "undefined" ? parseHash("") : parseHash(window.location.hash),
-  );
+  // The server cannot see the hash, so the first render is the default route on
+  // both sides; the address bar is read once the page is live. Reading it during
+  // the first render made the browser's markup differ from the server's whenever
+  // the page was opened on a section, and React threw the server render away.
+  const [route, setRoute] = useState<AppRoute>(() => parseHash(""));
   const routeRef = useRef(route);
   const view = route.view;
 
@@ -90,7 +92,11 @@ export default function Home() {
     }
     window.addEventListener("hashchange", onHash);
     if (!window.location.hash) history.replaceState(null, "", "#/workspace");
-    return () => window.removeEventListener("hashchange", onHash);
+    const opened = window.setTimeout(onHash, 0);
+    return () => {
+      window.clearTimeout(opened);
+      window.removeEventListener("hashchange", onHash);
+    };
   }, []);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
