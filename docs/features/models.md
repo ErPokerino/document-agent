@@ -81,8 +81,11 @@ asks. Examples carry text read by a pipeline's reading steps, not page images.
 A document without a label for a field the model is asked for is left out and
 listed, rather than written with `null`.
 
-Training jobs run in the background and are kept in memory; a backend restart
-forgets the jobs, never the models or the exported files. **Training elsewhere** lists the remote
+Training and exports run in the background as recorded jobs: the list shows
+the latest of them with their progress, and one runs at a time. Locally they
+run inside the backend, which marks any it was running as interrupted when it
+restarts; deployed, each runs in a worker of its own
+([deployment](../deployment.md#long-work-runs-as-jobs)). **Training elsewhere** lists the remote
 targets — Gemini supervised tuning on Vertex AI, Document AI custom processors,
 Bedrock, Azure OpenAI — as not connected: tuning Gemini is offered on Vertex AI
 rather than through the Gemini API key used in LLM, and needs a project, a

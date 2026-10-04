@@ -42,29 +42,32 @@ pipeline or model it names has changed or is gone since.
 
 ## Cloud deployment
 
-The gaps in [docs/deployment.md](docs/deployment.md#what-is-not-portable-yet),
-in the order a first deployment on Google Cloud meets them. Each is an
-interface with the local implementation kept, never a GCP-only replacement.
+DocuFlow is deployed on Google Cloud from the `cloud` branch
+([deployment](docs/deployment.md#google-cloud)): Cloud Run for the app, the
+worker and the model server, Cloud SQL, a bucket for the data folder. Done on
+the way: long work as jobs ([0007](docs/decisions/0007-long-work-as-recorded-jobs.md)),
+PostgreSQL behind the same stores, the runtime identity for Google APIs, one
+origin for frontend and API, a model server provider, a one-account sign-in.
 
-1. **Access control** before anything is reachable: behind the platform's
-   identity-aware proxy at first; users and roles in the app once more than one
-   team works in it.
-2. **Jobs out of the API process.** Lab runs, experiments and training behind
-   one job interface: in-process locally, a queue (Cloud Tasks or Pub/Sub on
-   GCP) when deployed. Until then, one instance.
-3. **Credentials from the runtime.** Application Default Credentials for
-   Document AI and Vertex AI on Google Cloud; the key file stays for other hosts.
-4. **Database interface.** The SQLite stores behind one SQL layer that also runs
-   on PostgreSQL (Cloud SQL, RDS, Azure Database).
-5. **Storage interface.** Datasets, evaluation inputs, models and caches behind
-   one interface over local files and object storage (GCS, S3, Blob).
-6. **Generic reader kinds.** `ocr`, `layout` and `field_extractor` steps bound
+Next, in order. Each is an interface with the local implementation kept, never
+a GCP-only replacement; the gaps they close are in
+[deployment](docs/deployment.md#what-is-not-portable-yet).
+
+1. **Users instead of one account.** The sign-in is a demo door. Real users
+   and roles in the app — or the platform's identity-aware proxy in front — before
+   a team or customer data relies on it.
+2. **Storage interface.** Datasets, evaluation inputs, models and caches
+   behind one interface over local files and object storage (GCS, S3, Blob),
+   replacing the FUSE mount and its one-writer limit.
+3. **The company project.** A second env file in `deploy/gcp/`, with the
+   company's region, budget and identity; nothing in the scripts changes.
+4. **Generic reader kinds.** `ocr`, `layout` and `field_extractor` steps bound
    to a provider in the processor catalog, with existing `document_ai_*`
    pipelines migrated; then a second OCR provider to prove the seam.
-7. **API address at run time** for the frontend image, or one origin for both
-   services, so one image serves every environment.
-8. **First deployment**: Cloud Run with a Filestore volume, Secret Manager and
-   IAP, from the images CI already builds.
+5. **A second cloud.** A job runner (AWS Batch or Container Apps jobs) and the
+   same images, mapped as in [deployment](docs/deployment.md#mapping-onto-other-clouds).
+6. **Merge `cloud` into `main`** once the team wants the job runner, PostgreSQL
+   and the model server locally too; everything there is configuration-gated.
 
 ## Collaboration and code health
 

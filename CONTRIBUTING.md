@@ -12,6 +12,20 @@ points back here.
   change to one subject, and push when it is done: work that exists only on one
   machine is work nobody else can build on.
 
+## Two long-lived branches
+
+- **`main`** is DocuFlow as it runs on a developer machine.
+- **`cloud`** is what is deployed to Google Cloud: `main` plus what a cloud
+  deployment needs (`deploy/gcp/`, and code that is active only when its
+  `DOCUFLOW_*` variables are set, so it runs locally exactly as `main` does).
+
+Work for both lands on `main`; merge `main` into `cloud` regularly, never the
+other way round by accident. A change that only the deployment needs lands on
+`cloud`. Anything on `cloud` that is useful locally too — the job runner, the
+PostgreSQL support, the model server provider — is configuration-gated so it
+can move to `main` in one merge when the team decides to. Deploy only from
+`cloud` ([deployment](docs/deployment.md#google-cloud)).
+
 ## Making a change
 
 1. **Branch** from `main` for anything larger than a fix (`feature/…`, `fix/…`,

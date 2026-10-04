@@ -1,15 +1,17 @@
 # Deployment and cloud portability
 
-DocuFlow runs on a developer machine today. It is meant to run on more than one
-cloud, starting with Google Cloud, without depending on any one of them. This
-page is the contract that keeps that true, and the list of what still stands in
-the way.
+DocuFlow runs on a developer machine, and on Google Cloud from the `cloud`
+branch. It is meant to run on more than one cloud without depending on any one
+of them. This page is the contract that keeps that true, how the Google Cloud
+deployment is built, and the list of what still stands in the way.
 
 ## Principles
 
 1. **One image, configured by the environment.** The backend and frontend are
-   plain OCI images (`deploy/`). Nothing in them names a cloud; storage,
-   allowed origins and credentials come from `DOCUFLOW_*` variables.
+   plain OCI images (`deploy/`). Nothing in them names a cloud; storage, the
+   database, sign-in, where long work runs and which model server answers come
+   from `DOCUFLOW_*` variables. Unset, everything behaves as on a developer
+   machine.
 2. **Every external service behind one module.** A provider is an adapter
    behind an interface ([architecture](architecture.md#where-vendor-specific-code-lives)).
    Callers never import a cloud SDK directly.
@@ -23,13 +25,36 @@ the way.
 
 ## Configuration
 
+The backend reads these (`backend/app/config.py`); the frontend the last two.
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `DOCUFLOW_DATA_DIR` | `backend/data` | Settings, database, datasets, models, caches |
-| `DOCUFLOW_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Origins allowed to call the API |
+| `DOCUFLOW_DATA_DIR` | `backend/data` | Settings, datasets, models, caches, and the SQLite file |
+| `DOCUFLOW_DATABASE_URL` | unset: SQLite in the data folder | `postgresql://…` to keep the tables in PostgreSQL |
+| `DOCUFLOW_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Origins allowed to call the API directly |
 | `DOCUFLOW_GCP_CREDENTIALS` | `<data dir>/gcp-service-account.json` | Document AI service-account key |
+| `DOCUFLOW_GCP_RUNTIME_IDENTITY` | `false` | `true`: call Google APIs as the platform's identity for the container, with no key file |
+| `DOCUFLOW_LOGIN_USER`, `DOCUFLOW_LOGIN_PASSWORD` | unset: no sign-in | The one account the sign-in screen accepts |
+| `DOCUFLOW_SESSION_SECRET` | random per process | Signs the sign-in cookie |
+| `DOCUFLOW_JOBS` | `in_process` | `cloud_run`: Lab runs, experiments and training run as Cloud Run job executions |
+| `DOCUFLOW_JOBS_CLOUD_RUN_JOB` | — | With `cloud_run`: `projects/<p>/locations/<r>/jobs/<name>` |
+| `DOCUFLOW_MODEL_SERVER_URL` | unset | An OpenAI-compatible model server (llama.cpp, vLLM, Ollama…) |
+| `DOCUFLOW_MODEL_SERVER_AUTH`, `DOCUFLOW_MODEL_SERVER_TOKEN` | `none` | `bearer` with a token, or `google_id_token` for a private Cloud Run service |
 | `PORT` | `8000` backend, `3000` frontend | Port inside the container |
-| `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | API address the browser calls; fixed at frontend build time |
+| `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | API address the browser calls, fixed at frontend build time; `/` for the page's own origin |
+| `DOCUFLOW_API_URL` | unset | Read by the frontend server at run time: where to forward `/api` when built with `/` |
+
+## Long work runs as jobs
+
+A Lab run, an experiment, a training run and a fine-tuning export are each a
+row in the `jobs` table (`backend/app/jobs/`): what to do, how far it got,
+whether someone asked it to stop. The API records the row and returns at once;
+the work is done by the API process itself (`in_process`, the default) or by a
+worker container started for it (`cloud_run`: `python -m app.worker <id>` in a
+Cloud Run job execution). Either way it reports progress into the row and the
+run's own tables, and Cancel reaches it through the row. Another platform's
+batch service is another class in `jobs/queue.py` with the same two methods.
+Why this shape: [0007](decisions/0007-long-work-as-recorded-jobs.md).
 
 ## Running the containers
 
@@ -41,57 +66,92 @@ The backend keeps its state on the `docuflow-data` volume. LM Studio stays on
 the host: in **LLM**, set its URL to `http://host.docker.internal:1234`. CI
 builds both images and starts them on every push.
 
-## Mapping onto a cloud
+## Google Cloud
 
-The same two images; each platform supplies a container runtime, a volume or
-bucket for the data folder, a secret store for keys, and a way to restrict who
-reaches the app.
+Everything for a Google Cloud target lives in `deploy/gcp/`, driven by one env
+file per target (`personal.env` is the first; a company project is a copy with
+other values). The scripts name nothing else.
 
-| Need | Google Cloud (first target) | AWS | Azure |
+```bash
+LOGIN_PASSWORD=... deploy/gcp/provision.sh deploy/gcp/personal.env   # resources, once
+deploy/gcp/deploy.sh deploy/gcp/personal.env                          # build and deploy
+PYTHON=python3 deploy/gcp/migrate-data.sh deploy/gcp/personal.env backend/data  # once
+```
+
+| Resource | What it is for |
+|---|---|
+| Cloud Run service `docuflow` | The app: frontend and backend as two containers of one service, one public origin, billed per request, scales to zero |
+| Cloud Run job `docuflow-worker` | Lab runs, experiments, training: one execution per job, billed while it runs |
+| Cloud Run service `docuflow-llm` | llama.cpp serving the open model on CPUs; private, called with the app's identity |
+| Cloud SQL for PostgreSQL `docuflow-pg` | Runs, Lab results, experiments, jobs, register and rules; reached through the Cloud SQL connector only |
+| Bucket `…-docuflow-data` | The data folder, mounted at `/data` with Cloud Storage FUSE |
+| Bucket `…-docuflow-models` | The model files llama.cpp loads |
+| Artifact Registry `docuflow` | The images, built by Cloud Build from `deploy/*.Dockerfile` |
+| Secret Manager | Database address, sign-in password, session secret |
+| Service accounts `docuflow-run`, `-llm`, `-build` | The app and worker; the model server; the image build. No keys are downloaded |
+| Budget | A monthly budget with alerts on the project; it warns, it does not stop spending |
+
+The browser reaches one address: the frontend container answers it and
+forwards `/api` to the backend beside it (`app/api/[...path]/route.ts`), so
+the sign-in cookie covers every request, PDF previews and downloads included,
+and the backend is not exposed. Document AI is called as `docuflow-run`, with
+no key file. The data migration copies the files to the bucket and the SQLite
+history into Cloud SQL from inside a worker execution; it leaves the Gemini key
+and the service-account key behind.
+
+What to know when using it:
+
+- **Sign-in is one shared account**, meant for a short demo. Change the
+  password with `LOGIN_PASSWORD=... provision.sh` and redeploy, and remove it
+  once DocuFlow has real users.
+- **The data folder is a bucket.** Cloud Storage FUSE has no file locking and
+  the last write of a file wins. One app instance, one Lab job and one training
+  job at a time (all enforced) keep that safe, since they write different
+  files; a storage interface removes the limit.
+- **The model server scales to zero.** The first request after a pause waits
+  while the model loads, and the CPU answers more slowly than a GPU would. The
+  Lab measures both.
+
+## Mapping onto other clouds
+
+The same images; each platform supplies a container runtime, a database, a
+volume or bucket for the data folder, a secret store, and a batch runner for
+jobs.
+
+| Need | Google Cloud (deployed) | AWS | Azure |
 |---|---|---|---|
-| Run the containers | Cloud Run or GKE | ECS on Fargate or EKS | Container Apps or AKS |
-| Data folder | Filestore (NFS) volume | EFS | Azure Files |
-| Secrets (API keys, service account) | Secret Manager, mounted as files or variables | Secrets Manager | Key Vault |
-| Restricting access | IAP or a load balancer with OIDC | ALB with OIDC / Cognito | Easy Auth / Entra ID |
+| Run the containers | Cloud Run | ECS on Fargate or EKS | Container Apps or AKS |
+| Long work | Cloud Run jobs | AWS Batch or ECS tasks | Container Apps jobs |
+| Database | Cloud SQL for PostgreSQL | RDS for PostgreSQL | Azure Database for PostgreSQL |
+| Data folder | Cloud Storage FUSE | Mountpoint for S3 or EFS | Blob NFS or Azure Files |
+| Secrets | Secret Manager | Secrets Manager | Key Vault |
+| Restricting access | Sign-in in the app; IAP for a real perimeter | ALB with OIDC / Cognito | Easy Auth / Entra ID |
+| Self-hosted models | llama.cpp on Cloud Run (GPU optional) | ECS/EKS with vLLM or llama.cpp | Container Apps with vLLM or llama.cpp |
 | Hosted language models | Gemini (API or Vertex AI) | Bedrock | Azure OpenAI |
 | OCR and layout | Document AI | Textract | Document Intelligence |
 
 ## What is not portable yet
 
-Honest gaps, in the order a first cloud deployment would meet them. Each is a
-seam to cut, not a rewrite.
+Honest gaps, in the order the next deployment would meet them. Each is a seam
+to cut, not a rewrite.
 
-1. **No authentication.** The API trusts whoever reaches it. Until DocuFlow
-   has users, a deployment must sit behind the platform's identity-aware
-   access (the *Restricting access* row above).
-2. **One instance.** Lab runs, experiments and training jobs run as tasks
-   inside the API process, and the model-operation lock is in memory. Two
-   instances would each think they were alone. Run a single instance until
-   jobs move to a queue (Cloud Tasks / Pub/Sub, SQS, Service Bus — behind one
-   job interface).
-3. **SQLite.** Right for one machine; on network storage its locking is not
-   reliable, and object-storage mounts (Cloud Storage FUSE, S3 mounts) do not
-   support it at all. Keep the data folder on a file-system volume, or move the
-   stores to PostgreSQL (Cloud SQL, RDS, Azure Database) behind the same store
-   classes.
-4. **Files on a file system.** Datasets, evaluation inputs, models and caches
-   are files under the data folder. A storage interface over local files and
-   object storage (GCS, S3, Blob) would let the folder become a bucket.
-5. **Vendor names in the pipeline vocabulary.** Step kinds such as
+1. **One shared account.** Sign-in keeps a demo URL from being used by
+   whoever finds it; it is not users, roles or an audit trail. A deployment
+   for a team sits behind the platform's identity-aware access until DocuFlow
+   has users.
+2. **Files on a file system.** Datasets, evaluation inputs, models and caches
+   are files under the data folder, which on Google Cloud is a FUSE-mounted
+   bucket. A storage interface over local files and object storage (GCS, S3,
+   Blob) would drop the mount and its one-writer limit.
+3. **Vendor names in the pipeline vocabulary.** Step kinds such as
    `document_ai_ocr` name Google. Generic reader kinds (`ocr`, `layout`,
    `field_extractor`) bound to a provider in the processor catalog would let one
    pipeline run on Textract or Document Intelligence; existing pipelines would
    migrate by mapping the old kinds.
-6. **Credentials as a key file.** Document AI is reached with a
-   service-account key. On Google Cloud the runtime's own identity (Application
-   Default Credentials / workload identity) should be used instead, with the key
-   file kept for other hosts.
-7. **Local inference is LM Studio only.** In a cloud, models are served by a
-   provider (Gemini, Bedrock, Azure OpenAI) or self-hosted behind an
-   OpenAI-compatible endpoint; the `ExtractionProvider` interface is where such
-   a provider joins.
-8. **The frontend's API address is fixed at build time.** Serving both
-   behind one origin, or reading the address at run time, would let one
-   frontend image serve every environment.
+4. **One job runner per cloud.** In process and Cloud Run jobs exist; AWS Batch
+   or Container Apps jobs are a class each in `backend/app/jobs/queue.py`.
+5. **The frontend's API address is fixed at build time.** `/` (same origin)
+   makes one frontend image serve every deployment that forwards `/api`; a
+   frontend calling an API elsewhere still needs its own build.
 
 The order to tackle them is in the [roadmap](../ROADMAP.md#cloud-deployment).

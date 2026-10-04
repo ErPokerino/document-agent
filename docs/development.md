@@ -88,8 +88,13 @@ npm run verify    # the above, then the production build
 `npm test` does not build, so it is safe to run while the app is up. The npm
 scripts reach the virtualenv through `scripts/python.mjs`, which finds its
 interpreter on Windows and elsewhere. CI (`.github/workflows/ci.yml`) runs the
-build and `npm test` on Windows, and builds and starts the container images on
-Linux, for every push and pull request.
+build and `npm test` on Windows, the backend tests again against PostgreSQL,
+and builds and starts the container images on Linux, for every push to `main`
+or `cloud` and every pull request.
+
+To run the backend tests against PostgreSQL yourself, point
+`DOCUFLOW_TEST_DATABASE_URL` at a database you can create schemas in; each test
+gets one of its own and drops it after (`backend/tests/conftest.py`).
 
 **A build landing under a running `vinext start` leaves it stale**, and the
 failure does not look like one: `vinext start` reads its manifest once and

@@ -100,6 +100,12 @@ fingerprint, listed in Past runs and in Analytics like any other. Cells run one
 after another, grouped by model, so each local model is loaded once. The model
 selected in LLM is not changed, though another one may be in memory when the
 experiment ends. Cancelling the run in progress cancels the experiment.
+
+A run and an experiment each run in the background as a recorded job, one at a
+time: locally inside the backend, deployed in a worker of their own, so closing
+the page or the app scaling down does not stop them
+([deployment](../deployment.md#long-work-runs-as-jobs)). Cancel reaches the
+work wherever it runs, within a few seconds.
 Deleting an experiment forgets the grid; its runs stay.
 
 The results grid shows each cell's accuracy, time and cost per document. Below

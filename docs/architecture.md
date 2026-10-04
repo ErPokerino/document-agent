@@ -2,8 +2,8 @@
 
 DocuFlow is a FastAPI backend and a React frontend. The backend owns every
 decision and every byte of state; the frontend draws what the API returns and
-holds nothing a reload would lose. Both run on one machine today and are built
-to run as containers anywhere ([deployment](deployment.md)).
+holds nothing a reload would lose. Both run on one machine, and as containers
+anywhere — on Google Cloud from the `cloud` branch ([deployment](deployment.md)).
 
 ```text
 Browser ── React app (vinext) ── HTTP/JSON ──► FastAPI
@@ -12,9 +12,10 @@ Browser ── React app (vinext) ── HTTP/JSON ──► FastAPI
             │                                    │                             │
       Pipeline engine                     Lab & experiments             Models (training)
    steps → candidates → value      runs, snapshots, fingerprints     algorithms, artefacts
-            │                                    │                             │
+            │                                    │      └──── long work as jobs ─────┤
+            │                                    │      in process, or a worker elsewhere
             └──────────── adapters to external services and storage ───────────┘
-              LM Studio · Gemini · Document AI · SQLite · files under DOCUFLOW_DATA_DIR
+   LM Studio · model server · Gemini · Document AI · SQLite or PostgreSQL · files under DOCUFLOW_DATA_DIR
 ```
 
 ## The pipeline engine
@@ -56,6 +57,16 @@ the model execution profile, pinned processor versions, the supplier register
 and rules. A fingerprint of all of it groups runs of the same configuration.
 Details in [Lab](features/lab.md).
 
+## Long work
+
+A Lab run, an experiment, a training run and a fine-tuning export are recorded
+as a **job** (`backend/app/jobs/`): the endpoint checks the request, records
+the run and its job, and returns. The work runs in the API process, or — when
+deployed — in a worker container started for that job, which rebuilds
+everything from the recorded rows. Progress and Cancel go through the job's
+row, so both work across machines
+([0007](decisions/0007-long-work-as-recorded-jobs.md)).
+
 ## Code map
 
 ```text
@@ -69,18 +80,22 @@ lib/                       frontend logic worth testing on its own
 tests/                     Node tests, one file per lib module
 
 backend/app/
-  main.py                  the FastAPI app; one router per subject
+  main.py                  the FastAPI app, sign-in check; one router per subject
   config.py                where state lives and who may call: DOCUFLOW_* variables
+  worker.py                runs one recorded job and exits: the deployed worker's entry point
+  jobs/                    the job table, its runners (in process, Cloud Run), the dispatcher
   api/deps.py              stores and helpers every router shares
   api/routes/              endpoints, one module per section
   domain/                  Pydantic models, one module per subject; models.py re-exports them
   pipeline/                step contracts, the compiler, the engine, the steps, resolution
-  services/                adapters: LM Studio, Gemini, Document AI, master data, caches, SQLite
+  services/                adapters: LM Studio, model server, Gemini, Document AI, runtime
+                           identity, master data, caches, the database (SQLite or PostgreSQL)
   evaluation/              datasets, scoring, classification, Lab store, experiments
-  training/                features, algorithms, classifiers, KNN, artefact registry, jobs
+  training/                features, algorithms, classifiers, KNN, artefact registry
 backend/tests/             pytest, one file per concern
 
 deploy/                    container images; compose.yaml at the root runs them
+  gcp/                     Google Cloud: provisioning, Cloud Build, Cloud Run, data migration
 scripts/                   lifecycle helpers shared by the PowerShell scripts and npm
 docs/                      this documentation
 ```
@@ -92,11 +107,13 @@ provider touches that module and its registration, not the callers.
 
 | Concern | Interface | Implementations today |
 |---|---|---|
-| Field extraction by a language model | `ExtractionProvider` (`services/extraction_provider.py`) | `LMStudioClient`, `GeminiClient` |
+| Field extraction by a language model | `ExtractionProvider` (`services/extraction_provider.py`) | `LMStudioClient`, `ModelServerClient` (any OpenAI-compatible server), `GeminiClient` |
 | Reading pages (OCR, layout, custom extraction) | pipeline steps over `DocumentAiClient` (`services/document_ai.py`) | Google Document AI |
 | Trained models | `Algorithm` registry (`training/algorithms.py`) | scikit-learn, LightGBM, XGBoost, CatBoost; TabPFN and Jev listed |
-| Relational state | SQLite through `services/db.py` | one file under the data folder |
-| Files: datasets, models, caches, inputs | stores rooted at `config.data_dir()` | local filesystem or a mounted volume |
+| Relational state | `services/db.py`; stores write SQLite's dialect, translated there | SQLite file, or PostgreSQL by `DOCUFLOW_DATABASE_URL` |
+| Long work | job runners (`jobs/queue.py`) | in process, Cloud Run jobs |
+| Google credentials | key file, or `services/gcp_runtime.py` | service-account key, or the platform's identity |
+| Files: datasets, models, caches, inputs | stores rooted at `config.data_dir()` | local filesystem, or a mounted volume or bucket |
 | Configuration and secrets | `config.py`, `settings.json` | environment variables and the data folder |
 
 What it would take to swap each one is in [deployment](deployment.md#what-is-not-portable-yet).

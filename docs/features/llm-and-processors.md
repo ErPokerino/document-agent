@@ -84,6 +84,24 @@ pinned when processor metadata is available. Other remote processors remain
 whatever Google serves. A run recorded before the register snapshot uses today's
 tables on retry, and the Lab says so.
 
+## A model server
+
+A deployment can serve open models from its own server instead of LM Studio:
+llama.cpp, vLLM, Ollama or anything else that speaks the OpenAI-compatible
+API. With `DOCUFLOW_MODEL_SERVER_URL` set, the models it lists appear in LLM
+beside the others, tagged *Model server*, and are chosen the same way. They
+need no loading here — the server holds the model it was started with — and
+answer the same request LM Studio is sent: the same prompt, the same schema
+constraint, temperature 0 and a fixed seed, at `/v1/chat/completions`. A run
+records the provider `model_server` and only what the request fixes; how the
+server loaded the model (context, quantization, threads) is its own
+configuration and is not claimed.
+
+On Google Cloud this is llama.cpp on Cloud Run, private and called with the
+app's identity (`DOCUFLOW_MODEL_SERVER_AUTH=google_id_token`); see
+[deployment](../deployment.md#google-cloud). It scales to zero, so the first
+request after a pause waits for the model to load.
+
 ## Why Outlines is not required
 
 LM Studio directly supports `response_format.type = json_schema`. The backend supplies the dynamic schema in every `/v1/chat/completions` extraction request, so the Structured Output field in the LM Studio desktop UI does not need to be configured manually. Pydantic provides a second application-level validation layer. Outlines remains a useful future adapter for direct Transformers or MLX inference, but would duplicate the structured-output layer in this setup.

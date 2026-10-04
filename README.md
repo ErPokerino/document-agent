@@ -7,8 +7,9 @@ labelled history.
 
 It runs locally today — a FastAPI backend and a React frontend, with local
 models through LM Studio and hosted ones through Gemini and Google Document AI —
-and ships as provider-neutral containers for deployment on any cloud, Google
-Cloud first.
+and ships as provider-neutral containers for deployment on any cloud. The
+`cloud` branch is deployed on Google Cloud: Cloud Run, Cloud SQL, and open
+models served by llama.cpp ([deployment](docs/deployment.md#google-cloud)).
 
 ## What it does
 
