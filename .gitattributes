@@ -2,6 +2,8 @@
 # prefers. Binary formats are never touched.
 * text=auto
 *.sh text eol=lf
+# Sourced by the deployment scripts: a carriage return would end up in every value.
+deploy/gcp/*.env text eol=lf
 *.Dockerfile text eol=lf
 compose.yaml text eol=lf
 *.pdf binary
