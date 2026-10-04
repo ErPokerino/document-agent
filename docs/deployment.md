@@ -168,6 +168,13 @@ What to know when using it:
   again, which takes longest for the largest model, read from the bucket. While
   an instance is up, CPU stays allocated so a load can finish between
   requests. The CPU answers more slowly than a GPU would; the Lab measures it.
+  Measured on the first deployment: minicpm5-1b loaded in 18 s and warmed in
+  3 s; qwen3.6-35b-a3b (20.6 GiB) loaded in 7 min and warmed in 4 min. A load
+  is one request through the app, which Cloud Run allows 15 minutes.
+- **A model the deployed llama.cpp does not support is refused at warm-up.**
+  LM Studio ships its own runtime, so a model that works locally may not here.
+  spark-x2.5-4b loads but answers garbage on the build deployed; its warm-up
+  fails, the model is unloaded, and LLM says why.
 
 ## Mapping onto other clouds
 
