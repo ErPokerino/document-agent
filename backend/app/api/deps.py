@@ -17,6 +17,7 @@ from typing import Any, AsyncIterator
 import pymupdf
 from fastapi import HTTPException
 
+from app import config
 from app.domain.models import (
     MODEL_NOT_USED,
     AppSettings,
@@ -75,13 +76,13 @@ MAX_FILE_SIZE = 20 * 1024 * 1024
 # A dataset archive is many PDFs at once, so it needs its own ceiling: ten
 # documents at the single-file limit already exceed that one.
 MAX_ARCHIVE_SIZE = 500 * 1024 * 1024
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR = config.data_dir()
 SETTINGS_PATH = DATA_DIR / "settings.json"
 DATABASE_PATH = DATA_DIR / "docuflow.db"
 DATASETS_PATH = DATA_DIR / "datasets"
 PIPELINES_PATH = DATA_DIR / "pipelines"
 # One fixed location, so the instructions in Settings can name a real path.
-GCP_CREDENTIALS_PATH = DATA_DIR / "gcp-service-account.json"
+GCP_CREDENTIALS_PATH = config.gcp_credentials_path(DATA_DIR)
 READING_CACHE_PATH = DATA_DIR / "reading-cache"
 ARTIFACTS_PATH = DATA_DIR / "artifacts"
 EXPORTS_PATH = DATA_DIR / "training-exports"

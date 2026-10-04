@@ -9,7 +9,7 @@ def test_generated_typescript_matches_the_committed_file() -> None:
 
     assert committed == render_types(app.openapi()), (
         "lib/types.ts is out of date with the FastAPI schema. "
-        "Run: .venv/Scripts/python.exe backend/scripts/generate_types.py"
+        "Run: npm run types:generate"
     )
 
 

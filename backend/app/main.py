@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import config
 from app.services.errors import ProviderError
 from app.api.routes import models, settings, documents, pipelines, master_data, datasets, runs, evaluations, processors, training, experiments
 
@@ -16,7 +17,7 @@ app = FastAPI(title="DocuFlow API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=config.cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
