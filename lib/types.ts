@@ -480,6 +480,8 @@ export type GeminiSettings = {
 export type HealthStatus = {
   status: string;
   lm_studio: boolean;
+  lm_studio_enabled: boolean;
+  model_server: boolean;
   active_model: string;
   lm_studio_error: string | null;
 };

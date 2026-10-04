@@ -500,6 +500,7 @@ function App() {
             modelsRefreshing={modelsRefreshing}
             isConnected={isConnected}
             connectionError={health?.lm_studio_error ?? null}
+            lmStudioEnabled={health?.lm_studio_enabled !== false}
             processState={workspace.processState}
           />
         )}

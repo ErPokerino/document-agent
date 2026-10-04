@@ -95,13 +95,17 @@ tables on retry, and the Lab says so.
 A deployment can serve open models from its own server instead of LM Studio:
 llama.cpp, vLLM, Ollama or anything else that speaks the OpenAI-compatible
 API. With `DOCUFLOW_MODEL_SERVER_URL` set, the models it lists appear in LLM
-beside the others, tagged *Model server*, and are chosen the same way. They
+beside the others, tagged *Model server*, with what the server reports about
+each — llama.cpp gives parameters, quantization, size, context, parallel slots
+and whether the model reads images; a server that gives only ids leaves them
+blank and the capabilities unknown. They are chosen the same way. They
 need no loading here — the server holds the model it was started with — and
 answer the same request LM Studio is sent: the same prompt, the same schema
 constraint, temperature 0 and a fixed seed, at `/v1/chat/completions`. A run
-records the provider `model_server` and only what the request fixes; how the
-server loaded the model (context, quantization, threads) is its own
-configuration and is not claimed.
+records the provider `model_server`, what the request fixes, and what the
+server reported about the model it ran on. Where a deployment runs no LM Studio
+(`DOCUFLOW_LM_STUDIO=off`), the *Local* tab becomes *Self-hosted* and shows the
+model server in place of the LM Studio connection.
 
 On Google Cloud this is llama.cpp on Cloud Run, private and called with the
 app's identity (`DOCUFLOW_MODEL_SERVER_AUTH=google_id_token`); see

@@ -3,7 +3,8 @@
 DocuFlow is a FastAPI backend and a React frontend. The backend owns every
 decision and every byte of state; the frontend draws what the API returns and
 holds nothing a reload would lose. Both run on one machine, and as containers
-anywhere — on Google Cloud from the `cloud` branch ([deployment](deployment.md)).
+anywhere — on Google Cloud from the `cloud` branch. How the deployed services
+connect is drawn in [deployment](deployment.md#google-cloud).
 
 ```text
 Browser ── React app (vinext) ── HTTP/JSON ──► FastAPI

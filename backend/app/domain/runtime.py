@@ -106,6 +106,11 @@ class ModelExecutionProfile(BaseModel):
 class HealthStatus(BaseModel):
     status: str
     lm_studio: bool
+    # False where this deployment runs no LM Studio (DOCUFLOW_LM_STUDIO=off):
+    # not a fault to report, and nothing to connect to.
+    lm_studio_enabled: bool = True
+    # Whether a model server is configured for this deployment.
+    model_server: bool = False
     active_model: str
     # Why the local models are missing, when they are. /api/models answers with
     # the hosted ones alone rather than failing outright, which is right — and

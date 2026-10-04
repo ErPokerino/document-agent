@@ -84,6 +84,8 @@ type Props = {
   modelsRefreshing: boolean;
   isConnected: boolean;
   connectionError: string | null;
+  // False where this deployment runs no LM Studio: nothing to connect to.
+  lmStudioEnabled: boolean;
   processState: string;
 };
 
@@ -116,8 +118,10 @@ export function LanguageModels(props: Props) {
     modelsRefreshing,
     isConnected,
     connectionError,
+    lmStudioEnabled,
     processState,
   } = props;
+  const servedModels = models.filter((model) => model.provider === "model_server");
 
   const [runsFilter, setRunsFilter] = useState<RunsFilter>(draftSettings.provider === "gemini" ? "api" : "local");
   const [visionFilter, setVisionFilter] = useState<VisionFilter>("any");
@@ -178,18 +182,32 @@ export function LanguageModels(props: Props) {
     <section className="settings-layout wide">
       <div className="settings-intro">
         <Cpu size={19} />
-        <div><h2>LLM</h2><p>Which language model answers, and where it runs: LM Studio on this machine, or the Gemini API.</p></div>
+        <div><h2>LLM</h2><p>Which language model answers, and where it runs: {lmStudioEnabled ? "LM Studio on this machine" : "the model server of this deployment"}, or the Gemini API.</p></div>
       </div>
 
       <div className="resource-tabs" aria-label="Model location">
-        <button aria-pressed={runsFilter === "local"} onClick={() => setRunsFilter("local")}>Local <small>{filterModels(models, { runs: "local" }).length}</small></button>
+        <button aria-pressed={runsFilter === "local"} onClick={() => setRunsFilter("local")}>{lmStudioEnabled ? "Local" : "Self-hosted"} <small>{filterModels(models, { runs: "local" }).length}</small></button>
         <button aria-pressed={runsFilter === "api"} onClick={() => setRunsFilter("api")}>API <small>{filterModels(models, { runs: "api" }).length}</small></button>
       </div>
       <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {draftSettings.provider === "gemini" ? "API" : draftSettings.provider === "model_server" ? "Model server" : "Local"}. Model changes apply when saved.</p>
 
       {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}
 
-      <div className="settings-card" hidden={runsFilter !== "local"}>
+      <div className="settings-card" hidden={runsFilter !== "local" || lmStudioEnabled}>
+        <div className="settings-card-heading">
+          <span className="settings-card-icon"><Server size={18} /></span>
+          <div><h3>Model server</h3><p>Open models served for this deployment, behind an OpenAI-compatible API. They are loaded by the server when it starts.</p></div>
+          <span className={`connection-badge ${servedModels.length ? "online" : ""}`}><CircleDot size={12} /> {servedModels.length ? `${servedModels.length} served` : "Not answering"}</span>
+        </div>
+        {!servedModels.length && (
+          <p className="connection-problem">
+            <AlertCircle size={14} />
+            <span>The model server listed no models. A server that has scaled to zero answers once its model has loaded, which takes a while.</span>
+          </p>
+        )}
+      </div>
+
+      <div className="settings-card" hidden={runsFilter !== "local" || !lmStudioEnabled}>
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Server size={18} /></span>
           <div><h3>LM Studio connection</h3><p>OpenAI-compatible endpoint used by the backend.</p></div>
@@ -217,7 +235,7 @@ export function LanguageModels(props: Props) {
       <div className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Cpu size={18} /></span>
-          <div><h3>Extraction model<InfoHint text="Image-based model extraction needs a vision model. OCR text can be sent to a text or vision model. A Custom Extractor pipeline may not call an LLM." /></h3><p>Local models come from LM Studio, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
+          <div><h3>Extraction model<InfoHint text="Image-based model extraction needs a vision model. OCR text can be sent to a text or vision model. A Custom Extractor pipeline may not call an LLM." /></h3><p>{lmStudioEnabled ? "Local models come from LM Studio" : "Self-hosted models come from the model server"}, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
           <span className="connection-badge"><RefreshCw className={modelsRefreshing ? "spin" : ""} size={12} /> Auto refresh</span>
         </div>
 
@@ -247,7 +265,7 @@ export function LanguageModels(props: Props) {
 
         <div className="model-list">
           {scopedModels.length === 0 ? (
-            <div className="models-empty"><AlertCircle size={18} /><span>{runsFilter === "local" ? connectionError ?? "LM Studio answered, and has no models installed." : "No API models are available."}</span></div>
+            <div className="models-empty"><AlertCircle size={18} /><span>{runsFilter === "local" ? (lmStudioEnabled ? connectionError ?? "LM Studio answered, and has no models installed." : "The model server listed no models.") : "No API models are available."}</span></div>
           ) : visibleModels.length === 0 ? (
             <div className="models-empty"><FilterX size={18} /><span>No model matches these filters.</span></div>
           ) : visibleModels.map((model) => {

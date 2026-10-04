@@ -354,6 +354,9 @@ async def ensure_model_ready(
             raise HTTPException(status_code=409, detail=f"The model server does not serve {settings.model}.")
         return selected
 
+    if not config.lm_studio_enabled():
+        raise HTTPException(status_code=409, detail="LM Studio is not part of this deployment. Choose another model in LLM.")
+
     try:
         # Every installed model, not only the ones that can see: a text-only
         # model behind an OCR step is a legitimate choice, and looking for it
@@ -401,12 +404,17 @@ def execution_profile(
             thinking_level=settings.gemini.thinking_level if supports_thinking else None,
         )
     if settings.provider == "model_server":
-        # What this request fixes. How the server loaded the model — context,
-        # quantization, threads — is its own configuration and unknown here,
-        # so it is left out rather than guessed.
+        # What this request fixes, and what the server reports about how it
+        # loaded the model. A server that reports nothing leaves those null
+        # rather than guessed.
         return ModelExecutionProfile(
             provider="model_server",
             profile="server",
+            parameters=getattr(selected, "parameters", None),
+            quantization=getattr(selected, "quantization", None),
+            model_size_bytes=getattr(selected, "size_bytes", None),
+            context_length=getattr(selected, "context_length", None),
+            parallel=getattr(selected, "parallel", None),
             temperature=0,
             seed=MODEL_PROFILE_SEED,
             reasoning_effort="none",

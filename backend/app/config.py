@@ -19,6 +19,7 @@ from depending on one provider.
 | `DOCUFLOW_SESSION_SECRET` | random per process | Signs the login cookie; set it so sessions outlive a restart |
 | `DOCUFLOW_JOBS` | `in_process` | `cloud_run`: Lab runs, experiments and training run as Cloud Run job executions |
 | `DOCUFLOW_JOBS_CLOUD_RUN_JOB` | — | With `cloud_run`: `projects/<p>/locations/<r>/jobs/<name>` |
+| `DOCUFLOW_LM_STUDIO` | `on` | `off` where no LM Studio runs, such as a cloud deployment |
 | `DOCUFLOW_MODEL_SERVER_URL` | unset | An OpenAI-compatible model server (llama.cpp, vLLM, Ollama…) |
 | `DOCUFLOW_MODEL_SERVER_AUTH` | `none` | `bearer` (with `DOCUFLOW_MODEL_SERVER_TOKEN`) or `google_id_token` |
 """
@@ -78,6 +79,10 @@ def jobs_backend() -> str:
 
 def cloud_run_job() -> str:
     return _env("DOCUFLOW_JOBS_CLOUD_RUN_JOB")
+
+
+def lm_studio_enabled() -> bool:
+    return _env("DOCUFLOW_LM_STUDIO").lower() not in ("off", "false", "0", "no")
 
 
 def model_server_url() -> str:

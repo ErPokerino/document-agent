@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Response, APIRouter
 
+from app import config
 from app.api import deps
 from app.domain.models import (
     AppSettings,
@@ -135,8 +136,16 @@ async def update_settings(settings: AppSettings) -> AppSettings:
         endpoint_changed = settings.lm_studio_url != previous_settings.lm_studio_url
         provider_changed = settings.provider != previous_settings.provider
         if settings.model != previous_settings.model or endpoint_changed or provider_changed:
+            # A model server holds its models; LM Studio is asked only about its own.
+            served = settings.provider == "model_server"
+            if not served and not config.lm_studio_enabled():
+                raise HTTPException(status_code=400, detail="LM Studio is not part of this deployment. Choose another model.")
             try:
-                available = await deps.LMStudioClient(settings.lm_studio_url).list_models()
+                available = await (
+                    deps.ModelServerClient().list_models()
+                    if served
+                    else deps.LMStudioClient(settings.lm_studio_url).list_models()
+                )
             except LMStudioError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
             chosen = next(
@@ -144,7 +153,12 @@ async def update_settings(settings: AppSettings) -> AppSettings:
             )
             if chosen is None:
                 raise HTTPException(
-                    status_code=400, detail="Select a model installed in LM Studio"
+                    status_code=400,
+                    detail=(
+                        f"The model server does not serve {settings.model}."
+                        if served
+                        else "Select a model installed in LM Studio"
+                    ),
                 )
             # Vision is only required by a pipeline that hands the model page
             # images; one that reads OCR text is better off without it.

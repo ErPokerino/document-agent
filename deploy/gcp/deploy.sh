@@ -66,6 +66,8 @@ backend_env() {
   value: "$LLM_URL"
 - name: DOCUFLOW_MODEL_SERVER_AUTH
   value: google_id_token
+- name: DOCUFLOW_LM_STUDIO
+  value: "off"
 EOF
 }
 

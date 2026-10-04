@@ -83,7 +83,10 @@ elif ! secret_exists "$PREFIX-login-password"; then
 fi
 
 step "Permissions"
-for role in roles/documentai.apiUser roles/cloudsql.client; do
+# Viewer as well as API user: a Lab run pins each processor to the version it
+# reads, and only a pinned reading may be cached; that needs the processor's
+# metadata, which processing alone does not grant.
+for role in roles/documentai.apiUser roles/documentai.viewer roles/cloudsql.client; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:$RUN_SA" \
     --role "$role" --condition None "${P[@]}" >/dev/null
 done

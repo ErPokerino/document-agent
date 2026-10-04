@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, APIRouter
 
+from app import config
 from app.api import deps
 from app.domain.models import (
     HealthStatus,
@@ -20,6 +21,11 @@ router = APIRouter()
 @router.get("/api/health", response_model=HealthStatus)
 async def health() -> HealthStatus:
     settings = deps.settings_store.read()
+    if not config.lm_studio_enabled():
+        return HealthStatus(
+            status="ok", lm_studio=False, lm_studio_enabled=False,
+            model_server=bool(config.model_server_url()), active_model=settings.model,
+        )
     reason: str | None = None
     try:
         await deps.LMStudioClient(settings.lm_studio_url).list_models()
@@ -32,6 +38,7 @@ async def health() -> HealthStatus:
         lm_studio=connected,
         active_model=settings.model,
         lm_studio_error=reason,
+        model_server=bool(config.model_server_url()),
     )
 
 
@@ -45,6 +52,8 @@ async def models() -> list[ModelInfo]:
         hosted = [*await deps.ModelServerClient().list_models(settings.excluded_model_ids), *hosted]
     except LMStudioError:
         pass
+    if not config.lm_studio_enabled():
+        return hosted
     try:
         discovered = await deps.LMStudioClient(settings.lm_studio_url).list_models(
             settings.excluded_model_ids
@@ -70,6 +79,8 @@ async def models() -> list[ModelInfo]:
 
 @router.get("/api/runtime-engine", response_model=RuntimeEngineInfo)
 async def runtime_engine() -> RuntimeEngineInfo:
+    if not config.lm_studio_enabled():
+        return RuntimeEngineInfo()
     settings = deps.settings_store.read()
     client = deps.LMStudioClient(settings.lm_studio_url)
     engine = await client.selected_runtime()
@@ -99,6 +110,8 @@ async def _served_models() -> list[ModelInfo]:
 @router.post("/api/models/load", response_model=ModelLoadResponse)
 async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
     settings = deps.settings_store.read()
+    if not config.lm_studio_enabled():
+        raise HTTPException(status_code=400, detail="LM Studio is not part of this deployment, so there is nothing to load.")
     if any(model.id == request.model for model in await _served_models()):
         raise HTTPException(
             status_code=400,

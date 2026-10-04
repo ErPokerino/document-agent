@@ -38,6 +38,7 @@ The backend reads these (`backend/app/config.py`); the frontend the last two.
 | `DOCUFLOW_SESSION_SECRET` | random per process | Signs the sign-in cookie |
 | `DOCUFLOW_JOBS` | `in_process` | `cloud_run`: Lab runs, experiments and training run as Cloud Run job executions |
 | `DOCUFLOW_JOBS_CLOUD_RUN_JOB` | — | With `cloud_run`: `projects/<p>/locations/<r>/jobs/<name>` |
+| `DOCUFLOW_LM_STUDIO` | `on` | `off` where no LM Studio runs: LLM shows the model server instead, and nothing reports LM Studio missing |
 | `DOCUFLOW_MODEL_SERVER_URL` | unset | An OpenAI-compatible model server (llama.cpp, vLLM, Ollama…) |
 | `DOCUFLOW_MODEL_SERVER_AUTH`, `DOCUFLOW_MODEL_SERVER_TOKEN` | `none` | `bearer` with a token, or `google_id_token` for a private Cloud Run service |
 | `PORT` | `8000` backend, `3000` frontend | Port inside the container |
@@ -78,6 +79,39 @@ deploy/gcp/deploy.sh deploy/gcp/personal.env                          # build an
 PYTHON=python3 deploy/gcp/migrate-data.sh deploy/gcp/personal.env backend/data  # once
 ```
 
+```mermaid
+flowchart TB
+    user([Browser]) -->|"HTTPS · sign-in cookie"| fe
+
+    subgraph code["DocuFlow app and worker · service account docuflow-run"]
+        direction LR
+        subgraph app["Cloud Run service docuflow · public, scales to zero"]
+            fe["frontend container<br/>vinext · port 8080"] -->|"/api → localhost:8000"| be["backend container<br/>FastAPI"]
+        end
+        subgraph worker["Cloud Run job docuflow-worker"]
+            wk["python -m app.worker JOB_ID<br/>one execution per Lab run,<br/>experiment or training"]
+        end
+        be -->|"starts an execution per job"| wk
+    end
+
+    code -->|"identity token"| llm["Cloud Run service docuflow-llm · private<br/>llama.cpp · Gemma on 8 vCPU"]
+    llm -->|"read-only mount"| models[("bucket …-docuflow-models<br/>GGUF files")]
+    code -->|"Cloud SQL connector"| sql[("Cloud SQL · PostgreSQL<br/>runs, Lab, jobs, register")]
+    code -->|"Cloud Storage FUSE at /data"| data[("bucket …-docuflow-data<br/>datasets, models, caches, settings")]
+    code -->|"runtime identity"| docai["Document AI · eu"]
+    code -->|"API key"| gemini["Gemini API"]
+    sm["Secret Manager<br/>database URL, sign-in password,<br/>session secret"] -.->|"read at start"| code
+    cb["Cloud Build"] -->|"images"| ar[("Artifact Registry")]
+    ar -.-> code
+    ar -.-> llm
+```
+
+The app and the worker are the same backend image with the same
+configuration; they differ only in what they run. Everything runs as one of
+three service accounts and none of them has a downloaded key: `docuflow-run`
+(the app and the worker), `docuflow-llm` (the model server, which reads only
+the models bucket) and `docuflow-build` (Cloud Build).
+
 | Resource | What it is for |
 |---|---|
 | Cloud Run service `docuflow` | The app: frontend and backend as two containers of one service, one public origin, billed per request, scales to zero |
@@ -90,6 +124,11 @@ PYTHON=python3 deploy/gcp/migrate-data.sh deploy/gcp/personal.env backend/data  
 | Secret Manager | Database address, sign-in password, session secret |
 | Service accounts `docuflow-run`, `-llm`, `-build` | The app and worker; the model server; the image build. No keys are downloaded |
 | Budget | A monthly budget with alerts on the project; it warns, it does not stop spending |
+
+LM Studio is switched off in this deployment (`DOCUFLOW_LM_STUDIO=off`): the
+LLM section's *Self-hosted* tab shows the model server and the models it
+serves, with the parameters, quantization, size, context and vision support
+the server reports.
 
 The browser reaches one address: the frontend container answers it and
 forwards `/api` to the backend beside it (`app/api/[...path]/route.ts`), so
