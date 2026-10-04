@@ -144,7 +144,8 @@ def _summary(stored: StoredArtifact) -> ArtifactSummary:
         cutoff_before=training.get("cutoff_before"),
         excluded_by_cutoff=int(training.get("excluded_by_cutoff") or 0),
         unreadable=int(training.get("unreadable") or 0),
-        validation_method=validation.get("method"),
+        # Models trained before cross-validation recorded the method as an identifier.
+        validation_method={"leave_one_out": "leave-one-out"}.get(validation.get("method"), validation.get("method")),
         validation=validation.get("entities") or {},
         imported=bool(manifest.get("imported")),
         size_bytes=stored.size_bytes,
