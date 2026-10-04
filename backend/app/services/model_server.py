@@ -277,9 +277,23 @@ class ModelServerClient(LMStudioClient):
         if phase_callback:
             phase_callback("warming_up")
         warmup_started = time.perf_counter()
-        await self._warm_up_structured_output(model, entities, include_schema=True, include_image=has_vision)
+        try:
+            await self._warm_up_structured_output(model, entities, include_schema=True, include_image=has_vision)
+        except LMStudioError:
+            # Loaded but not answering properly: let it go, so it is not
+            # listed as ready and no run starts on it.
+            await self._unload(model)
+            raise
         warmup_ms = round((time.perf_counter() - warmup_started) * 1000)
         return _load_report(model, already=False, load_ms=load_ms, warmup_ms=warmup_ms, started=started, unloaded=others_loaded, mode=mode)
+
+    async def _unload(self, model: str) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=LIST_TIMEOUT_SECONDS) as client:
+                await client.post(f"{self.base_url}/models/unload", json={"model": model}, headers=await self._headers())
+        except httpx.HTTPError:
+            # The failure being reported matters more than this one.
+            pass
 
     async def list_vision_models(self, excluded_model_ids: list[str] | None = None) -> list[ModelInfo]:
         return await self.list_models(excluded_model_ids)

@@ -25,6 +25,7 @@ class FakeRouter:
         self.loads: list[str] = []
         self.chats: list[dict] = []
         self.polls_before_loaded = 2
+        self.text_answer = "OK"
 
     async def get(self, url: str) -> httpx.Response:
         if url.endswith("/models") and not url.endswith("/v1/models"):
@@ -49,6 +50,9 @@ class FakeRouter:
         ]})
 
     async def post(self, url: str, payload: dict) -> httpx.Response:
+        if url.endswith("/models/unload"):
+            self.status[payload["model"]] = "unloaded"
+            return httpx.Response(200, json={"success": True})
         if url.endswith("/models/load"):
             self.loads.append(payload["model"])
             # --models-max 1: the model held so far is let go.
@@ -56,7 +60,7 @@ class FakeRouter:
             self.status[payload["model"]] = "loading"
             return httpx.Response(200, json={"success": True})
         self.chats.append(payload)
-        content = encode({"invoice_number": None, "c": "l"}) if "response_format" in payload else "OK"
+        content = encode({"invoice_number": None, "c": "l"}) if "response_format" in payload else self.text_answer
         return httpx.Response(
             200,
             json={"choices": [{"finish_reason": "stop", "message": {"content": content}}]},
@@ -152,3 +156,14 @@ def test_load_in_llm_loads_on_the_server_and_selects_the_model(router, tmp_path,
     assert answer.json()["profile"] == "server"
     assert router.loads == ["minicpm5-1b"]
     assert (settings.read().provider, settings.read().model) == ("model_server", "minicpm5-1b")
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_fails_its_warm_up_is_unloaded_rather_than_left_ready(router) -> None:
+    """A runtime that does not really support a model answers garbage; the check catches it."""
+    router.text_answer = "garbled"
+
+    with pytest.raises(model_server.LMStudioError, match="warm-up"):
+        await ModelServerClient().load_and_warm_model("minicpm5-1b", entities=ENTITIES, warm_vision=False)
+
+    assert router.status["minicpm5-1b"] == "unloaded"
