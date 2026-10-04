@@ -454,6 +454,33 @@ follows the step's own score when every answer has one (a similarity does) and
 the confidence band otherwise, which gives at most three points. Scores are
 stored per field and exported in the CSV.
 
+## Experiments
+
+In Lab, **Run a test** starts either one configuration or an **Experiment**: a
+grid with pipelines down the side and models across the top, over one dataset.
+The builder shows the grid before anything runs — which cells run, which are
+skipped and why, and how many document extractions that is. A pipeline that
+calls no model is one cell whatever models are chosen; a pipeline that sends
+page images is not paired with a model known not to read them.
+
+Every cell is an ordinary Lab run, with its own snapshot, pinned processors and
+fingerprint, listed in Past runs and in Analytics like any other. Cells run one
+after another, grouped by model, so each local model is loaded once. The model
+selected in LLM is not changed, though another one may be in memory when the
+experiment ends. Cancelling the run in progress cancels the experiment.
+Deleting an experiment forgets the grid; its runs stay.
+
+The results grid shows each cell's accuracy, time and cost per document. Below
+it, the cells are compared **only on the documents every finished cell
+scored** — a document one cell failed on would otherwise count against the
+other alone — with a 95% bootstrap interval over documents and, for each cell,
+its difference from the best resampled on the same documents for both (a
+paired bootstrap, 2,000 resamples, fixed seed). A cell whose difference
+interval lies wholly below zero is *worse than the best*; otherwise it is *not
+distinguishable from the best*, which says these documents cannot tell the two
+apart, not that they are equal. Accuracy per field follows on the same
+documents.
+
 ## Several methods per field
 
 Every step that writes a field leaves a **candidate**: its method (the step

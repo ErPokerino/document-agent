@@ -2,7 +2,7 @@
 
 import asyncio
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated, Any, Awaitable, Callable
 
 from fastapi import HTTPException, Query, Response, APIRouter
 
@@ -165,20 +165,31 @@ async def lab_extraction_engine():
     return await deps.lab_extractor(settings, deps.selected_pipeline(settings))
 
 
-@router.post("/api/evaluations", response_model=Evaluation, status_code=202)
-async def start_evaluation(request: EvaluationRequest) -> Evaluation:
-    deps.require_dataset(request.dataset)
-    settings = deps.settings_store.read()
+async def prepare_evaluation(
+    dataset: str,
+    settings: Any,
+    *,
+    reuse_readings: bool,
+    claim: bool,
+    experiment_id: int | None = None,
+    experiment_cell: int | None = None,
+) -> tuple[int, Callable[[asyncio.Event], Awaitable[None]]]:
+    """Snapshot, compile and record one Lab run, and return how to run it.
 
+    Shared by a single run and by every cell of an experiment, so a cell is an
+    ordinary run in every respect: the same snapshot, pinning, fingerprint and
+    refusals. `claim` takes the model operation just before the run is
+    recorded; an experiment holds it for all its cells and passes False.
+    """
     documents: list[tuple[str, dict[str, Any]]] = []
     dataset_snapshot: dict[str, Any] = {}
-    for document in deps.dataset_store.list_documents(request.dataset):
+    for document in deps.dataset_store.list_documents(dataset):
         if not document.labelled:
             continue
-        label_file = deps.dataset_store.read_labels(request.dataset, document.name)
+        label_file = deps.dataset_store.read_labels(dataset, document.name)
         if label_file is not None:
             documents.append((document.name, label_file.labels))
-            digest = deps.evaluation_store.snapshot_document(deps.dataset_store.read_document(request.dataset, document.name))
+            digest = deps.evaluation_store.snapshot_document(deps.dataset_store.read_document(dataset, document.name))
             dataset_snapshot[document.name] = {"sha256": digest, "labels": label_file.labels}
     if not documents:
         raise HTTPException(
@@ -198,7 +209,7 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
             identity = await resolve_extractor(client, config["processor_id"])
             if identity["version"]:
                 config["processor_id"] = identity["processor_id"] + "/processorVersions/" + identity["version"]
-    deps.refuse_seen_documents(pipeline_definition, request.dataset, dataset_snapshot)
+    deps.refuse_seen_documents(pipeline_definition, dataset, dataset_snapshot)
     register_rows = deps.master_data_store.rows("suppliers")
     rule_list = deps.supplier_rule_store.all()
     rule_records = [rule_record(rule) for rule in rule_list]
@@ -239,9 +250,10 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         rules=rule_records,
     )
 
-    deps.claim_model_operation("evaluating")
+    if claim:
+        deps.claim_model_operation("evaluating")
     evaluation_id = deps.evaluation_store.start(
-        dataset=request.dataset,
+        dataset=dataset,
         model=recorded_model,
         prompts=settings.prompts,
         total_documents=len(documents),
@@ -256,33 +268,48 @@ async def start_evaluation(request: EvaluationRequest) -> Evaluation:
         fingerprint=fingerprint,
         register_snapshot=register_rows,
         rules_snapshot=rule_records,
-        reuse_readings=request.reuse_readings,
+        reuse_readings=reuse_readings,
+        experiment_id=experiment_id,
+        experiment_cell=experiment_cell,
+    )
+
+    async def run(cancelled: asyncio.Event) -> None:
+        await deps.run_evaluation(
+            evaluation_id=evaluation_id,
+            evaluations=deps.evaluation_store,
+            datasets=deps.dataset_store,
+            run_store=deps.run_store,
+            dataset=dataset,
+            documents=documents,
+            entities=settings.prompts.entities,
+            prompts=settings.prompts,
+            model=recorded_model,
+            provider=recorded_provider,
+            steps=steps,
+            pipeline_name=settings.pipeline,
+            pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
+            execution_profile=execution_profile,
+            make_context=lambda name, content: deps.pipeline_context(
+                settings, name, content, reuse_readings=reuse_readings
+            ),
+            cancelled=cancelled,
+            read_document=lambda name: deps.evaluation_store.read_snapshot_document(dataset_snapshot[name]["sha256"]),
+        )
+
+    return evaluation_id, run
+
+
+@router.post("/api/evaluations", response_model=Evaluation, status_code=202)
+async def start_evaluation(request: EvaluationRequest) -> Evaluation:
+    deps.require_dataset(request.dataset)
+    evaluation_id, run = await prepare_evaluation(
+        request.dataset, deps.settings_store.read(), reuse_readings=request.reuse_readings, claim=True,
     )
     deps.evaluation_cancelled = asyncio.Event()
 
     async def drive(cancelled: asyncio.Event) -> None:
         try:
-            await deps.run_evaluation(
-                evaluation_id=evaluation_id,
-                evaluations=deps.evaluation_store,
-                datasets=deps.dataset_store,
-                run_store=deps.run_store,
-                dataset=request.dataset,
-                documents=documents,
-                entities=settings.prompts.entities,
-                prompts=settings.prompts,
-                model=recorded_model,
-                provider=recorded_provider,
-                steps=steps,
-                pipeline_name=settings.pipeline,
-                pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
-                execution_profile=execution_profile,
-                make_context=lambda name, content: deps.pipeline_context(
-                    settings, name, content, reuse_readings=request.reuse_readings
-                ),
-                cancelled=cancelled,
-                read_document=lambda name: deps.evaluation_store.read_snapshot_document(dataset_snapshot[name]["sha256"]),
-            )
+            await run(cancelled)
         except asyncio.CancelledError:
             deps.evaluation_store.finish(evaluation_id, "cancelled")
         except Exception:

@@ -35,3 +35,17 @@ def never_touch_real_data(tmp_path, monkeypatch):
     monkeypatch.setattr(deps, "EXPORTS_PATH", isolated / "training-exports")
     monkeypatch.setattr(deps, "artifact_store", ArtifactStore(isolated / "artifacts"))
     monkeypatch.setattr(deps, "training_jobs", TrainingJobs())
+    from app.evaluation.experiments import ExperimentStore
+
+    class Lazy:
+        """Opened on first use: opening a database creates its folder."""
+
+        def __init__(self) -> None:
+            self.store = None
+
+        def __getattr__(self, name):
+            if self.store is None:
+                self.store = ExperimentStore(isolated / "experiments.db")
+            return getattr(self.store, name)
+
+    monkeypatch.setattr(deps, "experiment_store", Lazy())

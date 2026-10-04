@@ -172,9 +172,10 @@ and Pareto presentation are documented in README. Remaining work:
   the complete pipeline, the model profile, the supplier register and supplier
   rules. Analytics groups on it. Runs from before the column existed stay on
   the coarser grouping.
-- Prefer paired comparisons on shared document hashes; show sample size,
-  completion coverage and label changes. Avoid treating changes in the scored
-  field set as evidence of better extraction.
+- Done for experiments: cells are compared on the documents every finished
+  cell scored, with bootstrap intervals and a paired difference from the best.
+  Still open for runs compared outside an experiment, and for label changes
+  between runs.
 - Consider a logarithmic time axis for wide runtime ranges and explain missing
   cost measurements directly in the chart.
 - Add per-request context-tier accounting before enabling automatic Gemini

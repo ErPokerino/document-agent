@@ -15,6 +15,7 @@ import {
   EyeOff,
   FilterX,
   FlaskConical,
+  Grid3x3,
   History,
   Info,
   LoaderCircle,
@@ -25,12 +26,14 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api, apiUrls } from "../lib/api";
 import { engineLabel, engineDetail, versionLabel } from "../lib/extraction-engine";
 import { Analytics } from "./analytics";
 import { ClassificationPanel } from "./classification-panel";
+import { ExperimentBuilder } from "./experiment-builder";
+import { ExperimentsView } from "./experiment-view";
 import { MethodsPanel } from "./methods-panel";
 import { InfoHint } from "./info-hint";
 import { RunFiltersBar } from "./run-filters-bar";
@@ -56,6 +59,7 @@ import type {
   Dataset,
   Evaluation,
   EvaluationDetail,
+  Experiment,
   MetricTally,
   ModelExecutionProfile,
   ModelInfo,
@@ -101,7 +105,11 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
   const filters = route.filters;
   // Two ways of reading the same runs. Both were on one page and it grew
   // taller than anything anyone would scroll.
-  const [view, setView] = useState<"runs" | "analytics">("runs");
+  const [view, setView] = useState<"runs" | "analytics" | "experiments">("runs");
+  // One configuration, or a grid of them: the same card starts either.
+  const [mode, setMode] = useState<"single" | "experiment">("single");
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [selectedExperiment, setSelectedExperiment] = useState<number | null>(null);
   const [sort, setSort] = useState<Sort>({ key: "id", direction: "desc" });
   // Scoring a run again without a field, in the view only: the stored run
   // is what happened, and this is a question about it.
@@ -119,6 +127,8 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
   const detailRequests = useLatest();
 
   const running = evaluations.find((evaluation) => evaluation.status === "running") ?? null;
+  const runningExperiment = experiments.find((experiment) => experiment.status === "running") ?? null;
+  const reportError = useCallback((message: string) => setError(message), []);
   // Reads this machine's own history rather than assuming a cost, so it
   // still tells the truth on a machine this one knows nothing about.
   const runTarget = labRunTarget(settings, activeModel, usesModel(pipelineKinds));
@@ -177,10 +187,11 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
     let active = true;
     async function load() {
       try {
-        const [nextDatasets, nextEvaluations] = await Promise.all([api.datasets(), api.evaluations()]);
+        const [nextDatasets, nextEvaluations, nextExperiments] = await Promise.all([api.datasets(), api.evaluations(), api.experiments()]);
         if (!active) return;
         setDatasets(nextDatasets);
         setEvaluations(nextEvaluations);
+        setExperiments(nextExperiments);
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -190,6 +201,22 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
       active = false;
     };
   }, []);
+
+  // Between two cells an experiment is loading a model and no run is in
+  // flight, so the experiment is polled on its own.
+  useEffect(() => {
+    if (!runningExperiment) return;
+    const timer = window.setInterval(() => {
+      void api.experiments().then(setExperiments).catch(() => undefined);
+      void api.evaluations().then(setEvaluations).catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [runningExperiment]);
+
+  async function refreshExperiments() {
+    setExperiments(await api.experiments());
+    setEvaluations(await api.evaluations());
+  }
 
   // A test run is many model calls; poll while one is in flight.
   useEffect(() => {
@@ -317,6 +344,31 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
           <InfoHint text="A run records the pipeline and its execution profile. The selected model is recorded only when the pipeline can call it." />
         </div>
 
+        <div className="segmented lab-mode" role="tablist" aria-label="What to run">
+          <button type="button" role="tab" aria-selected={mode === "single"} className={mode === "single" ? "active" : ""} onClick={() => setMode("single")}>
+            One configuration
+          </button>
+          <button type="button" role="tab" aria-selected={mode === "experiment"} className={mode === "experiment" ? "active" : ""} onClick={() => setMode("experiment")}>
+            <Grid3x3 size={13} /> Experiment
+          </button>
+          <InfoHint text="An experiment runs several pipelines, each with several models, over one dataset — one ordinary run per cell — and compares them on the documents every cell scored, with confidence intervals." />
+        </div>
+
+        {mode === "experiment" ? (
+          <ExperimentBuilder
+            datasets={datasets}
+            dataset={selectedDataset}
+            onDataset={setSelectedDataset}
+            busy={busy}
+            running={Boolean(running || runningExperiment)}
+            onError={reportError}
+            onStarted={(experiment) => {
+              setSelectedExperiment(experiment.id);
+              setView("experiments");
+              void refreshExperiments().catch(() => undefined);
+            }}
+          />
+        ) : (<>
         <div className="run-controls">
       <select value={selectedDataset ?? ""} onChange={(event) => setSelectedDataset(event.target.value || null)}>
         <option value="">Choose a dataset…</option>
@@ -327,7 +379,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
           <Square size={14} /> Cancel
         </button>
       ) : (
-        <button className="primary-button" disabled={!selectedDataset || busy || modelBlocks} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!, reuseReadings); await refreshEvaluations(); await refreshValidatedRuns(); })}>
+        <button className="primary-button" disabled={!selectedDataset || busy || modelBlocks || Boolean(runningExperiment)} onClick={() => guard(async () => { await api.startEvaluation(selectedDataset!, reuseReadings); await refreshEvaluations(); await refreshValidatedRuns(); })}>
           <Play size={14} /> Run test
         </button>
       )}
@@ -338,6 +390,13 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
           <InfoHint text="OCR and Layout Parser readings from earlier runs are read back instead of sent again, when the step names a pinned processor version. Time and pages are then not what the pipeline costs, so Analytics leaves this run out of its time and cost figures. Readings are stored by every run either way." />
         </label>
         {modelBlocks && <p className="field-help">Load and warm up the model in LLM before running a test.</p>}
+        </>)}
+        {runningExperiment && (
+          <p className="field-help">
+            Experiment <button type="button" className="link-button" onClick={() => { setSelectedExperiment(runningExperiment.id); setView("experiments"); }}>{runningExperiment.name}</button> is running.
+            Cancelling the run in progress cancels the whole experiment.
+          </p>
+        )}
         {runNote && (
           <div className="alert warning-alert" role="status">
             <Info size={17} />
@@ -365,7 +424,31 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
         <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}>
           <BarChart3 size={14} /> Analytics
         </button>
+        <button type="button" className={view === "experiments" ? "active" : ""} onClick={() => setView("experiments")}>
+          <Grid3x3 size={14} /> Experiments <span>{experiments.length}</span>
+        </button>
       </div>
+
+      {view === "experiments" ? (
+        <div className="settings-card">
+          <div className="settings-card-heading">
+            <span className="settings-card-icon"><Grid3x3 size={18} /></span>
+            <div>
+              <h3>Experiments</h3>
+              <p>Pipelines down the side, models across the top. Every cell is an ordinary run, also listed in Past runs; open one by clicking it.</p>
+            </div>
+          </div>
+          <ExperimentsView
+            experiments={experiments}
+            selected={selectedExperiment}
+            onSelect={setSelectedExperiment}
+            onOpenRun={(evaluationId) => openRun(evaluationId)}
+            onChanged={refreshExperiments}
+            costOf={runCost}
+            onError={reportError}
+          />
+        </div>
+      ) : (
 
       <div className="settings-card">
         <div className="settings-card-heading">
@@ -534,6 +617,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
           <Analytics evaluations={visibleEvaluations} costOf={runCost} />
         )}
       </div>
+      )}
 
       {openEvaluation && (
         <div className="settings-card">

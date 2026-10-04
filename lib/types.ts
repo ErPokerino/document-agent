@@ -170,6 +170,8 @@ export type Evaluation = {
   current_step: string | null;
   reuse_readings: boolean;
   cached_pages: number;
+  experiment_id: number | null;
+  experiment_cell: number | null;
   metrics: Metrics;
 };
 
@@ -205,6 +207,8 @@ export type EvaluationDetail = {
   current_step: string | null;
   reuse_readings: boolean;
   cached_pages: number;
+  experiment_id: number | null;
+  experiment_cell: number | null;
   metrics: Metrics;
   prompts: PromptConfiguration;
   pipeline_definition: PipelineDefinition | null;
@@ -241,6 +245,63 @@ export type EvaluationFieldResult = {
 
 export type EvaluationRequest = {
   dataset: string;
+  reuse_readings: boolean;
+};
+
+export type Experiment = {
+  id: number;
+  name: string;
+  created_at: string;
+  finished_at: string | null;
+  dataset: string;
+  status: "running" | "completed" | "cancelled" | "failed";
+  reuse_readings: boolean;
+  error: string | null;
+  cells: ExperimentCell[];
+  comparison: ExperimentComparison | null;
+};
+
+export type ExperimentCell = {
+  index: number;
+  pipeline: string;
+  provider: "lm_studio" | "gemini" | "none";
+  model: string;
+  status: string;
+  skipped: string | null;
+  error: string | null;
+  run: Evaluation | null;
+};
+
+export type ExperimentCellScore = {
+  cell: number;
+  accuracy: number;
+  low: number;
+  high: number;
+  delta: number;
+  delta_low: number;
+  delta_high: number;
+  verdict: "best" | "worse" | "indistinguishable";
+  seconds_per_document: number | null;
+  per_entity: Record<string, number | null>;
+};
+
+export type ExperimentComparison = {
+  shared_documents: string[];
+  left_out: string[];
+  resamples: number;
+  cells: ExperimentCellScore[];
+};
+
+export type ExperimentModelChoice = {
+  provider: "lm_studio" | "gemini";
+  model: string;
+};
+
+export type ExperimentRequest = {
+  name: string;
+  dataset: string;
+  pipelines: string[];
+  models: ExperimentModelChoice[];
   reuse_readings: boolean;
 };
 

@@ -1,6 +1,8 @@
 import type {
   AppSettings,
   ArtifactSummary,
+  Experiment,
+  ExperimentRequest,
   FineTuningExportRequest,
   KnnTrainingRequest,
   ReadingCacheStatus,
@@ -248,6 +250,11 @@ export const api = {
     request<Evaluation>("/api/evaluations", json("POST", { dataset, reuse_readings: reuseReadings })),
   tryResolution: (id: number, config: ResolutionConfig) =>
     request<ResolutionTrial>(`/api/evaluations/${id}/resolve`, json("POST", config)),
+  experiments: () => request<Experiment[]>("/api/experiments"),
+  experiment: (id: number) => request<Experiment>(`/api/experiments/${id}`),
+  startExperiment: (body: ExperimentRequest) => request<Experiment>("/api/experiments", json("POST", body)),
+  cancelExperiment: (id: number) => request<Experiment>(`/api/experiments/${id}/cancel`, { method: "POST" }),
+  deleteExperiment: (id: number) => request<void>(`/api/experiments/${id}`, { method: "DELETE" }),
   cancelEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/cancel`, { method: "POST" }),
   retryEvaluation: (id: number) => request<Evaluation>(`/api/evaluations/${id}/retry`, { method: "POST" }),
   deleteEvaluation: (id: number) => request<void>(`/api/evaluations/${id}`, { method: "DELETE" }),

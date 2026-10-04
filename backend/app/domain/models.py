@@ -655,6 +655,9 @@ class Evaluation(BaseModel):
     # the page counts above.
     reuse_readings: bool = False
     cached_pages: int = 0
+    # The experiment this run is a cell of, and which cell.
+    experiment_id: int | None = None
+    experiment_cell: int | None = None
     metrics: Metrics
 
 
@@ -946,3 +949,68 @@ class TrainingProvider(BaseModel):
     trains: str
     status: Literal["available", "not_connected"]
     description: str
+
+
+class ExperimentModelChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["lm_studio", "gemini"]
+    model: Annotated[str, Field(min_length=1)]
+
+
+class ExperimentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(max_length=80)] = ""
+    dataset: Annotated[str, Field(min_length=1, max_length=128)]
+    pipelines: Annotated[list[str], Field(min_length=1, max_length=20)]
+    # Ignored by a pipeline that calls no model; it is one cell whatever is chosen.
+    models: Annotated[list[ExperimentModelChoice], Field(max_length=12)] = Field(default_factory=list)
+    reuse_readings: bool = False
+
+
+class ExperimentCell(BaseModel):
+    index: int
+    pipeline: str
+    provider: Literal["lm_studio", "gemini", "none"]
+    model: str
+    # pending, loading, running, completed, partial, failed, cancelled, skipped, error
+    status: str
+    skipped: str | None = None
+    error: str | None = None
+    run: Evaluation | None = None
+
+
+class ExperimentCellScore(BaseModel):
+    cell: int
+    accuracy: float
+    low: float
+    high: float
+    delta: float
+    delta_low: float
+    delta_high: float
+    verdict: Literal["best", "worse", "indistinguishable"]
+    seconds_per_document: float | None = None
+    per_entity: dict[str, float | None] = Field(default_factory=dict)
+
+
+class ExperimentComparison(BaseModel):
+    """Every finished cell, scored on the documents all of them scored."""
+
+    shared_documents: list[str]
+    left_out: list[str]
+    resamples: int
+    cells: list[ExperimentCellScore]
+
+
+class Experiment(BaseModel):
+    id: int
+    name: str
+    created_at: str
+    finished_at: str | None = None
+    dataset: str
+    status: Literal["running", "completed", "cancelled", "failed"]
+    reuse_readings: bool
+    error: str | None = None
+    cells: list[ExperimentCell]
+    comparison: ExperimentComparison | None = None

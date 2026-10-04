@@ -143,6 +143,8 @@ class EvaluationSummary:
     current_step: str | None = None
     reuse_readings: bool = False
     cached_pages: int = 0
+    experiment_id: int | None = None
+    experiment_cell: int | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,9 @@ class EvaluationStore:
                 "rules_snapshot_json": "TEXT",
                 "current_step": "TEXT",
                 "reuse_readings": "INTEGER NOT NULL DEFAULT 0",
+                # Null for a run started on its own.
+                "experiment_id": "INTEGER",
+                "experiment_cell": "INTEGER",
             },
         )
         # Runs recorded before the column exists still happened somewhere. The
@@ -300,6 +305,8 @@ class EvaluationStore:
         register_snapshot: list[dict[str, Any]] | None = None,
         rules_snapshot: list[dict[str, Any]] | None = None,
         reuse_readings: bool = False,
+        experiment_id: int | None = None,
+        experiment_cell: int | None = None,
     ) -> int:
         if dataset_snapshot is not None and len(dataset_snapshot) != total_documents:
             raise ValueError("The document snapshot does not match the evaluation total")
@@ -310,8 +317,9 @@ class EvaluationStore:
                     (created_at, dataset, model, prompts_json, status, total_documents,
                      max_pages, pipeline, steps, provider, pipeline_json,
                      execution_profile_json, dataset_snapshot_json, extraction_engine_json,
-                     fingerprint, register_snapshot_json, rules_snapshot_json, reuse_readings)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     fingerprint, register_snapshot_json, rules_snapshot_json, reuse_readings,
+                     experiment_id, experiment_cell)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _now(),
@@ -339,6 +347,8 @@ class EvaluationStore:
                     json.dumps(register_snapshot, ensure_ascii=False) if register_snapshot is not None else None,
                     json.dumps(rules_snapshot, ensure_ascii=False) if rules_snapshot is not None else None,
                     int(reuse_readings),
+                    experiment_id,
+                    experiment_cell,
                 ),
             )
             return int(cursor.lastrowid)
@@ -576,6 +586,14 @@ class EvaluationStore:
                 (step, evaluation_id),
             )
 
+    def experiment_runs(self, experiment_id: int) -> list[EvaluationSummary]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM evaluations WHERE experiment_id = ? ORDER BY experiment_cell, id",
+                (experiment_id,),
+            ).fetchall()
+            return [self._summary(connection, row) for row in rows]
+
     def list_evaluations(self, limit: int = 50, before_id: int | None = None) -> list[EvaluationSummary]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -717,4 +735,6 @@ class EvaluationStore:
             current_step=row["current_step"],
             reuse_readings=bool(row["reuse_readings"]),
             cached_pages=int(progress["cached_pages"] or 0),
+            experiment_id=row["experiment_id"],
+            experiment_cell=row["experiment_cell"],
         )

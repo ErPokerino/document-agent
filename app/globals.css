@@ -1131,3 +1131,63 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .training-export { border: 1px dashed var(--line-strong); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: grid; gap: 10px; }
 .training-export h4 { margin: 0; font-size: 12.5px; display: flex; align-items: center; gap: 4px; }
 .training-job .secondary-button.small { justify-self: start; }
+
+/* Experiments: one card starts a single run or a grid; the grid shows results. */
+.lab-mode { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); margin-bottom: 14px; }
+.lab-mode button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.lab-mode button.active { background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px #0000001a; }
+.lab-mode .info-hint, .lab-mode > span { margin-left: 4px; }
+.experiment-builder { display: grid; gap: 16px; }
+.experiment-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.experiment-steps h4 { margin: 0 0 8px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.experiment-steps h4 > span { width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-size: 11px; }
+.experiment-steps h4 small { color: var(--muted); font-weight: 400; }
+.experiment-steps select { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); padding: 0 10px; font: inherit; font-size: 12px; }
+.experiment-choices { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; display: grid; gap: 6px; max-height: 200px; overflow-y: auto; }
+.experiment-choices label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.experiment-choices small { margin-left: auto; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.experiment-preview h4, .experiment-comparison h4 { margin: 0 0 8px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.experiment-grid { border-collapse: separate; border-spacing: 4px; font-size: 12px; }
+.experiment-grid th { font-weight: 600; color: var(--muted); font-size: 11px; text-align: left; padding: 4px 6px; vertical-align: bottom; }
+.experiment-grid thead th small { display: block; font-weight: 400; font-size: 10px; }
+.experiment-grid tbody th { color: var(--ink); max-width: 180px; }
+.experiment-grid td { border-radius: 8px; min-width: 120px; vertical-align: top; }
+.experiment-grid td.empty { background: transparent; }
+.experiment-grid.preview td { padding: 8px 10px; text-align: center; font-size: 11.5px; }
+.experiment-grid td.planned.runs, .experiment-grid td.planned.once { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.experiment-grid td.planned.skipped { background: var(--surface-2); color: var(--muted); }
+.experiment-grid td.result { background: var(--surface); border: 1px solid var(--line); padding: 0; }
+.experiment-grid td.result.best { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.experiment-grid td.result.indistinguishable { border-color: var(--accent); }
+.experiment-cell { all: unset; box-sizing: border-box; width: 100%; display: grid; gap: 2px; padding: 9px 11px; cursor: pointer; }
+.experiment-cell.idle { cursor: default; color: var(--muted); font-size: 11.5px; }
+.experiment-cell:focus-visible { outline: 2px solid var(--accent); border-radius: 8px; }
+.experiment-cell strong { font-size: 18px; }
+.experiment-cell strong.good { color: #1d7a56; }
+.experiment-cell strong.fair { color: #9a5b1c; }
+.experiment-cell strong.poor { color: #9c3b2e; }
+.experiment-cell small, .experiment-cell span { color: var(--muted); font-size: 10.5px; }
+.experiment-cell em { font-style: normal; font-size: 10px; font-weight: 700; color: var(--accent); display: inline-flex; gap: 4px; align-items: center; }
+.experiment-start { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+.experiment-start .flow-field { max-width: 260px; margin: 0; }
+.experiment-start .flow-field > span { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 600; }
+.experiment-start input[type="text"], .experiment-start .flow-field input { height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; font: inherit; font-size: 12px; background: var(--paper); color: var(--ink); }
+.experiment-start .primary-button { margin: 0 0 0 auto; }
+.experiments { display: grid; gap: 14px; }
+.experiment-list { display: grid; gap: 6px; }
+.experiment-item { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; font-size: 12.5px; }
+.experiment-item small { color: var(--muted); font-size: 11px; grid-column: 1; }
+.experiment-item .status-tag { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+.experiment-item.active { border-color: var(--accent); background: var(--accent-soft); }
+.experiment-item:focus-visible { outline: 2px solid var(--accent); }
+.experiment-detail { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 16px; }
+.experiment-detail-head { display: flex; align-items: flex-start; gap: 8px; }
+.experiment-detail-head > div { flex: 1; }
+.experiment-detail-head h4 { margin: 0 0 4px; font-size: 13.5px; }
+.experiment-detail-head .field-help { margin: 0; }
+.experiment-comparison tr.verdict-best td { font-weight: 600; }
+.experiment-comparison td.field-top { color: #1d7a56; font-weight: 700; }
+.status-tag.partial { background: #f1eee4; color: #7a6b3c; }
+@media (max-width: 640px) {
+  .experiment-start .primary-button { margin-left: 0; }
+}

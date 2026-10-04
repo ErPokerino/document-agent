@@ -33,6 +33,7 @@ from app.domain.models import (
 )
 from app.evaluation.datasets import DatasetStore
 from app.evaluation.runner import run_evaluation
+from app.evaluation.experiments import ExperimentStore
 from app.evaluation.store import EvaluationStore
 from app.pipeline.compiler import PipelineError, build_steps
 from app.pipeline.definition import (
@@ -87,6 +88,7 @@ EXPORTS_PATH = DATA_DIR / "training-exports"
 settings_store = SettingsStore(SETTINGS_PATH)
 run_store = RunStore(DATABASE_PATH)
 evaluation_store = EvaluationStore(DATABASE_PATH)
+experiment_store = ExperimentStore(DATABASE_PATH)
 dataset_store = DatasetStore(DATASETS_PATH)
 master_data_store = MasterDataStore(DATABASE_PATH)
 # Beside the register the rules key on, in the same database.
@@ -113,6 +115,7 @@ evaluation_task: asyncio.Task | None = None
 evaluation_cancelled: asyncio.Event | None = None
 # A run still marked `running` belongs to a backend that no longer exists.
 evaluation_store.mark_interrupted()
+experiment_store.mark_interrupted()
 
 
 def claim_model_operation(phase: str) -> None:
@@ -142,6 +145,55 @@ async def exclusive_model_operation(phase: str) -> AsyncIterator[None]:
         yield
     finally:
         release_model_operation()
+
+
+async def load_local_model(settings: AppSettings, model: str, *, warm_vision: bool, phase: str) -> dict[str, Any]:
+    """Load and warm one LM Studio model, and record that it is the one in memory.
+
+    The caller holds the model operation. `phase` is restored on the shared
+    operation marker after the load phases have used it, so an experiment
+    loading a model mid-run still reads as evaluating afterwards. It does not
+    change which model is selected in LLM: an experiment loads models in turn
+    without choosing any of them for the user.
+    """
+    global active_model_operation
+
+    client = LMStudioClient(settings.lm_studio_url)
+    previous_runtime_state = model_runtime_states.get(model)
+    model_runtime_states[model] = "loading"
+
+    def update_phase(step: str) -> None:
+        global active_model_operation
+        active_model_operation = step
+        model_runtime_states[model] = step
+
+    try:
+        discovered = await client.list_models()
+        selected = next((candidate for candidate in discovered if candidate.id == model), None)
+        already_ready = bool(selected and selected.loaded and previous_runtime_state == "ready")
+        result = await client.load_and_warm_model(
+            model,
+            skip_warmup=already_ready,
+            phase_callback=update_phase,
+            entities=settings.prompts.entities,
+            warm_vision=warm_vision,
+        )
+    except BaseException:
+        # Includes CancelledError, raised whenever the browser tab is closed
+        # during a multi-minute load. Without this the model would stay
+        # "loading" forever and both Load and Extract would refuse to run.
+        model_runtime_states[model] = "error"
+        raise
+    finally:
+        active_model_operation = phase
+    for model_id in list(model_runtime_states):
+        if model_id != model:
+            model_runtime_states[model_id] = "not_loaded"
+            model_runtime_profiles.pop(model_id, None)
+    model_runtime_states[model] = "ready"
+    model_warmup_modes[model] = str(result["warmup_mode"])
+    model_runtime_profiles[model] = str(result["profile"])
+    return result
 
 
 def models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
@@ -483,6 +535,8 @@ def evaluation_model(detail: Any) -> Evaluation:
                 "current_step",
                 "reuse_readings",
                 "cached_pages",
+                "experiment_id",
+                "experiment_cell",
             )
         },
         metrics=metrics_model(detail.metrics),
