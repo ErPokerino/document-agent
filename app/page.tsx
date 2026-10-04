@@ -22,19 +22,19 @@ import { resolveBootstrap } from "../lib/bootstrap";
 import { describeDataFlow } from "../lib/data-flow";
 import { uploadsOnlyScans, usesModel } from "../lib/pipeline-steps";
 import { formatHash, parseHash, type AppRoute, type AppView } from "../lib/route";
-import { Datasets } from "./datasets";
-import { Entities } from "./entities";
-import { MasterData } from "./master-data";
-import { Models } from "./models";
-import { Lab } from "./lab";
+import { Datasets } from "./datasets/datasets";
+import { Entities } from "./extraction/entities";
+import { MasterData } from "./master-data/master-data";
+import { Models } from "./models/models";
+import { Lab } from "./lab/lab";
 import { modelDisplayName, modelStatusLabel } from "../lib/format";
-import { LanguageModels } from "./llm";
-import { Pipelines } from "./pipeline";
-import { Processors } from "./processors";
-import { Settings } from "./settings";
+import { LanguageModels } from "./llm/llm";
+import { Pipelines } from "./pipelines/pipeline";
+import { Processors } from "./processors/processors";
+import { Settings } from "./settings/settings";
 import { stepLabels } from "../lib/pipeline-editor";
 import { validateSettingsDraft } from "../lib/validation";
-import { Workspace, useWorkspace } from "./workspace";
+import { Workspace, useWorkspace } from "./workspace/workspace";
 import type {
   AppSettings,
   HealthStatus,
