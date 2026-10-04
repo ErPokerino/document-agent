@@ -28,6 +28,12 @@ resolved remains mutable; use explicit versions for controlled comparisons.
 Runs filter; capability filters remain, and disk-size filtering applies only to
 Local. Switching tabs does not change the selected model, and the selection
 remains visible. The active LLM is still shared by model-calling pipeline steps.
+The API tab holds a rate per million tokens for each hosted model, used to
+estimate the cost of runs. Rates can be edited, removed, and added for any
+hosted model that has none. A new installation starts with a rate for each
+selectable model; a default is offered once, so a removed rate stays removed.
+A retired model keeps its rate only where an installation already had one,
+marked *retired*, for the cost of its old runs.
 **Settings** contains app appearance; Document AI connection and pricing live
 with the processors that use them.
 

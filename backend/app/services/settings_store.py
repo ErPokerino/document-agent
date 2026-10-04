@@ -75,8 +75,13 @@ class SettingsStore:
         if data.get("provider") == "gemini" and data.get("model") == "gemini-3.7-flash":
             data["model"] = "gemini-3.8-flash"
         if isinstance(gemini, dict) and isinstance(gemini.get("pricing"), dict):
+            # A file from before the list existed has had every default it
+            # holds offered; the rest are offered now, once each.
+            offered = gemini.setdefault("pricing_defaults_offered", [])
             for model, pricing in default_gemini_pricing().items():
-                gemini["pricing"].setdefault(model, pricing.model_dump())
+                if model not in offered:
+                    gemini["pricing"].setdefault(model, pricing.model_dump())
+                    offered.append(model)
         gcp = data.get("gcp")
         if isinstance(gcp, dict) and "processors" not in gcp:
             from app.services.processors import legacy_catalog

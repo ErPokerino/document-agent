@@ -75,3 +75,8 @@ export function formatUsd(value: number | null): string {
   // Two significant figures, so a sub-cent amount is still legible.
   return `$${value.toPrecision(2)}`;
 }
+
+/** The rates without one model's: removing a rate stops estimating that model's cost. */
+export function withoutRate(pricing: Record<string, ModelPricing>, model: string): Record<string, ModelPricing> {
+  return Object.fromEntries(Object.entries(pricing).filter(([id]) => id !== model));
+}

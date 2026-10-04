@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { documentAiCost, estimateCost, formatUsd, totalCost } from "../lib/cost.ts";
+import { documentAiCost, estimateCost, formatUsd, totalCost, withoutRate } from "../lib/cost.ts";
 
 const rate = { input_per_million: 0.3, output_per_million: 2.5 };
 
@@ -93,4 +93,11 @@ test("local tokens need no API tariff and unknown historical usage is not priced
   const rates = {ocr_per_thousand_pages:1.5, layout_per_thousand_pages:10};
   assert.equal(totalCost(usage, null, rates), 1.5);
   assert.equal(totalCost({...usage, usageComplete:false}, null, rates), null);
+});
+
+test("removing a rate leaves the others untouched", () => {
+  const pricing = { a: { input_per_million: 1, output_per_million: 2 }, b: { input_per_million: null, output_per_million: null } };
+
+  assert.deepEqual(withoutRate(pricing, "a"), { b: pricing.b });
+  assert.deepEqual(Object.keys(pricing), ["a", "b"]);
 });
