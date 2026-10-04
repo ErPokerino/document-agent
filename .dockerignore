@@ -1,0 +1,16 @@
+# Never in an image: local state, real documents, credentials, build output.
+.git
+.venv
+node_modules
+dist
+.next
+.vinext
+.runtime
+.pytest_cache
+backend/data
+tmp
+outputs
+work
+**/__pycache__
+.env*
+!.env.example

@@ -1,0 +1,32 @@
+# DocuFlow in containers on one machine: `docker compose up --build`.
+#
+# The same images run on any cloud's container service; see
+# docs/deployment.md. LM Studio stays on the host: set the LM Studio URL in
+# LLM to http://host.docker.internal:1234.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    environment:
+      DOCUFLOW_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - docuflow-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  docuflow-data:

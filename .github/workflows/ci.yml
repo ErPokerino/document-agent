@@ -1,0 +1,76 @@
+# Every push and pull request: the full test suite on the platform DocuFlow is
+# developed on, and the container images built and started on Linux, which is
+# what any cloud's container service runs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Type check, lint and tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: npm
+
+      - name: Python environment from the lock file
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install --requirement backend/requirements.lock.txt
+
+      - name: Node dependencies from the lock file
+        run: npm ci
+
+      # The frontend tests render the built server entry, so the build comes first.
+      - name: Build
+        run: npm run build
+
+      - name: Tests
+        run: npm test
+
+  containers:
+    name: Container images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the images
+        run: docker compose build
+
+      - name: Start them and check both answer
+        run: |
+          docker compose up --detach
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/api/health > /dev/null \
+              && curl --fail --silent http://localhost:3000/ > /dev/null; then
+              echo "Both services answer."
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      - name: Stop
+        if: always()
+        run: docker compose down --volumes
