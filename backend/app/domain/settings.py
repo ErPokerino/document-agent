@@ -23,12 +23,16 @@ class ModelPricing(BaseModel):
 
 
 def default_gemini_pricing() -> dict[str, ModelPricing]:
-    # Paid tier, checked on 2026-08-21. Verify against the pricing page.
+    """A starting rate for each hosted model that can be selected.
+
+    Paid tier, checked on 2026-08-21. Verify against the pricing page. A
+    retired model gets none: it cannot be chosen, and a rate for it is kept
+    only where an installation already had one, for the cost of its old runs.
+    """
     return {
         "gemini-3.8-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75),
         # Pro has context-dependent tariffs; a flat rate must be configured explicitly.
         "gemini-3.1-pro-preview": ModelPricing(),
-        "gemini-3.7-flash": ModelPricing(input_per_million=0.75, output_per_million=3.75),
         "gemini-3.5-flash-lite": ModelPricing(input_per_million=0.30, output_per_million=2.50),
     }
 
@@ -41,6 +45,10 @@ class GeminiSettings(BaseModel):
     thinking_level: Literal["low", "medium", "high"] = "low"
     pricing: dict[str, ModelPricing] = Field(default_factory=default_gemini_pricing)
     pricing_checked_on: str = "2026-08-21"
+    # Models whose default rate has been offered once. A default is added to
+    # an installation only the first time, so a rate someone removed stays
+    # removed instead of coming back on the next read.
+    pricing_defaults_offered: list[str] = Field(default_factory=lambda: list(default_gemini_pricing()))
 
 
 class DocumentProcessor(BaseModel):

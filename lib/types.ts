@@ -474,6 +474,7 @@ export type GeminiSettings = {
   thinking_level: "low" | "medium" | "high";
   pricing: Record<string, ModelPricing>;
   pricing_checked_on: string;
+  pricing_defaults_offered: string[];
 };
 
 export type HealthStatus = {

@@ -18,6 +18,35 @@ def test_flash_selection_migrates_without_rewriting_custom_prices(tmp_path):
     assert settings.gemini.pricing["gemini-3.1-pro-preview"].input_per_million is None
 
 
+def test_a_removed_rate_stays_removed(tmp_path) -> None:
+    store = SettingsStore(tmp_path / "settings.json")
+    settings = store.read()
+    del settings.gemini.pricing["gemini-3.5-flash-lite"]
+    store.write(settings)
+
+    assert "gemini-3.5-flash-lite" not in store.read().gemini.pricing
+
+
+def test_a_new_installation_has_no_rate_for_a_retired_model(tmp_path) -> None:
+    pricing = SettingsStore(tmp_path / "settings.json").read().gemini.pricing
+
+    assert "gemini-3.7-flash" not in pricing
+    assert "gemini-3.8-flash" in pricing
+
+
+def test_a_file_from_before_offered_defaults_gets_each_missing_default_once(tmp_path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"gemini": {"pricing": {"gemini-3.8-flash": {"input_per_million": 2, "output_per_million": 4}}}}), encoding="utf-8")
+    store = SettingsStore(path)
+    settings = store.read()
+    assert settings.gemini.pricing["gemini-3.8-flash"].input_per_million == 2
+    assert "gemini-3.5-flash-lite" in settings.gemini.pricing
+
+    del settings.gemini.pricing["gemini-3.5-flash-lite"]
+    store.write(settings)
+    assert "gemini-3.5-flash-lite" not in store.read().gemini.pricing
+
+
 def test_corrupted_settings_file_falls_back_to_defaults(tmp_path) -> None:
     path = tmp_path / "settings.json"
     path.write_text('{"model": "half-written', encoding="utf-8")

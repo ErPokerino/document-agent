@@ -114,6 +114,15 @@ async def update_settings(settings: AppSettings) -> AppSettings:
             }
         )
 
+    # A rate is for a hosted model DocuFlow knows: one that can be chosen, or
+    # a retired one whose old runs still need costing.
+    unknown_rates = sorted(model for model in settings.gemini.pricing if find_model(model) is None)
+    if unknown_rates:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No hosted model is named {', '.join(unknown_rates)}, so it has no price to set.",
+        )
+
     if settings.provider == "gemini":
         if find_model(settings.model) is None:
             raise HTTPException(

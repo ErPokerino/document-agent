@@ -27,6 +27,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { InfoHint } from "../components/info-hint";
 import { describeHost, describeRuntimeEngine } from "../../lib/runtime-engine";
+import { withoutRate } from "../../lib/cost";
 import { formatBytes, modelStateLabels } from "../../lib/format";
 import {
   filterModels,
@@ -165,6 +166,11 @@ export function LanguageModels(props: Props) {
     (modelLoadState === "error" || selectedRuntimeState === "error") && settingsError
       ? settingsError
       : null;
+  // Rates are kept for hosted models: the ones that can be chosen, and a
+  // retired one only as long as someone keeps its rate for old runs.
+  const hostedModels = models.filter((model) => model.provider === "gemini");
+  const hostedIds = new Set(hostedModels.map((model) => model.id));
+  const unpricedHosted = hostedModels.filter((model) => !(model.id in draftSettings.gemini.pricing));
   const selectedModelPreparing =
     selectedRuntimeState === "loading" || selectedRuntimeState === "warming_up" || modelLoadState === "loading";
 
@@ -379,9 +385,10 @@ export function LanguageModels(props: Props) {
 
         <p className="input-label prompt-label">Price per million tokens (USD)</p>
         <div className="pricing-grid">
+          {Object.keys(draftSettings.gemini.pricing).length === 0 && <p className="field-help">No rates: the cost of hosted runs is not estimated.</p>}
           {Object.entries(draftSettings.gemini.pricing).map(([modelId, price]) => (
             <div className="pricing-row" key={modelId}>
-              <code>{modelId}</code>
+              <code title={hostedIds.has(modelId) ? undefined : "Not selectable any more; kept to cost the runs that used it"}>{modelId}{hostedIds.has(modelId) ? "" : " · retired"}</code>
               <label>
                 <span>Input</span>
                 <input
@@ -398,8 +405,31 @@ export function LanguageModels(props: Props) {
                   onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [modelId]: { ...price, output_per_million: event.target.value === "" ? null : Number(event.target.value) } } } })}
                 />
               </label>
+              <button
+                className="icon-button"
+                title={`Remove the rate for ${modelId}`}
+                aria-label={`Remove the rate for ${modelId}`}
+                onClick={() => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: withoutRate(draftSettings.gemini.pricing, modelId) } })}
+              >
+                <Trash2 size={13} />
+              </button>
             </div>
           ))}
+          {unpricedHosted.length > 0 && (
+            <label className="pricing-add">
+              <span>Add a rate for</span>
+              <select
+                value=""
+                onChange={(event) => {
+                  if (!event.target.value) return;
+                  setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [event.target.value]: { input_per_million: null, output_per_million: null } } } });
+                }}
+              >
+                <option value="">Choose a hosted model…</option>
+                {unpricedHosted.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         <p className="field-help">
           Rates you can edit, checked on {draftSettings.gemini.pricing_checked_on}. They are not

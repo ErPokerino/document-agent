@@ -112,6 +112,20 @@ def test_switching_model_while_lm_studio_is_unreachable_is_rejected(isolated_api
     assert isolated_api.read().model == "vision-model"
 
 
+def test_a_rate_can_be_removed_but_not_set_for_a_model_that_does_not_exist(isolated_api) -> None:
+    with TestClient(main.app) as client:
+        settings = AppSettings(model="vision-model")
+        del settings.gemini.pricing["gemini-3.5-flash-lite"]
+        assert client.put("/api/settings", json=settings.model_dump(mode="json")).status_code == 200
+        assert "gemini-3.5-flash-lite" not in isolated_api.read().gemini.pricing
+
+        settings.gemini.pricing["gemini-9-ultra"] = settings.gemini.pricing["gemini-3.8-flash"]
+        refused = client.put("/api/settings", json=settings.model_dump(mode="json"))
+
+    assert refused.status_code == 400
+    assert "gemini-9-ultra" in refused.json()["detail"]
+
+
 def test_switching_to_an_unknown_model_is_still_rejected() -> None:
     with TestClient(main.app) as client:
         settings = AppSettings(model="not-installed")
