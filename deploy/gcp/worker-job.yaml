@@ -13,6 +13,9 @@ spec:
     metadata:
       annotations:
         run.googleapis.com/execution-environment: gen2
+        # A job takes the Cloud SQL connection as an annotation, not a volume;
+        # the socket appears under /cloudsql all the same.
+        run.googleapis.com/cloudsql-instances: ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}
     spec:
       taskCount: 1
       parallelism: 1
@@ -35,8 +38,6 @@ ${BACKEND_ENV}
               volumeMounts:
                 - name: data
                   mountPath: /data
-                - name: cloudsql
-                  mountPath: /cloudsql
           volumes:
             - name: data
               csi:
@@ -45,7 +46,3 @@ ${BACKEND_ENV}
                 volumeAttributes:
                   bucketName: ${DATA_BUCKET}
                   mountOptions: implicit-dirs,uid=10001,gid=10001,rename-dir-limit=1000
-            - name: cloudsql
-              cloudSqlInstance:
-                instances:
-                  - ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}

@@ -24,6 +24,8 @@ spec:
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/execution-environment: gen2
         run.googleapis.com/container-dependencies: '{"frontend":["backend"]}'
+        # The Cloud SQL connector's socket, under /cloudsql.
+        run.googleapis.com/cloudsql-instances: ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}
     spec:
       serviceAccountName: ${RUN_SA}
       containerConcurrency: 80
@@ -44,7 +46,9 @@ spec:
         - name: backend
           image: ${IMAGE_REPO}/backend:${TAG}
           command: ["uvicorn"]
-          args: ["app.main:app", "--host", "127.0.0.1", "--port", "8000"]
+          # All interfaces, so the platform's startup probe reaches it; only the
+          # frontend's port is routed from outside.
+          args: ["app.main:app", "--host", "0.0.0.0", "--port", "8000"]
           env:
 ${BACKEND_ENV}
           resources:
@@ -59,8 +63,6 @@ ${BACKEND_ENV}
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: cloudsql
-              mountPath: /cloudsql
       volumes:
         - name: data
           csi:
@@ -72,7 +74,3 @@ ${BACKEND_ENV}
               # object prefixes are listed; an artefact is stored by renaming
               # its staging folder.
               mountOptions: implicit-dirs,uid=10001,gid=10001,rename-dir-limit=1000
-        - name: cloudsql
-          cloudSqlInstance:
-            instances:
-              - ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}
