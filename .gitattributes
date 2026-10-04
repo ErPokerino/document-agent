@@ -1,0 +1,10 @@
+# Text is stored with LF in the repository and checked out as each platform
+# prefers. Binary formats are never touched.
+* text=auto
+*.sh text eol=lf
+*.Dockerfile text eol=lf
+compose.yaml text eol=lf
+*.pdf binary
+*.png binary
+*.ico binary
+*.zip binary
