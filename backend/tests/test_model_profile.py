@@ -30,6 +30,10 @@ def integrated_laptop(monkeypatch):
 
     monkeypatch.setattr(LMStudioClient, "host_capabilities", read_host)
     monkeypatch.setattr(LMStudioClient, "_host_cache", None)
+    # That machine has the lms CLI, which the safe load path needs. Without
+    # this, the tests took whichever path the machine running them allowed,
+    # and failed in CI where LM Studio is not installed.
+    monkeypatch.setattr("app.services.lm_studio.shutil.which", lambda name: "lms")
     return host
 
 

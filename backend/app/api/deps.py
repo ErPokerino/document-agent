@@ -275,6 +275,12 @@ async def ensure_model_ready(
     if pipeline is not None and not uses_model(pipeline):
         return None
 
+    # Said before any provider is asked: on a machine without LM Studio the
+    # answer used to be that nothing was listening, which named the server
+    # rather than the missing choice.
+    if not settings.model.strip():
+        raise HTTPException(status_code=409, detail="No model is selected. Choose one in LLM.")
+
     if settings.provider == "gemini":
         selected = find_model(settings.model)
         if selected is None:
