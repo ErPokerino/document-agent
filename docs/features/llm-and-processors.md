@@ -94,23 +94,37 @@ tables on retry, and the Lab says so.
 
 A deployment can serve open models from its own server instead of LM Studio:
 llama.cpp, vLLM, Ollama or anything else that speaks the OpenAI-compatible
-API. With `DOCUFLOW_MODEL_SERVER_URL` set, the models it lists appear in LLM
-beside the others, tagged *Model server*, with what the server reports about
-each — llama.cpp gives parameters, quantization, size, context, parallel slots
-and whether the model reads images; a server that gives only ids leaves them
-blank and the capabilities unknown. They are chosen the same way. They
-need no loading here — the server holds the model it was started with — and
-answer the same request LM Studio is sent: the same prompt, the same schema
-constraint, temperature 0 and a fixed seed, at `/v1/chat/completions`. A run
-records the provider `model_server`, what the request fixes, and what the
-server reported about the model it ran on. Where a deployment runs no LM Studio
-(`DOCUFLOW_LM_STUDIO=off`), the *Local* tab becomes *Self-hosted* and shows the
-model server in place of the LM Studio connection.
+API. With `DOCUFLOW_MODEL_SERVER_URL` set, its models appear in LLM beside the
+others, tagged *Model server*, and answer the same request LM Studio is sent:
+the same prompt, the same schema constraint, temperature 0 and a fixed seed, at
+`/v1/chat/completions`.
 
-On Google Cloud this is llama.cpp on Cloud Run, private and called with the
-app's identity (`DOCUFLOW_MODEL_SERVER_AUTH=google_id_token`); see
-[deployment](../deployment.md#google-cloud). It scales to zero, so the first
-request after a pause waits for the model to load.
+Two kinds of server are understood:
+
+- **A llama.cpp router** (`llama-server --models-preset …`) knows many models
+  and holds the ones it is asked to load — one at a time, as configured here.
+  LLM lists every model with whether it is loaded, and **Load & warm up**
+  works as it does for LM Studio: the server loads the selected model,
+  unloading the previous one, and DocuFlow warms it with the same text, image
+  and schema requests, timed apart from any document. A run on a model the
+  server does not hold is refused until it is loaded; an experiment loads each
+  of its models once, in turn.
+- **A server started with one model** has nothing to load: what it lists is
+  ready.
+
+What is shown about each model — parameters, quantization, size, context,
+parallel slots, whether it reads images — comes from the server for a model it
+holds, and from the deployment's catalog (`DOCUFLOW_MODEL_SERVER_CATALOG`) for
+one it does not. Anything neither gives is left blank, and a capability nobody
+reports is marked unknown. A run records the provider `model_server`, what the
+request fixes, and what was known about the model it ran on. Where a
+deployment runs no LM Studio (`DOCUFLOW_LM_STUDIO=off`), the *Local* tab becomes
+*Self-hosted* and shows the model server in place of the LM Studio connection.
+
+On Google Cloud this is a llama.cpp router on Cloud Run, private and called
+with the app's identity; see [deployment](../deployment.md#google-cloud) and
+[0008](../decisions/0008-one-model-server-loading-on-demand.md). It scales to
+zero and forgets the loaded model when it does.
 
 ## Why Outlines is not required
 

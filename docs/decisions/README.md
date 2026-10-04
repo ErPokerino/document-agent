@@ -13,6 +13,7 @@ record is never rewritten — a later one supersedes it and says so.
 | [0005](0005-local-first-cloud-portable.md) | Local first, deployable on any cloud | Accepted; supersedes "never deployed" |
 | [0006](0006-experiments-compare-shared-documents.md) | Experiments compare cells on shared documents, with paired intervals | Accepted |
 | [0007](0007-long-work-as-recorded-jobs.md) | Long work is a recorded job, run in process or by a worker elsewhere | Accepted |
+| [0008](0008-one-model-server-loading-on-demand.md) | One model server that loads the selected model, as LM Studio does | Accepted |
 
 To add one, copy the shape of an existing record: *Context*, *Decision*,
 *Alternatives*, *Consequences*.

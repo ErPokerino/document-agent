@@ -66,7 +66,11 @@ a GCP-only replacement; the gaps they close are in
    pipelines migrated; then a second OCR provider to prove the seam.
 5. **A second cloud.** A job runner (AWS Batch or Container Apps jobs) and the
    same images, mapped as in [deployment](docs/deployment.md#mapping-onto-other-clouds).
-6. **Merge `cloud` into `main`** once the team wants the job runner, PostgreSQL
+6. **Models added from the app.** Today a model joins the model server through
+   the env file and `upload-models.sh`; an upload in LLM, writing the file,
+   the preset and the catalog entry, would let a user add one without a
+   deployment script.
+7. **Merge `cloud` into `main`** once the team wants the job runner, PostgreSQL
    and the model server locally too; everything there is configuration-gated.
 
 ## Collaboration and code health
