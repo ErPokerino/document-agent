@@ -32,6 +32,7 @@ import { LanguageModels } from "./llm/llm";
 import { Pipelines } from "./pipelines/pipeline";
 import { Processors } from "./processors/processors";
 import { Settings } from "./settings/settings";
+import { SignInGate } from "./components/sign-in";
 import { stepLabels } from "../lib/pipeline-editor";
 import { validateSettingsDraft } from "../lib/validation";
 import { Workspace, useWorkspace } from "./workspace/workspace";
@@ -58,6 +59,14 @@ const sectionCopy: Record<View, { eyebrow: string; title: string }> = {
 };
 
 export default function Home() {
+  return (
+    <SignInGate>
+      <App />
+    </SignInGate>
+  );
+}
+
+function App() {
   // The server cannot see the hash, so the first render is the default route on
   // both sides; the address bar is read once the page is live. Reading it during
   // the first render made the browser's markup differ from the server's whenever
@@ -196,6 +205,8 @@ export default function Home() {
   // Where documents actually go. Saying "local" while pages are being uploaded
   // to Google would be the worst kind of wrong copy.
   const usingHostedModel = settings?.provider === "gemini";
+  // A model server holds its model; nothing on this machine has to be running.
+  const usingModelServer = settings?.provider === "model_server";
   // Not only the model: a Document AI step uploads the page whatever answers
   // afterwards, so a pipeline with one is not local processing.
   const dataFlow = describeDataFlow(settings?.provider ?? "lm_studio", pipelineKinds, onlyScansUploaded);
@@ -219,7 +230,7 @@ export default function Home() {
   // first paint that shows a gate which may not apply, where the other way
   // round would let a run start that then fails.
   const callsModel = pipelineKinds.length === 0 || usesModel(pipelineKinds);
-  const needsLmStudio = callsModel && !usingHostedModel;
+  const needsLmStudio = callsModel && !usingHostedModel && !usingModelServer;
   const modelBlocks = callsModel && !isModelReady;
   const lmStudioBlocks = needsLmStudio && !isConnected;
   // The chip names the model this machine is set to. On a pipeline that never
@@ -354,15 +365,16 @@ export default function Home() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className={`local-status ${usingHostedModel ? (keyStatus?.configured ? "online" : "offline") : isConnected ? "online" : "offline"}`}>
+          <div className={`local-status ${usingHostedModel ? (keyStatus?.configured ? "online" : "offline") : usingModelServer ? (isModelReady ? "online" : "offline") : isConnected ? "online" : "offline"}`}>
             <span className="status-dot" />
             <div>
-              <strong>{usingHostedModel ? "Google Gemini" : "LM Studio"}</strong>
-              <small>{usingHostedModel ? "Hosted API" : "Local inference"}</small>
+              <strong>{usingHostedModel ? "Google Gemini" : usingModelServer ? "Model server" : "LM Studio"}</strong>
+              <small>{usingHostedModel ? "Hosted API" : usingModelServer ? "Self-hosted model" : "Local inference"}</small>
             </div>
             <span className="status-pill">
               {usingHostedModel
                 ? keyStatus?.configured ? "Key set" : "No key"
+                : usingModelServer ? isModelReady ? "Serving" : "Not serving"
                 : isConnected ? "Online" : "Offline"}
             </span>
           </div>
@@ -384,7 +396,7 @@ export default function Home() {
             <button className="model-chip" onClick={() => setView(pipelineKinds.includes("document_ai_extract") ? "pipelines" : "llm")} title={pipelineKinds.includes("document_ai_extract") ? [extractionEngine?.display_name, engineDetail({ model: pipelineKinds.some(kind => kind === "llm_extract" || kind === "supplier_rules") ? settings?.model || "Not used" : "Not used", steps: pipelineKinds, extraction_engine: extractionEngine ?? null }), "Choose the processor and version in Pipelines."].filter(Boolean).join("\n") : "Change model in LLM"}>
               <span className="model-icon"><Cpu size={15} /></span>
               <div><small>{pipelineKinds.includes("document_ai_extract") ? `Document AI · CE${extractionEngine?.additional_processors?.length ? ` +${extractionEngine.additional_processors.length}` : ""}` : activeModelStatus}</small><strong>{pipelineKinds.includes("document_ai_extract") ? engineResult?.settings !== settings ? "Reading version…" : compactExtractorVersion(extractionEngine?.version) : activeModelName}</strong></div>
-              {!pipelineKinds.includes("document_ai_extract") && <span className={`connection-light ${isConnected && isModelReady ? "online" : ""}`} />}
+              {!pipelineKinds.includes("document_ai_extract") && <span className={`connection-light ${(usingModelServer || isConnected) && isModelReady ? "online" : ""}`} />}
             </button>
           </div>
         </header>

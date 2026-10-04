@@ -58,6 +58,7 @@ from app.services.lm_studio import (
     MODEL_PROFILE_SEED,
 )
 from app.services.master_data import MasterDataStore
+from app.services.model_server import ModelServerClient
 from app.services.migrations import (
     adopt_legacy_page_limit,
     clear_inherited_model_default,
@@ -65,7 +66,8 @@ from app.services.migrations import (
 from app.services.processors import migrate_processor_catalog
 from app.services.reading_cache import ReadingCache
 from app.training.artifacts import ArtifactStore, UnknownArtifact, InvalidArtifact, training_hashes
-from app.training.jobs import TrainingJobs
+from app.jobs import queue as job_queue
+from app.jobs.store import JobStore
 from app.services.run_store import RunStore
 from app.services.settings_store import SettingsStore
 from app.services.supplier_rules import SupplierRule, SupplierRuleStore
@@ -97,7 +99,12 @@ supplier_rule_store = SupplierRuleStore(DATABASE_PATH)
 pipeline_store = PipelineStore(PIPELINES_PATH)
 reading_cache = ReadingCache(READING_CACHE_PATH)
 artifact_store = ArtifactStore(ARTIFACTS_PATH)
-training_jobs = TrainingJobs()
+# Lab runs, experiments and training, recorded so that whoever does them can
+# be this process or a worker elsewhere (app/jobs).
+job_store = JobStore(DATABASE_PATH)
+jobs = job_queue.from_config()
+LAB_JOB_KINDS = ("evaluation", "experiment")
+TRAINING_JOB_KINDS = ("training", "fine_tuning_export")
 # The page limit used to be one number for the whole app; carry an existing
 # install's value into the pipeline that inherits the job, then write the
 # starting point out so it is an ordinary editable file.
@@ -112,11 +119,12 @@ active_model_operation: str | None = None
 active_document_task: asyncio.Task[Any] | None = None
 # The step inside the workspace request. Lab runs report theirs on the evaluation row.
 pipeline_activity: dict[str, str | None] = {"step": None}
-evaluation_task: asyncio.Task | None = None
-evaluation_cancelled: asyncio.Event | None = None
-# A run still marked `running` belongs to a backend that no longer exists.
-evaluation_store.mark_interrupted()
-experiment_store.mark_interrupted()
+# A run still marked `running` belongs to a backend that no longer exists —
+# when this process is what runs them. A worker elsewhere may be mid-run.
+if not jobs.remote:
+    evaluation_store.mark_interrupted()
+    experiment_store.mark_interrupted()
+    job_store.mark_interrupted()
 
 
 def claim_model_operation(phase: str) -> None:
@@ -137,6 +145,47 @@ def claim_model_operation(phase: str) -> None:
 def release_model_operation() -> None:
     global active_model_operation
     active_model_operation = None
+
+
+def claim_lab() -> None:
+    """Refuse a Lab run or an experiment while another one is under way.
+
+    In process, the claim is the shared model operation, which also keeps a
+    model load from starting under a run. With a worker elsewhere, the job rows
+    are what knows: this process is not doing the run and cannot hold it.
+    """
+    if jobs.remote:
+        if job_store.active(LAB_JOB_KINDS) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="An evaluation is running in Lab. Only one can run at a time, so wait for it to finish or cancel it.",
+            )
+        return
+    claim_model_operation("evaluating")
+
+
+def release_lab() -> None:
+    if not jobs.remote:
+        release_model_operation()
+
+
+async def start_job(kind: str, name: str, payload: dict[str, Any], *, subject_id: int | None = None, total: int = 0) -> int:
+    """Record a job and hand it to whatever runs jobs here."""
+    job = job_store.create(kind, name, payload, subject_id=subject_id, total=total)
+    try:
+        await jobs.dispatch(job.id)
+    except Exception as exc:
+        job_store.finish(job.id, "failed", error=str(exc))
+        raise
+    return job.id
+
+
+def cancel_job(kind: str, subject_id: int) -> None:
+    job = job_store.for_subject(kind, subject_id)
+    if job is None:
+        return
+    job_store.request_cancel(job.id)
+    jobs.cancel(job.id)
 
 
 @asynccontextmanager
@@ -295,6 +344,16 @@ async def ensure_model_ready(
             )
         return selected
 
+    if settings.provider == "model_server":
+        try:
+            served = await ModelServerClient().list_models()
+        except LMStudioError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        selected = next((model for model in served if model.id == settings.model), None)
+        if selected is None:
+            raise HTTPException(status_code=409, detail=f"The model server does not serve {settings.model}.")
+        return selected
+
     try:
         # Every installed model, not only the ones that can see: a text-only
         # model behind an OCR step is a legitimate choice, and looking for it
@@ -340,6 +399,17 @@ def execution_profile(
             profile="hosted",
             temperature=0,
             thinking_level=settings.gemini.thinking_level if supports_thinking else None,
+        )
+    if settings.provider == "model_server":
+        # What this request fixes. How the server loaded the model — context,
+        # quantization, threads — is its own configuration and unknown here,
+        # so it is left out rather than guessed.
+        return ModelExecutionProfile(
+            provider="model_server",
+            profile="server",
+            temperature=0,
+            seed=MODEL_PROFILE_SEED,
+            reasoning_effort="none",
         )
 
     runtime_profile = model_runtime_profiles.get(settings.model)
@@ -674,6 +744,14 @@ def reading_warnings(definition: PipelineDefinition) -> list[str]:
 
 
 def gcp_status(settings: AppSettings) -> GcpKeyStatus:
+    if config.gcp_runtime_identity():
+        # No key to show: the deployment calls Google as its own service account.
+        return GcpKeyStatus(
+            configured=True,
+            path="",
+            client_email="the runtime identity of this deployment",
+            project_id=settings.gcp.project_id,
+        )
     try:
         account = ServiceAccount.load(GCP_CREDENTIALS_PATH)
     except DocumentAiError as exc:

@@ -44,6 +44,10 @@ def build_extraction_client(context: PipelineContext) -> ExtractionProvider:
     """The pipeline is provider-agnostic; only this decides who does the work."""
     if context.provider == "gemini":
         return GeminiClient(context.gemini_api_key, context.gemini_thinking_level)
+    if context.provider == "model_server":
+        from app.services.model_server import ModelServerClient
+
+        return ModelServerClient()
     return LMStudioClient(context.lm_studio_url)
 
 

@@ -85,7 +85,7 @@ async def test_lab_cancel_cancels_the_current_evaluation_task(tmp_path, monkeypa
         prompts=PromptConfiguration(),
         total_documents=1,
     )
-    deps.evaluation_cancelled = asyncio.Event()
+    job = deps.job_store.create("evaluation", "run", {"evaluation_id": evaluation_id}, subject_id=evaluation_id)
     interrupted = asyncio.Event()
 
     async def slow_evaluation() -> None:
@@ -95,7 +95,8 @@ async def test_lab_cancel_cancels_the_current_evaluation_task(tmp_path, monkeypa
             interrupted.set()
             raise
 
-    deps.evaluation_task = asyncio.create_task(slow_evaluation())
+    task = asyncio.create_task(slow_evaluation())
+    deps.jobs.tasks[job.id] = task
     await asyncio.sleep(0)
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -104,8 +105,7 @@ async def test_lab_cancel_cancels_the_current_evaluation_task(tmp_path, monkeypa
 
     assert response.status_code == 202
     assert response.json()["status"] == "cancelled"
-    assert deps.evaluation_cancelled.is_set()
+    # Recorded where a worker elsewhere would read it, and the local task stopped at once.
+    assert deps.job_store.cancel_requested(job.id)
     assert interrupted.is_set()
-    assert deps.evaluation_task.cancelled()
-    deps.evaluation_task = None
-    deps.evaluation_cancelled = None
+    assert task.cancelled()

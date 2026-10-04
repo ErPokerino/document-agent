@@ -98,7 +98,7 @@ class GcpSettings(BaseModel):
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["lm_studio", "gemini"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server"] = "lm_studio"
     # No default: which models exist is a property of the machine DocuFlow
     # was installed on, and naming one here opens a fresh install already
     # configured for a model the user does not have.

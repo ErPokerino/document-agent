@@ -1225,3 +1225,11 @@ a.icon-button { display: inline-flex; align-items: center; justify-content: cent
 .model-leaderboard h4 { margin: 0 0 6px; font-size: 12px; }
 .model-leaderboard tr.verdict-best td { font-weight: 600; }
 .model-leaderboard .field-help { margin: 0; }
+
+/* Sign-in, when the deployment requires an account. */
+.sign-in-shell { min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--surface); }
+.sign-in-card { width: min(360px, 100%); display: grid; gap: 4px; padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.sign-in-card h1 { margin: 0 0 14px; font-size: 22px; }
+.sign-in-card .text-input { margin-bottom: 12px; font-size: 12px; }
+.sign-in-card .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 6px 0 0; }
+.sign-in-error { margin: 0 0 8px; color: #923d31; font-size: 11px; }

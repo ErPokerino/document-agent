@@ -61,7 +61,7 @@ class Evaluation(BaseModel):
     pipeline: str
     # Where the model ran, or `none` when this pipeline called no model. It
     # cannot be recovered from the selected model id afterwards.
-    provider: Literal["lm_studio", "gemini", "none"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server", "none"] = "lm_studio"
     steps: list[str] = Field(default_factory=list)
     execution_profile: ModelExecutionProfile | None = None
     succeeded_documents: int
@@ -198,7 +198,7 @@ class EvaluationDetail(Evaluation):
 class ExperimentModelChoice(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["lm_studio", "gemini"]
+    provider: Literal["lm_studio", "gemini", "model_server"]
     model: Annotated[str, Field(min_length=1)]
 
 
@@ -216,7 +216,7 @@ class ExperimentRequest(BaseModel):
 class ExperimentCell(BaseModel):
     index: int
     pipeline: str
-    provider: Literal["lm_studio", "gemini", "none"]
+    provider: Literal["lm_studio", "gemini", "model_server", "none"]
     model: str
     # pending, loading, running, completed, partial, failed, cancelled, skipped, error
     status: str

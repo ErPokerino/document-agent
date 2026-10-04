@@ -194,10 +194,3 @@ def train_model(
             "files": sorted(files),
         }
     return store.save(manifest, files)
-
-
-def progress_callback(job: Any) -> Callable[[int], None]:
-    def advance(done: int) -> None:
-        job.done = done
-
-    return advance

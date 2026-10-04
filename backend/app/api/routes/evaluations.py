@@ -2,7 +2,7 @@
 
 import asyncio
 from dataclasses import asdict
-from typing import Annotated, Any, Awaitable, Callable
+from typing import Annotated, Any
 
 from fastapi import HTTPException, Query, Response, APIRouter
 
@@ -173,13 +173,17 @@ async def prepare_evaluation(
     claim: bool,
     experiment_id: int | None = None,
     experiment_cell: int | None = None,
-) -> tuple[int, Callable[[asyncio.Event], Awaitable[None]]]:
-    """Snapshot, compile and record one Lab run, and return how to run it.
+) -> int:
+    """Snapshot, compile and record one Lab run, ready to be run.
 
     Shared by a single run and by every cell of an experiment, so a cell is an
     ordinary run in every respect: the same snapshot, pinning, fingerprint and
-    refusals. `claim` takes the model operation just before the run is
-    recorded; an experiment holds it for all its cells and passes False.
+    refusals. `claim` takes the Lab just before the run is recorded; an
+    experiment holds it for all its cells and passes False.
+
+    Everything the run needs is recorded on its row, so whoever runs it —
+    this process or a worker elsewhere — rebuilds it from there
+    (`run_recorded_evaluation`).
     """
     documents: list[tuple[str, dict[str, Any]]] = []
     dataset_snapshot: dict[str, Any] = {}
@@ -251,8 +255,8 @@ async def prepare_evaluation(
     )
 
     if claim:
-        deps.claim_model_operation("evaluating")
-    evaluation_id = deps.evaluation_store.start(
+        deps.claim_lab()
+    return deps.evaluation_store.start(
         dataset=dataset,
         model=recorded_model,
         prompts=settings.prompts,
@@ -273,52 +277,140 @@ async def prepare_evaluation(
         experiment_cell=experiment_cell,
     )
 
-    async def run(cancelled: asyncio.Event) -> None:
+
+async def run_recorded_evaluation(evaluation_id: int, cancelled: asyncio.Event, *, resumed: bool) -> None:
+    """Run, from what its row recorded, every document of a run not yet scored.
+
+    A new run and a retry are the same thing here: the documents that have not
+    succeeded, on the terms the run started with — its pinned pipeline, its
+    prompts, its register and rules, its model and its choice about cached
+    readings. Today's settings supply only what a run does not record: keys,
+    addresses and the Google Cloud project.
+    """
+    detail = deps.evaluation_store.get_evaluation(evaluation_id)
+    if detail is None:
+        raise ValueError(f"No evaluation with id {evaluation_id}")
+    if detail.dataset_snapshot is None:
+        raise ValueError("This evaluation has no snapshot of its original documents and labels.")
+    settings = deps.settings_store.read()
+    steps = recorded_steps(detail, settings)
+    definition = recorded_definition(detail)
+    run_settings = (
+        settings.model_copy(update={"provider": detail.provider, "model": detail.model})
+        if uses_model(definition)
+        else settings
+    )
+    attempted = deps.evaluation_store.attempted_documents(evaluation_id)
+    documents = [
+        (name, snapshot["labels"])
+        for name, snapshot in detail.dataset_snapshot.items()
+        if attempted.get(name) != "ok"
+    ]
+    snapshot = detail.dataset_snapshot
+    try:
         await deps.run_evaluation(
             evaluation_id=evaluation_id,
             evaluations=deps.evaluation_store,
             datasets=deps.dataset_store,
             run_store=deps.run_store,
-            dataset=dataset,
+            dataset=detail.dataset,
             documents=documents,
-            entities=settings.prompts.entities,
-            prompts=settings.prompts,
-            model=recorded_model,
-            provider=recorded_provider,
+            entities=detail.prompts.entities,
+            prompts=detail.prompts,
+            model=detail.model,
+            provider=detail.provider,
             steps=steps,
-            pipeline_name=settings.pipeline,
-            pipeline_steps=[step.kind.value for step in pipeline_definition.steps],
-            execution_profile=execution_profile,
+            pipeline_name=detail.pipeline,
+            pipeline_steps=detail.steps,
+            execution_profile=detail.execution_profile,
+            # The run finishes on the terms it started with, cached readings included.
             make_context=lambda name, content: deps.pipeline_context(
-                settings, name, content, reuse_readings=reuse_readings
+                run_settings, name, content, reuse_readings=detail.reuse_readings
             ),
             cancelled=cancelled,
-            read_document=lambda name: deps.evaluation_store.read_snapshot_document(dataset_snapshot[name]["sha256"]),
+            read_document=lambda name: deps.evaluation_store.read_snapshot_document(snapshot[name]["sha256"]),
+            resumed=resumed,
         )
+    except asyncio.CancelledError:
+        deps.evaluation_store.finish(evaluation_id, "cancelled")
+        raise
 
-    return evaluation_id, run
+
+def recorded_definition(detail: Any) -> Any:
+    # New runs carry the complete definition. Legacy rows fall back to the
+    # saved pipeline because the earlier schema retained only its name.
+    definition = (
+        detail.pipeline_definition.model_copy(deep=True)
+        if detail.pipeline_definition is not None
+        else deps.pipeline_store.read(detail.pipeline)
+    )
+    definition.page_limit = detail.max_pages or definition.page_limit
+    return definition
+
+
+def recorded_steps(detail: Any, settings: Any) -> list[Any]:
+    """The run's pipeline compiled as it was recorded, pinned versions included."""
+    definition = recorded_definition(detail)
+    # A run that recorded the register replays that copy. A run from before
+    # the snapshot existed has nothing to replay, so it uses the tables as
+    # they are now.
+    if detail.register_snapshot is not None and detail.rules_snapshot is not None:
+        return build_steps(
+            definition,
+            prompts=detail.prompts,
+            entities=detail.prompts.entities,
+            gcp=settings.gcp,
+            register_rows=detail.register_snapshot,
+            frozen_rules=rules_from_records(detail.rules_snapshot),
+            artifacts=deps.artifact_store,
+        )
+    return build_steps(
+        definition,
+        prompts=detail.prompts,
+        entities=detail.prompts.entities,
+        gcp=settings.gcp,
+        master_data=deps.master_data_store,
+        supplier_rules=deps.supplier_rule_store,
+        artifacts=deps.artifact_store,
+    )
+
+
+async def run_evaluation_job(job: Any, cancelled: asyncio.Event) -> None:
+    """The work of an `evaluation` job: one Lab run, new or resumed."""
+    evaluation_id = int(job.payload["evaluation_id"])
+    try:
+        await run_recorded_evaluation(evaluation_id, cancelled, resumed=bool(job.payload.get("resumed")))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # run_evaluation records a failure it meets itself; this covers one
+        # met before it started, and leaves a run it already closed alone.
+        deps.evaluation_store.finish(evaluation_id, "failed", error=str(exc))
+        raise
+    finally:
+        deps.release_lab()
+
+
+async def dispatch_evaluation(evaluation_id: int, *, resumed: bool) -> None:
+    """Hand a recorded run to whatever runs jobs here; close it if nothing can."""
+    try:
+        await deps.start_job(
+            "evaluation", f"Lab run {evaluation_id}", {"evaluation_id": evaluation_id, "resumed": resumed},
+            subject_id=evaluation_id,
+        )
+    except Exception as exc:
+        deps.evaluation_store.finish(evaluation_id, "failed", error=str(exc))
+        deps.release_lab()
+        raise
 
 
 @router.post("/api/evaluations", response_model=Evaluation, status_code=202)
 async def start_evaluation(request: EvaluationRequest) -> Evaluation:
     deps.require_dataset(request.dataset)
-    evaluation_id, run = await prepare_evaluation(
+    evaluation_id = await prepare_evaluation(
         request.dataset, deps.settings_store.read(), reuse_readings=request.reuse_readings, claim=True,
     )
-    deps.evaluation_cancelled = asyncio.Event()
-
-    async def drive(cancelled: asyncio.Event) -> None:
-        try:
-            await run(cancelled)
-        except asyncio.CancelledError:
-            deps.evaluation_store.finish(evaluation_id, "cancelled")
-        except Exception:
-            # run_evaluation has already recorded the failure on the evaluation.
-            pass
-        finally:
-            deps.release_model_operation()
-
-    deps.evaluation_task = asyncio.create_task(drive(deps.evaluation_cancelled))
+    await dispatch_evaluation(evaluation_id, resumed=False)
     return deps.evaluation_model(deps.evaluation_store.get_evaluation(evaluation_id))
 
 
@@ -357,38 +449,10 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
     if engine and not explicit_locations and (engine.get("project_id") != settings.gcp.project_id or engine.get("location") != settings.gcp.location):
         raise HTTPException(status_code=409, detail="This evaluation used a different Document AI project or location.")
     try:
-        # New runs carry the complete definition. Legacy rows fall back to the
-        # saved pipeline because the earlier schema retained only its name.
-        definition = (
-            detail.pipeline_definition.model_copy(deep=True)
-            if detail.pipeline_definition is not None
-            else deps.pipeline_store.read(detail.pipeline)
-        )
-        page_limit = detail.max_pages or definition.page_limit
-        definition.page_limit = page_limit
-        # A run that recorded the register replays that copy. A run from
-        # before the snapshot existed has nothing to replay, so it uses the
-        # tables as they are now.
-        if detail.register_snapshot is not None and detail.rules_snapshot is not None:
-            steps = build_steps(
-                definition,
-                prompts=detail.prompts,
-                entities=detail.prompts.entities,
-                gcp=settings.gcp,
-                register_rows=detail.register_snapshot,
-                frozen_rules=rules_from_records(detail.rules_snapshot),
-                artifacts=deps.artifact_store,
-            )
-        else:
-            steps = build_steps(
-                definition,
-                prompts=detail.prompts,
-                entities=detail.prompts.entities,
-                gcp=settings.gcp,
-                master_data=deps.master_data_store,
-                supplier_rules=deps.supplier_rule_store,
-                artifacts=deps.artifact_store,
-            )
+        # Compiled here so a run that can no longer be built is refused now,
+        # not by a worker after the run was reopened.
+        definition = recorded_definition(detail)
+        recorded_steps(detail, settings)
     except (UnknownPipeline, InvalidPipelineName) as exc:
         raise HTTPException(
             status_code=409,
@@ -426,63 +490,16 @@ async def retry_evaluation(evaluation_id: int) -> Evaluation:
             ),
         )
 
-    retry_settings = (
-        settings.model_copy(update={"provider": detail.provider, "model": detail.model})
-        if uses_model(definition)
-        else settings
-    )
-
     attempted = deps.evaluation_store.attempted_documents(evaluation_id)
-    documents: list[tuple[str, dict[str, Any]]] = []
-    for name, snapshot in detail.dataset_snapshot.items():
-        if attempted.get(name) == "ok":
-            continue
-        documents.append((name, snapshot["labels"]))
-    if not documents:
+    if all(attempted.get(name) == "ok" for name in detail.dataset_snapshot):
         raise HTTPException(
             status_code=400,
             detail="This run has nothing left to process: every labelled document already succeeded.",
         )
 
-    deps.claim_model_operation("evaluating")
+    deps.claim_lab()
     deps.evaluation_store.reopen(evaluation_id)
-    deps.evaluation_cancelled = asyncio.Event()
-
-    async def drive(cancelled: asyncio.Event) -> None:
-        try:
-            await deps.run_evaluation(
-                evaluation_id=evaluation_id,
-                evaluations=deps.evaluation_store,
-                datasets=deps.dataset_store,
-                run_store=deps.run_store,
-                dataset=detail.dataset,
-                documents=documents,
-                entities=detail.prompts.entities,
-                prompts=detail.prompts,
-                model=detail.model,
-                provider=detail.provider,
-                steps=steps,
-                pipeline_name=detail.pipeline,
-                pipeline_steps=detail.steps,
-                execution_profile=detail.execution_profile,
-                # The retry finishes the run on the terms it started with,
-                # cached readings included.
-                make_context=lambda name, content: deps.pipeline_context(
-                    retry_settings, name, content, reuse_readings=detail.reuse_readings
-                ),
-                cancelled=cancelled,
-                read_document=lambda name: deps.evaluation_store.read_snapshot_document(detail.dataset_snapshot[name]["sha256"]),
-                resumed=True,
-            )
-        except asyncio.CancelledError:
-            deps.evaluation_store.finish(evaluation_id, "cancelled")
-        except Exception:
-            # run_evaluation has already recorded the failure on the evaluation.
-            pass
-        finally:
-            deps.release_model_operation()
-
-    deps.evaluation_task = asyncio.create_task(drive(deps.evaluation_cancelled))
+    await dispatch_evaluation(evaluation_id, resumed=True)
     return deps.evaluation_model(deps.evaluation_store.get_evaluation(evaluation_id))
 
 
@@ -493,12 +510,14 @@ async def cancel_evaluation(evaluation_id: int) -> Evaluation:
         raise HTTPException(status_code=404, detail=f"No evaluation with id {evaluation_id}")
     if detail.status != "running":
         raise HTTPException(status_code=409, detail="That evaluation is not running.")
-    if deps.evaluation_cancelled is not None:
-        deps.evaluation_cancelled.set()
-    # The event is inspected at document boundaries. Cancelling the task as
-    # well propagates into the provider request, so a slow document does not
-    # keep running for minutes after the user pressed Cancel.
+    # Recorded on the job, where the work looks for it at document
+    # boundaries and every few seconds; in process the task is also cancelled
+    # at once, which propagates into the provider request so a slow document
+    # does not keep running for minutes after the user pressed Cancel. A run
+    # inside an experiment stops the experiment with it.
     deps.evaluation_store.finish(evaluation_id, "cancelled")
-    if deps.evaluation_task is not None and not deps.evaluation_task.done():
-        deps.evaluation_task.cancel()
+    if detail.experiment_id is not None:
+        deps.experiment_store.finish(detail.experiment_id, "cancelled")
+        deps.cancel_job("experiment", detail.experiment_id)
+    deps.cancel_job("evaluation", evaluation_id)
     return deps.evaluation_model(deps.evaluation_store.get_evaluation(evaluation_id))

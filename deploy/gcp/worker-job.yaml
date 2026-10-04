@@ -1,0 +1,51 @@
+# Where DocuFlow's long work runs on Google Cloud: one Cloud Run job, executed
+# once per Lab run, experiment or training with the job id as its argument
+# (`python -m app.worker <id>`, see backend/app/jobs). Billed while it runs,
+# with the same image, data and database as the app.
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: ${PREFIX}-worker
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      taskCount: 1
+      parallelism: 1
+      template:
+        spec:
+          serviceAccountName: ${RUN_SA}
+          # A failed run is recorded on its row; repeating it would bill twice.
+          maxRetries: 0
+          # The longest experiment this bench is expected to run.
+          timeoutSeconds: 21600
+          containers:
+            - image: ${IMAGE_REPO}/backend:${TAG}
+              command: ["python", "-m", "app.worker"]
+              env:
+${BACKEND_ENV}
+              resources:
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: cloudsql
+                  mountPath: /cloudsql
+          volumes:
+            - name: data
+              csi:
+                driver: gcsfuse.run.googleapis.com
+                readOnly: false
+                volumeAttributes:
+                  bucketName: ${DATA_BUCKET}
+                  mountOptions: implicit-dirs,uid=10001,gid=10001,rename-dir-limit=1000
+            - name: cloudsql
+              cloudSqlInstance:
+                instances:
+                  - ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}

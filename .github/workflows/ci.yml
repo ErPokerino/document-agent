@@ -1,11 +1,12 @@
 # Every push and pull request: the full test suite on the platform DocuFlow is
-# developed on, and the container images built and started on Linux, which is
-# what any cloud's container service runs.
+# developed on, the backend suite again against PostgreSQL (what a cloud
+# deployment keeps its tables in), and the container images built and started
+# on Linux, which is what any cloud's container service runs.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, cloud]
   pull_request:
 
 permissions:
@@ -52,6 +53,40 @@ jobs:
           set -o pipefail
           npm test 2>&1 | tee test-output.txt || {
             grep -E "^FAILED|^ERROR|^not ok| error |error TS" test-output.txt | head -40 | sed 's/^/::error::/'
+            exit 1
+          }
+
+  postgres:
+    name: Backend tests on PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: docuflow
+          POSTGRES_DB: docuflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Python environment from the lock file
+        run: python -m pip install --requirement backend/requirements.lock.txt
+
+      # Each test gets a schema of its own (backend/tests/conftest.py).
+      - name: Tests
+        env:
+          DOCUFLOW_TEST_DATABASE_URL: postgresql://postgres:docuflow@localhost:5432/docuflow
+        run: |
+          set -o pipefail
+          python -m pytest -q -rf 2>&1 | tee test-output.txt || {
+            grep -E "^FAILED|^ERROR" test-output.txt | head -40 | sed 's/^/::error::/'
             exit 1
           }
 

@@ -83,3 +83,18 @@ test("a hosted model that is never called is not a destination", () => {
   assert.doesNotMatch(flow.detail, /Gemini/);
   assert.match(flow.detail, /no language model/i);
 });
+
+test("a self-hosted model server is named as where the fields are extracted", () => {
+  const flow = describeDataFlow("model_server", ["render_pages", "llm_extract"]);
+
+  assert.equal(flow.leavesTheMachine, true);
+  assert.match(flow.heading, /model server/i);
+  assert.doesNotMatch(flow.heading, /Google/);
+  assert.match(flow.detail, /model server/);
+});
+
+test("Document AI and a model server are both named", () => {
+  const flow = describeDataFlow("model_server", ["document_ai_ocr", "llm_extract"]);
+
+  assert.match(flow.heading, /Google and the model server/);
+});

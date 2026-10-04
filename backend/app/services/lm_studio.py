@@ -233,9 +233,19 @@ def _representative_warmup_image() -> str:
 
 
 class LMStudioClient(ExtractionProvider):
+    # Named in errors; a subclass speaking to another server says which.
+    server_name = "LM Studio"
+
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.last_prediction_stats: dict[str, int | float] | None = None
+
+    async def _post_chat(self, payload: dict[str, Any]) -> httpx.Response:
+        """Send one chat completion request; raise for an HTTP error status."""
+        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT_SECONDS) as client:
+            response = await client.post(f"{self.base_url}/api/v0/chat/completions", json=payload)
+            response.raise_for_status()
+        return response
 
     async def _fetch_model_items(self) -> list[dict[str, Any]]:
         """Every model this LM Studio has, however it is willing to say so.
@@ -941,12 +951,7 @@ class LMStudioClient(ExtractionProvider):
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT_SECONDS) as client:
-                    response = await client.post(
-                        f"{self.base_url}/api/v0/chat/completions",
-                        json=payload,
-                    )
-                    response.raise_for_status()
+                response = await self._post_chat(payload)
                 response_data = response.json()
                 self.last_prediction_stats = self._prediction_stats(response_data)
                 choice = response_data["choices"][0]
@@ -969,7 +974,7 @@ class LMStudioClient(ExtractionProvider):
             except httpx.HTTPStatusError as exc:
                 detail = exc.response.text[:600]
                 raise LMStudioError(
-                    self._friendly_engine_error(detail, "LM Studio rejected the request"),
+                    self._friendly_engine_error(detail, f"{self.server_name} rejected the request"),
                     runtime_lost=self._runtime_lost(detail),
                 ) from exc
             except httpx.TimeoutException as exc:
@@ -979,7 +984,7 @@ class LMStudioClient(ExtractionProvider):
                     "so the reported processing time does not include hidden retries."
                 ) from exc
             except httpx.HTTPError as exc:
-                raise LMStudioError("LM Studio stopped responding during inference") from exc
+                raise LMStudioError(f"{self.server_name} stopped responding during inference") from exc
             except (KeyError, IndexError, json.JSONDecodeError, ValidationError, ValueError) as exc:
                 last_error = exc
                 if attempt == 0:

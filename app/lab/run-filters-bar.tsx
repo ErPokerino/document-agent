@@ -33,7 +33,7 @@ export function RunFiltersBar({ evaluations, filters, setFilters, children }: Pr
   const engineOptions = [...new Map(evaluations.map(run => [engineKey(run), {
     value: engineKey(run), label: engineOptionLabel(run),
   }])).values()].sort((a, b) => a.label.localeCompare(b.label));
-  const locations: Record<string, string> = { lm_studio: "On this machine", gemini: "Through an API", none: "No LLM" };
+  const locations: Record<string, string> = { lm_studio: "On this machine", gemini: "Through an API", model_server: "On a model server", none: "No LLM" };
   const selections = (["dataset", "model", "pipeline", "runsOn"] as const).flatMap(facet => filters[facet].map(value => ({
     facet, value, label: facet === "model" ? engineOptions.find(option => option.value === value)?.label || "Unavailable engine" : facet === "runsOn" ? locations[value] || value : value,
   })));
@@ -42,7 +42,7 @@ export function RunFiltersBar({ evaluations, filters, setFilters, children }: Pr
       <MultiFilter label="Dataset" options={distinctDatasets(evaluations).map(value => ({ value, label: value }))} value={filters.dataset} onChange={dataset => setFilters({ ...filters, dataset })} />
       <MultiFilter label="Extraction engine" options={engineOptions} value={filters.model} onChange={model => setFilters({ ...filters, model })} />
       <MultiFilter label="Pipeline" options={distinctPipelines(evaluations).map(value => ({ value, label: value }))} value={filters.pipeline} onChange={pipeline => setFilters({ ...filters, pipeline })} />
-      <MultiFilter label="LLM runs on" options={[{ value: "lm_studio", label: "On this machine" }, { value: "gemini", label: "Through an API" }, { value: "none", label: "No LLM" }]} value={filters.runsOn} onChange={runsOn => setFilters({ ...filters, runsOn })} />
+      <MultiFilter label="LLM runs on" options={[{ value: "lm_studio", label: "On this machine" }, { value: "gemini", label: "Through an API" }, { value: "model_server", label: "On a model server" }, { value: "none", label: "No LLM" }]} value={filters.runsOn} onChange={runsOn => setFilters({ ...filters, runsOn })} />
       <label><span>From</span>
         <input type="date" value={filters.since} onChange={(event) => setFilters({ ...filters, since: event.target.value })} />
       </label>

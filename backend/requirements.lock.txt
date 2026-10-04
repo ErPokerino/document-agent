@@ -35,6 +35,9 @@ pandas==3.0.6
 pillow==12.3.0
 plotly==7.1.0
 pluggy==1.6.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
+psycopg-pool==3.3.3
 pyasn1==0.6.4
 pyasn1_modules==0.4.2
 pycparser==3.0

@@ -223,7 +223,7 @@ class PromptPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompts: PromptConfiguration
-    provider: Literal["lm_studio", "gemini"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server"] = "lm_studio"
 
 
 class PromptPreview(BaseModel):

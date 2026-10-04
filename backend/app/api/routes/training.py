@@ -24,9 +24,10 @@ from app.pipeline.store import InvalidPipelineName, UnknownPipeline
 from app.services.spreadsheet import content_disposition
 from app.training.artifacts import InvalidArtifact, StoredArtifact, UnknownArtifact
 from app.training.corpus import LabelledDocument, executable_readers, read_corpus, reader_signature, reading_steps
-from app.training.jobs import TrainingJob
+from app.jobs.store import Job
+from app.pipeline.definition import PipelineStep
 from app.training.algorithms import ALGORITHMS, algorithm as find_algorithm
-from app.training.trainer import progress_callback, select_documents, train_model
+from app.training.trainer import select_documents, train_model
 
 router = APIRouter()
 
@@ -215,31 +216,37 @@ async def training_providers() -> list[TrainingProvider]:
     return PROVIDERS
 
 
-def _job_model(job: TrainingJob) -> TrainingJobModel:
+def _job_model(job: Job) -> TrainingJobModel:
+    # A training job is shown under the algorithm it trains.
+    kind = str(job.payload.get("algorithm") or job.kind)
     return TrainingJobModel(
-        id=job.id, kind=job.kind, name=job.name, created_at=job.created_at, status=job.status,  # type: ignore[arg-type]
+        id=job.id, kind=kind, name=job.name, created_at=job.created_at, status=job.status,  # type: ignore[arg-type]
         total=job.total, done=job.done, artifact_id=job.artifact_id, error=job.error, skipped=job.skipped,
         output=job.output, examples=job.examples, phase=job.phase,
     )
 
 
+def _training_job(job_id: int) -> Job | None:
+    job = deps.job_store.get(job_id)
+    return job if job is not None and job.kind in deps.TRAINING_JOB_KINDS else None
+
+
 @router.get("/api/training/jobs", response_model=list[TrainingJobModel])
 async def list_training_jobs() -> list[TrainingJobModel]:
-    return [_job_model(job) for job in deps.training_jobs.all()]
+    return [_job_model(job) for job in deps.job_store.latest(deps.TRAINING_JOB_KINDS)]
 
 
 @router.post("/api/training/jobs/{job_id}/cancel", response_model=TrainingJobModel, status_code=202)
 async def cancel_training_job(job_id: int) -> TrainingJobModel:
-    job = deps.training_jobs.get(job_id)
+    job = _training_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"No training job with id {job_id}")
     if job.status != "running":
         raise HTTPException(status_code=409, detail="That training job is not running.")
-    job.cancelled.set()
-    if job.task is not None and not job.task.done():
-        job.task.cancel()
-    job.status = "cancelled"
-    return _job_model(job)
+    deps.job_store.request_cancel(job_id)
+    deps.job_store.finish(job_id, "cancelled")
+    deps.jobs.cancel(job_id)
+    return _job_model(_training_job(job_id))  # type: ignore[arg-type]
 
 
 def _labelled_documents(datasets: list[str]) -> list[LabelledDocument]:
@@ -271,7 +278,7 @@ async def training_algorithms() -> list[AlgorithmInfo]:
 
 @router.post("/api/training/models", response_model=TrainingJobModel, status_code=202)
 async def start_training(request: TrainingRequest) -> TrainingJobModel:
-    if deps.training_jobs.running() is not None:
+    if deps.job_store.active(deps.TRAINING_JOB_KINDS) is not None:
         raise HTTPException(status_code=409, detail="A training job is already running.")
     try:
         chosen = find_algorithm(request.algorithm)
@@ -321,12 +328,6 @@ async def start_training(request: TrainingRequest) -> TrainingJobModel:
             ),
         )
 
-    job = deps.training_jobs.start(chosen.id, request.name)
-    job.total = len(selected)
-    job.phase = "reading"
-    steps = executable_readers(readers, definition.page_limit)
-    targets = [configured[name] for name in request.entities]
-    inputs = [configured[name] for name in request.input_fields]
     training: dict[str, Any] = {
         "datasets": request.datasets,
         "pipeline": definition.name,
@@ -336,49 +337,73 @@ async def start_training(request: TrainingRequest) -> TrainingJobModel:
         "cutoff_before": request.cutoff_before if cutoff else None,
         "excluded_by_cutoff": excluded,
     }
+    job_id = await deps.start_job(
+        "training",
+        request.name,
+        {
+            "algorithm": chosen.id,
+            "request": request.model_dump(mode="json"),
+            "parameters": parameters,
+            # Pinned above: the job reads at these versions wherever it runs.
+            "readers": [step.model_dump(mode="json") for step in readers],
+            "page_limit": definition.page_limit,
+            "training": training,
+        },
+        total=len(selected),
+    )
+    deps.job_store.progress(job_id, phase="reading")
+    return _job_model(deps.job_store.get(job_id))  # type: ignore[arg-type]
 
-    def on_phase(phase: str) -> None:
-        job.phase = phase
 
-    async def drive() -> None:
-        try:
-            read, skipped = await read_corpus(
-                selected,
-                steps,
-                # Training measures nothing about time or cost: stored readings
-                # are always reused.
-                lambda name, content: deps.pipeline_context(settings, name, content, reuse_readings=True),
-                on_progress=progress_callback(job),
-                cancelled=job.cancelled,
-            )
-            job.skipped = [f"{name}: {reason}" for name, reason in skipped]
-            if len(read) < 2:
-                raise ValueError(f"Text was read from {len(read)} of {len(selected)} documents; at least two are needed.")
-            stored = await asyncio.to_thread(
-                train_model,
-                store=deps.artifact_store,
-                name=request.name,
-                algorithm=chosen,
-                read=read,
-                targets=targets,
-                input_fields=inputs,
-                text=request.text,
-                parameters=parameters,
-                training={**training, "unreadable": len(skipped)},
-                on_phase=on_phase,
-            )
-            job.artifact_id = stored.id
-            job.status = "completed"
-        except asyncio.CancelledError:
-            job.status = "cancelled"
-        except Exception as exc:  # noqa: BLE001 - a job must never end silently
-            job.status = "failed"
-            job.error = str(exc)
-        finally:
-            job.phase = None
+def _progress(job_id: int):
+    def advance(done: int) -> None:
+        deps.job_store.progress(job_id, done=done)
 
-    job.task = asyncio.create_task(drive())
-    return _job_model(job)
+    return advance
+
+
+async def run_training_job(job: Job, cancelled: asyncio.Event) -> None:
+    """The work of a `training` job: read the corpus, train, validate and store a model.
+
+    The documents are selected again from the request, which gives the same
+    selection the request was accepted with unless the datasets changed in
+    between — and then the model records what it was actually trained on.
+    """
+    request = TrainingRequest.model_validate(job.payload["request"])
+    chosen = find_algorithm(request.algorithm)
+    settings = deps.settings_store.read()
+    configured = {entity.name: entity for entity in settings.prompts.entities}
+    cutoff = date.fromisoformat(request.cutoff_before) if request.cutoff_before else None
+    documents = await asyncio.to_thread(_labelled_documents, request.datasets)
+    selected, _ = select_documents(documents, request.entities, request.cutoff_entity if cutoff else None, cutoff)
+    deps.job_store.progress(job.id, total=len(selected), phase="reading")
+    readers = [PipelineStep.model_validate(step) for step in job.payload["readers"]]
+    read, skipped = await read_corpus(
+        selected,
+        executable_readers(readers, int(job.payload["page_limit"])),
+        # Training measures nothing about time or cost: stored readings are
+        # always reused.
+        lambda name, content: deps.pipeline_context(settings, name, content, reuse_readings=True),
+        on_progress=_progress(job.id),
+        cancelled=cancelled,
+    )
+    deps.job_store.progress(job.id, skipped=[f"{name}: {reason}" for name, reason in skipped])
+    if len(read) < 2:
+        raise ValueError(f"Text was read from {len(read)} of {len(selected)} documents; at least two are needed.")
+    stored = await asyncio.to_thread(
+        train_model,
+        store=deps.artifact_store,
+        name=request.name,
+        algorithm=chosen,
+        read=read,
+        targets=[configured[name] for name in request.entities],
+        input_fields=[configured[name] for name in request.input_fields],
+        text=request.text,
+        parameters=job.payload["parameters"],
+        training={**job.payload["training"], "unreadable": len(skipped)},
+        on_phase=lambda phase: deps.job_store.progress(job.id, phase=phase),
+    )
+    deps.job_store.progress(job.id, artifact_id=stored.id)
 
 
 def _reading_plan(pipeline: str, settings: Any) -> tuple[Any, list[Any]]:
@@ -397,9 +422,7 @@ def _reading_plan(pipeline: str, settings: Any) -> tuple[Any, list[Any]]:
 @router.post("/api/training/exports", response_model=TrainingJobModel, status_code=202)
 async def start_fine_tuning_export(request: FineTuningExportRequest) -> TrainingJobModel:
     """Write the labelled datasets as supervised fine-tuning examples, one JSON per line."""
-    from app.training.sft import example
-
-    if deps.training_jobs.running() is not None:
+    if deps.job_store.active(deps.TRAINING_JOB_KINDS) is not None:
         raise HTTPException(status_code=409, detail="A training job is already running.")
     for dataset in request.datasets:
         deps.require_dataset(dataset)
@@ -410,47 +433,53 @@ async def start_fine_tuning_export(request: FineTuningExportRequest) -> Training
     if not documents:
         raise HTTPException(status_code=400, detail="These datasets hold no labelled document.")
 
-    job = deps.training_jobs.start("fine_tuning_export", request.name)
-    job.total = len(documents)
-    steps = executable_readers(readers, definition.page_limit)
+    job_id = await deps.start_job(
+        "fine_tuning_export",
+        request.name,
+        {
+            "request": request.model_dump(mode="json"),
+            "readers": [step.model_dump(mode="json") for step in readers],
+            "page_limit": definition.page_limit,
+        },
+        total=len(documents),
+    )
+    return _job_model(deps.job_store.get(job_id))  # type: ignore[arg-type]
+
+
+async def run_export_job(job: Job, cancelled: asyncio.Event) -> None:
+    """The work of a `fine_tuning_export` job: the labelled documents as JSONL examples."""
+    from app.training.sft import example
+
+    request = FineTuningExportRequest.model_validate(job.payload["request"])
+    settings = deps.settings_store.read()
     prompts = settings.prompts
-
-    async def drive() -> None:
+    documents = await asyncio.to_thread(_labelled_documents, request.datasets)
+    deps.job_store.progress(job.id, total=len(documents))
+    readers = [PipelineStep.model_validate(step) for step in job.payload["readers"]]
+    read, skipped = await read_corpus(
+        documents,
+        executable_readers(readers, int(job.payload["page_limit"])),
+        lambda name, content: deps.pipeline_context(settings, name, content, reuse_readings=True),
+        on_progress=_progress(job.id),
+        cancelled=cancelled,
+    )
+    lines = []
+    for item in read:
         try:
-            read, skipped = await read_corpus(
-                documents,
-                steps,
-                lambda name, content: deps.pipeline_context(settings, name, content, reuse_readings=True),
-                on_progress=progress_callback(job),
-                cancelled=job.cancelled,
-            )
-            lines = []
-            for item in read:
-                try:
-                    lines.append(json.dumps(
-                        example(request.format, prompts, item.document.labels, item.text,
-                                total_pages=item.total_pages, processed_pages=item.processed_pages),
-                        ensure_ascii=False,
-                    ))
-                except ValueError as exc:
-                    skipped.append((f"{item.document.dataset}/{item.document.name}", str(exc)))
-            job.skipped = [f"{name}: {reason}" for name, reason in skipped]
-            if not lines:
-                raise ValueError("No document could be written as an example.")
-            deps.EXPORTS_PATH.mkdir(parents=True, exist_ok=True)
-            output = f"{job.id}-{safe_file_name(request.name)}-{request.format}.jsonl"
-            (deps.EXPORTS_PATH / output).write_text("\n".join(lines) + "\n", encoding="utf-8")
-            job.output = output
-            job.examples = len(lines)
-            job.status = "completed"
-        except asyncio.CancelledError:
-            job.status = "cancelled"
-        except Exception as exc:  # noqa: BLE001 - a job must never end silently
-            job.status = "failed"
-            job.error = str(exc)
-
-    job.task = asyncio.create_task(drive())
-    return _job_model(job)
+            lines.append(json.dumps(
+                example(request.format, prompts, item.document.labels, item.text,
+                        total_pages=item.total_pages, processed_pages=item.processed_pages),
+                ensure_ascii=False,
+            ))
+        except ValueError as exc:
+            skipped.append((f"{item.document.dataset}/{item.document.name}", str(exc)))
+    deps.job_store.progress(job.id, skipped=[f"{name}: {reason}" for name, reason in skipped])
+    if not lines:
+        raise ValueError("No document could be written as an example.")
+    deps.EXPORTS_PATH.mkdir(parents=True, exist_ok=True)
+    output = f"{job.id}-{safe_file_name(request.name)}-{request.format}.jsonl"
+    (deps.EXPORTS_PATH / output).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    deps.job_store.progress(job.id, output=output, examples=len(lines))
 
 
 @router.get("/api/training/exports/{output}", response_class=Response)

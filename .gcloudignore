@@ -1,0 +1,18 @@
+# What `gcloud builds submit` must never upload: local state, real
+# documents, credentials, build output. Mirrors .dockerignore.
+.git
+.gitignore
+.venv
+node_modules
+dist
+.next
+.vinext
+.runtime
+.pytest_cache
+backend/data
+tmp
+outputs
+work
+**/__pycache__
+.env*
+!.env.example

@@ -136,7 +136,7 @@ function ExperimentGrid({ experiment, onOpenRun, costOf }: { experiment: Experim
         <thead>
           <tr>
             <th aria-label="Pipeline" />
-            {columns.map((column) => <th key={column.key}>{column.label}<small>{column.provider === "gemini" ? "hosted" : column.provider === "lm_studio" ? "local" : ""}</small></th>)}
+            {columns.map((column) => <th key={column.key}>{column.label}<small>{column.provider === "gemini" ? "hosted" : column.provider === "lm_studio" ? "local" : column.provider === "model_server" ? "model server" : ""}</small></th>)}
           </tr>
         </thead>
         <tbody>

@@ -27,7 +27,7 @@ export type AlgorithmInfo = {
 };
 
 export type AppSettings = {
-  provider: "lm_studio" | "gemini";
+  provider: "lm_studio" | "gemini" | "model_server";
   model: string;
   excluded_model_ids: string[];
   gemini: GeminiSettings;
@@ -173,7 +173,7 @@ export type Evaluation = {
   error: string | null;
   max_pages: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini" | "none";
+  provider: "lm_studio" | "gemini" | "model_server" | "none";
   steps: string[];
   execution_profile: ModelExecutionProfile | null;
   succeeded_documents: number;
@@ -210,7 +210,7 @@ export type EvaluationDetail = {
   error: string | null;
   max_pages: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini" | "none";
+  provider: "lm_studio" | "gemini" | "model_server" | "none";
   steps: string[];
   execution_profile: ModelExecutionProfile | null;
   succeeded_documents: number;
@@ -285,7 +285,7 @@ export type Experiment = {
 export type ExperimentCell = {
   index: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini" | "none";
+  provider: "lm_studio" | "gemini" | "model_server" | "none";
   model: string;
   status: string;
   skipped: string | null;
@@ -314,7 +314,7 @@ export type ExperimentComparison = {
 };
 
 export type ExperimentModelChoice = {
-  provider: "lm_studio" | "gemini";
+  provider: "lm_studio" | "gemini" | "model_server";
   model: string;
 };
 
@@ -544,8 +544,8 @@ export type Metrics = {
 };
 
 export type ModelExecutionProfile = {
-  provider: "lm_studio" | "gemini";
-  profile: "standard" | "compatibility" | "compatibility_partial" | "hosted";
+  provider: "lm_studio" | "gemini" | "model_server";
+  profile: "standard" | "compatibility" | "compatibility_partial" | "hosted" | "server";
   parameters: string | null;
   quantization: string | null;
   model_size_bytes: number | null;
@@ -563,7 +563,7 @@ export type ModelExecutionProfile = {
 export type ModelInfo = {
   id: string;
   name: string;
-  provider: "lm_studio" | "gemini";
+  provider: "lm_studio" | "gemini" | "model_server";
   parameters: string | null;
   quantization: string | null;
   size_bytes: number | null;
@@ -692,7 +692,7 @@ export type PromptPreview = {
 
 export type PromptPreviewRequest = {
   prompts: PromptConfiguration;
-  provider: "lm_studio" | "gemini";
+  provider: "lm_studio" | "gemini" | "model_server";
 };
 
 export type ReadingCacheStatus = {
@@ -728,6 +728,16 @@ export type SavedPipeline = {
   steps: PipelineStep[];
   problems: string[];
   warnings: string[];
+};
+
+export type Session = {
+  required: boolean;
+  user: string | null;
+};
+
+export type SignIn = {
+  username: string;
+  password: string;
 };
 
 export type StepCatalogueEntry = {

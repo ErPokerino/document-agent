@@ -241,11 +241,14 @@ def reading_pipeline() -> None:
 
 
 def wait_for(api, job_id: int) -> dict:
-    for _ in range(200):
+    # Generous: gradient boosting on a loaded CI runner takes seconds, and a
+    # finished job returns at once.
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
         job = next(job for job in api.get("/api/training/jobs").json() if job["id"] == job_id)
         if job["status"] != "running":
             return job
-        time.sleep(0.02)
+        time.sleep(0.05)
     raise AssertionError("The training job did not finish")
 
 

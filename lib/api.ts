@@ -38,10 +38,20 @@ import type {
   StepCatalogueEntry,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+// The API's address, fixed at build time. "/" means the page's own origin: a
+// deployment serves the API behind the frontend (app/api/[...path]/route.ts),
+// so the sign-in cookie reaches every request, links and previews included.
+const configuredApi = process.env.NEXT_PUBLIC_API_URL;
+const API_BASE = configuredApi === undefined ? "http://127.0.0.1:8000" : configuredApi.replace(/\/+$/, "");
+
+/** Raised on window when the API answers that nobody is signed in. */
+export const SIGNED_OUT_EVENT = "docuflow:signed-out";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
+  if (response.status === 401 && !path.startsWith("/api/auth/") && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;
@@ -103,6 +113,10 @@ export const api = {
   deleteProcessor: (id: string) => request<void>(`/api/processors/${segment(id)}`, { method: "DELETE" }),
   inspectProcessor: (id: string) => request<import("./types").ProcessorInspection>(`/api/processors/${segment(id)}/inspect`),
   extractionEngine: () => request<import("./types").ExtractionEngine | null>("/api/lab/extraction-engine"),
+  session: () => request<import("./types").Session>("/api/auth/session"),
+  signIn: (username: string, password: string) =>
+    request<import("./types").Session>("/api/auth/login", json("POST", { username, password })),
+  signOut: () => request<import("./types").Session>("/api/auth/logout", { method: "POST" }),
   health: () => request<HealthStatus>("/api/health"),
   models: () => request<ModelInfo[]>("/api/models"),
   supplierRules: (idSubject?: string) =>

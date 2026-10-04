@@ -1,0 +1,31 @@
+# The three images a Google Cloud deployment runs, built by Cloud Build from
+# the same Dockerfiles CI builds (deploy/*.Dockerfile). Run by build.sh.
+#
+# _REPO   europe-west1-docker.pkg.dev/<project>/<repository>
+# _TAG    the git commit, so a deployment names the code it runs
+# _LLAMA  the llama.cpp server image, copied into Artifact Registry because
+#         Cloud Run pulls only from there (and Docker Hub)
+steps:
+  - id: backend
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    args: ["build", "-f", "deploy/backend.Dockerfile", "-t", "${_REPO}/backend:${_TAG}", "."]
+  - id: frontend
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    # "/": the browser calls the API on the page's own origin, through the
+    # frontend server (app/api/[...path]/route.ts).
+    args: ["build", "-f", "deploy/frontend.Dockerfile", "--build-arg", "NEXT_PUBLIC_API_URL=/", "-t", "${_REPO}/frontend:${_TAG}", "."]
+  - id: llama-cpp
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    entrypoint: bash
+    args: ["-c", "docker pull ${_LLAMA} && docker tag ${_LLAMA} ${_REPO}/llama-cpp-server:${_TAG}"]
+images:
+  - "${_REPO}/backend:${_TAG}"
+  - "${_REPO}/frontend:${_TAG}"
+  - "${_REPO}/llama-cpp-server:${_TAG}"
+options:
+  # Required with a user-managed build service account.
+  logging: CLOUD_LOGGING_ONLY
+timeout: 3600s

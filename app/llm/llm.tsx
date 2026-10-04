@@ -179,7 +179,7 @@ export function LanguageModels(props: Props) {
         <button aria-pressed={runsFilter === "local"} onClick={() => setRunsFilter("local")}>Local <small>{filterModels(models, { runs: "local" }).length}</small></button>
         <button aria-pressed={runsFilter === "api"} onClick={() => setRunsFilter("api")}>API <small>{filterModels(models, { runs: "api" }).length}</small></button>
       </div>
-      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {draftSettings.provider === "gemini" ? "API" : "Local"}. Model changes apply when saved.</p>
+      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {draftSettings.provider === "gemini" ? "API" : draftSettings.provider === "model_server" ? "Model server" : "Local"}. Model changes apply when saved.</p>
 
       {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}
 
@@ -249,11 +249,11 @@ export function LanguageModels(props: Props) {
             return (
               <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id, provider: model.provider }); setModelLoadState("idle"); setModelLoadReport(null); }}>
                 <span className="radio">{selected && <span />}</span>
-                <span className={`model-option-icon ${model.provider === "gemini" ? "hosted" : "local"}`} title={model.provider === "gemini" ? "Runs on Google's servers" : "Runs on this machine"}>
-                  {model.provider === "gemini" ? <Cloud size={17} /> : <HardDrive size={17} />}
+                <span className={`model-option-icon ${model.provider === "gemini" ? "hosted" : "local"}`} title={model.provider === "gemini" ? "Runs on Google's servers" : model.provider === "model_server" ? "Runs on the model server of this deployment" : "Runs on this machine"}>
+                  {model.provider === "gemini" ? <Cloud size={17} /> : model.provider === "model_server" ? <Server size={17} /> : <HardDrive size={17} />}
                 </span>
                 <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
-                <span className={`provider-tag ${model.provider}`}>{model.provider === "gemini" ? "Google API" : "Local"}</span>
+                <span className={`provider-tag ${model.provider}`}>{model.provider === "gemini" ? "Google API" : model.provider === "model_server" ? "Model server" : "Local"}</span>
                 <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
                   {model.capabilities_known === false ? <><HelpCircle size={11} /> Capabilities unknown</> : model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
                 </span>
@@ -272,7 +272,17 @@ export function LanguageModels(props: Props) {
           </div>
         )}
 
-        {runsFilter === "local" && selectedDraftModel && selectedDraftModel.provider !== "gemini" && (
+        {selectedDraftModel && selectedDraftModel.provider === "model_server" && (
+          <div className="model-loader ready">
+            <span className="model-loader-icon"><Server size={17} /></span>
+            <div className="model-loader-copy">
+              <strong>Served by the model server</strong>
+              <span>The server holds the model it was started with, so there is nothing to load or warm up from here. A server that scales to zero takes a while to answer its first request.</span>
+            </div>
+          </div>
+        )}
+
+        {runsFilter === "local" && selectedDraftModel && selectedDraftModel.provider === "lm_studio" && (
           <div className={`model-loader ${selectedRuntimeState}`}>
             <span className="model-loader-icon"><Power size={17} /></span>
             <div className="model-loader-copy">

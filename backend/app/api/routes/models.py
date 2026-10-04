@@ -39,6 +39,12 @@ async def health() -> HealthStatus:
 async def models() -> list[ModelInfo]:
     settings = deps.settings_store.read()
     hosted = deps.hosted_models(settings)
+    # A model server, when this deployment has one, is listed beside the
+    # rest; it being unreachable hides only its own models.
+    try:
+        hosted = [*await deps.ModelServerClient().list_models(settings.excluded_model_ids), *hosted]
+    except LMStudioError:
+        pass
     try:
         discovered = await deps.LMStudioClient(settings.lm_studio_url).list_models(
             settings.excluded_model_ids
@@ -83,9 +89,21 @@ async def runtime_engine() -> RuntimeEngineInfo:
     )
 
 
+async def _served_models() -> list[ModelInfo]:
+    try:
+        return await deps.ModelServerClient().list_models()
+    except LMStudioError:
+        return []
+
+
 @router.post("/api/models/load", response_model=ModelLoadResponse)
 async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
     settings = deps.settings_store.read()
+    if any(model.id == request.model for model in await _served_models()):
+        raise HTTPException(
+            status_code=400,
+            detail="This model is held by the model server, which loaded it when it started. It needs no loading here.",
+        )
     if find_model(request.model) is not None:
         raise HTTPException(
             status_code=400,

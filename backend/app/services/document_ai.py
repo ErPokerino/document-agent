@@ -213,6 +213,13 @@ class DocumentAiClient:
         return payload["access_token"], time.time() + float(payload.get("expires_in", 3600))
 
     async def _access_token(self) -> str:
+        from app import config
+
+        if config.gcp_runtime_identity():
+            # The identity the platform gives this container: no key file.
+            from app.services import gcp_runtime
+
+            return await gcp_runtime.access_token()
         if self._token is not None and time.time() < self._token_expires_at - TOKEN_MARGIN_SECONDS:
             return self._token
         self._token, self._token_expires_at = await self._exchange_assertion()

@@ -1,0 +1,78 @@
+# The DocuFlow web app on Cloud Run: one service, two containers, one origin.
+# The frontend receives every request and forwards /api to the backend beside
+# it on localhost, so the backend is never exposed and the sign-in cookie
+# covers everything. Long work does not run here: Lab runs, experiments and
+# training are Cloud Run job executions (worker-job.yaml), so this service is
+# billed per request and scales to zero. ${NAME} placeholders are filled by
+# deploy.sh from the env file.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ${PREFIX}
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        # One instance: sign-in throttling and the settings file assume it.
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/container-dependencies: '{"frontend":["backend"]}'
+    spec:
+      serviceAccountName: ${RUN_SA}
+      containerConcurrency: 80
+      timeoutSeconds: 900
+      containers:
+        - name: frontend
+          image: ${IMAGE_REPO}/frontend:${TAG}
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: DOCUFLOW_API_URL
+              value: http://127.0.0.1:8000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+        - name: backend
+          image: ${IMAGE_REPO}/backend:${TAG}
+          command: ["uvicorn"]
+          args: ["app.main:app", "--host", "127.0.0.1", "--port", "8000"]
+          env:
+${BACKEND_ENV}
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          startupProbe:
+            tcpSocket:
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 36
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: cloudsql
+              mountPath: /cloudsql
+      volumes:
+        - name: data
+          csi:
+            driver: gcsfuse.run.googleapis.com
+            readOnly: false
+            volumeAttributes:
+              bucketName: ${DATA_BUCKET}
+              # Owned by the image's non-root user; folders uploaded as plain
+              # object prefixes are listed; an artefact is stored by renaming
+              # its staging folder.
+              mountOptions: implicit-dirs,uid=10001,gid=10001,rename-dir-limit=1000
+        - name: cloudsql
+          cloudSqlInstance:
+            instances:
+              - ${PROJECT_ID}:${REGION}:${SQL_INSTANCE}

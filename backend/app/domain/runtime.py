@@ -35,7 +35,7 @@ class RuntimeEngineInfo(BaseModel):
 class ModelInfo(BaseModel):
     id: str
     name: str
-    provider: Literal["lm_studio", "gemini"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server"] = "lm_studio"
     parameters: str | None = None
     quantization: str | None = None
     size_bytes: int | None = None
@@ -87,8 +87,8 @@ class ModelExecutionProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["lm_studio", "gemini"]
-    profile: Literal["standard", "compatibility", "compatibility_partial", "hosted"]
+    provider: Literal["lm_studio", "gemini", "model_server"]
+    profile: Literal["standard", "compatibility", "compatibility_partial", "hosted", "server"]
     parameters: str | None = None
     quantization: str | None = None
     model_size_bytes: int | None = None

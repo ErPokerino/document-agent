@@ -27,8 +27,10 @@ export function describeDataFlow(
   const callsModel = usesModel(steps);
   // A hosted model that is never called sends nothing.
   const modelInTheCloud = provider === "gemini" && callsModel;
+  // A self-hosted model answers on the server this deployment runs it on.
+  const modelOnServer = provider === "model_server" && callsModel;
 
-  if (!uploaded && !modelInTheCloud) {
+  if (!uploaded && !modelInTheCloud && !modelOnServer) {
     return {
       heading: "Private processing",
       detail: "Documents stay on this machine: every step runs here.",
@@ -43,15 +45,16 @@ export function describeDataFlow(
       : "Google Document AI reads the pages");
   }
   if (modelInTheCloud) destinations.push("the Gemini API extracts the fields");
+  if (modelOnServer) destinations.push("the model server configured for this deployment extracts the fields");
 
   const closing = !callsModel
     ? "No language model is involved."
-    : modelInTheCloud
+    : modelInTheCloud || modelOnServer
       ? "Nothing is kept on this machine by them."
       : "The model answers on this machine.";
 
   return {
-    heading: "Sent to Google",
+    heading: uploaded || modelInTheCloud ? (modelOnServer ? "Sent to Google and the model server" : "Sent to Google") : "Sent to the model server",
     detail: `${destinations.join(", and ")}. ${closing}`,
     leavesTheMachine: true,
   };
