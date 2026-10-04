@@ -13,3 +13,8 @@ pytest-asyncio>=0.25,<2
 numpy>=2.2,<3
 scipy>=1.15,<2
 scikit-learn>=1.6,<2
+# Gradient boosting for trained models. CatBoost brings matplotlib, pandas and
+# plotly with it; they are its own dependencies, not used by DocuFlow.
+lightgbm>=4.5,<5
+xgboost>=3,<4
+catboost>=1.2,<2

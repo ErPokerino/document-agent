@@ -70,6 +70,7 @@ class KnnModel:
         self.matrix = matrix
         self.documents = documents
         self.parameters = parameters
+        self.votes = parameters.k
 
     # -- training ------------------------------------------------------------
 
@@ -97,8 +98,11 @@ class KnnModel:
     def predict(self, text: str, entity: str, *, exclude: set[int] | None = None) -> Prediction | None:
         return self._vote(self.similarities(text), entity, exclude or set())
 
-    def predict_all(self, text: str, entities: list[str]) -> dict[str, Prediction | None]:
-        """Every field from one comparison: the similarities do not depend on the field."""
+    def predict_all(self, text: str, entities: list[str], fields: dict[str, Any] | None = None) -> dict[str, Prediction | None]:
+        """Every field from one comparison: the similarities do not depend on the field.
+
+        `fields` is accepted and ignored: a neighbour is found from text alone.
+        """
         similarities = self.similarities(text)
         return {entity: self._vote(similarities, entity, set()) for entity in entities}
 

@@ -30,7 +30,7 @@ from typing import Any
 from app.training import knn
 
 ID = re.compile(r"^[0-9a-f]{32}$")
-KIND_FILES: dict[str, tuple[str, ...]] = {knn.KIND: knn.FILES}
+CLASSIFIER = "classifier"
 # An archive is a manifest and a few arrays; anything near this is not one.
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 
@@ -48,6 +48,36 @@ class StoredArtifact:
     id: str
     manifest: dict[str, Any]
     size_bytes: int
+
+
+def expected_files(manifest: dict[str, Any]) -> list[str]:
+    """The files a manifest's kind consists of, refusing any a kind does not declare.
+
+    A nearest-neighbour model is a fixed set. A classifier lists its own —
+    one set per field — and each name must be one a classifier can have:
+    features, classes, or a model format an algorithm here writes.
+    """
+    from app.training.classifier import classifier_files_allowed
+
+    kind = str(manifest.get("kind"))
+    if kind == knn.KIND:
+        return list(knn.FILES)
+    if kind == CLASSIFIER:
+        listed = [str(name) for name in manifest.get("files") or []]
+        entities = [str(name) for name in manifest.get("entities") or []]
+        refused = [name for name in listed if not classifier_files_allowed(name, entities)]
+        if refused:
+            raise InvalidArtifact(f"A classifier does not have the files: {', '.join(sorted(refused))}")
+        return listed
+    raise InvalidArtifact(f"{kind!r} is not a kind of model this version can run")
+
+
+def runnable(manifest: dict[str, Any], files: dict[str, bytes]) -> Any:
+    from app.training.classifier import ClassifierModel
+
+    if manifest.get("kind") == CLASSIFIER:
+        return ClassifierModel.from_files(files, manifest)
+    return knn.KnnModel.from_files(files, knn.KnnParameters.model_validate(manifest.get("parameters") or {}))
 
 
 def artifact_id(manifest: dict[str, Any], files: dict[str, bytes]) -> str:
@@ -96,29 +126,28 @@ class ArtifactStore:
 
     def files(self, artifact: str) -> dict[str, bytes]:
         stored = self.get(artifact)
-        names = KIND_FILES.get(str(stored.manifest.get("kind")))
-        if names is None:
-            raise InvalidArtifact(f"{artifact} is of a kind this version cannot run: {stored.manifest.get('kind')!r}")
         directory = self._dir(artifact)
-        return {name: (directory / name).read_bytes() for name in names}
+        return {name: (directory / name).read_bytes() for name in expected_files(stored.manifest)}
 
-    def load(self, artifact: str) -> "knn.KnnModel":
+    def load(self, artifact: str) -> Any:
         """The runnable model, read once and kept: a Lab run asks for it per document."""
         if artifact not in self._loaded:
             stored = self.get(artifact)
             files = self.files(artifact)
             if artifact_id(stored.manifest, files) != artifact:
                 raise InvalidArtifact(f"The files of {artifact} no longer match its id")
-            parameters = knn.KnnParameters.model_validate(stored.manifest["parameters"])
-            self._loaded[artifact] = knn.KnnModel.from_files(files, parameters)
+            try:
+                self._loaded[artifact] = runnable(stored.manifest, files)
+            except (ValueError, KeyError) as exc:
+                raise InvalidArtifact(str(exc)) from exc
         return self._loaded[artifact]
 
     # -- writing -----------------------------------------------------------------
 
     def save(self, manifest: dict[str, Any], files: dict[str, bytes]) -> StoredArtifact:
-        kind = str(manifest.get("kind"))
-        if kind not in KIND_FILES or set(files) != set(KIND_FILES[kind]):
-            raise InvalidArtifact(f"A {kind} model is the files {', '.join(KIND_FILES.get(kind, ()))}")
+        expected = expected_files(manifest)
+        if set(files) != set(expected):
+            raise InvalidArtifact(f"A {manifest.get('kind')} model is the files {', '.join(sorted(expected))}")
         identity = artifact_id(manifest, files)
         target = self._dir(identity)
         if target.exists():
@@ -173,9 +202,7 @@ class ArtifactStore:
             if not isinstance(manifest, dict):
                 raise InvalidArtifact("manifest.json must hold a JSON object")
             kind = str(manifest.get("kind"))
-            expected = KIND_FILES.get(kind)
-            if expected is None:
-                raise InvalidArtifact(f"{kind!r} is not a kind of model this version can run")
+            expected = expected_files(manifest)
             unexpected = names - set(expected) - {"manifest.json"}
             if unexpected:
                 raise InvalidArtifact(f"The archive holds files a {kind} model does not have: {', '.join(sorted(unexpected))}")
@@ -184,8 +211,7 @@ class ArtifactStore:
                 raise InvalidArtifact(f"The archive lacks: {', '.join(sorted(missing))}")
             files = {name: archive.read(name) for name in expected}
         try:
-            parameters = knn.KnnParameters.model_validate(manifest.get("parameters") or {})
-            knn.KnnModel.from_files(files, parameters)
+            runnable(manifest, files)
         except (ValueError, KeyError, OSError) as exc:
             raise InvalidArtifact(f"The model files cannot be read: {exc}") from exc
         for key in ("training", "entities"):

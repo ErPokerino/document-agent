@@ -484,7 +484,7 @@ class LookUpInMasterData:
         context.artifacts["extraction"] = extraction
 
 
-# What a TF-IDF cosine similarity is called in the three words the rest of the
+# What a TF-IDF cosine similarity or a class probability is called in the three words the rest of the
 # app speaks. A display convention, not a calibration: nothing has measured
 # where these bands fall on real documents, so a threshold belongs on the score
 # itself, which the Lab's coverage curve sets against accuracy.
@@ -531,7 +531,12 @@ class PredictWithArtifact:
             context.artifacts["extraction"] = extraction
             return
 
-        predictions = await asyncio.to_thread(self.model.predict_all, text, [entity.name for entity in self.entities])
+        # A classifier may also read fields earlier steps extracted; a
+        # nearest-neighbour model ignores them.
+        fields = {name: field.value for name, field in extraction.items()}
+        predictions = await asyncio.to_thread(
+            self.model.predict_all, text, [entity.name for entity in self.entities], fields
+        )
         for entity in self.entities:
             extraction[entity.name] = self._field(entity, predictions.get(entity.name))
         context.artifacts["extraction"] = extraction
@@ -542,19 +547,25 @@ class PredictWithArtifact:
                 value=None, confidence="low",
                 warning=f"No document the model learned from is labelled for '{entity.name}'.",
             )
-        nearest = f"{prediction.nearest.dataset}/{prediction.nearest.document}" if prediction.nearest else "a training document"
-        evidence = (
-            f"{self.artifact_name}: nearest {nearest}, similarity {prediction.score:.2f}"
-            + (f", {round(prediction.agreement * 100)}% of the vote" if self.model.parameters.k > 1 else "")
-        )
-        if prediction.score < self.minimum_similarity:
-            return FieldExtraction(
-                value=None, confidence="low", score=prediction.score, evidence=evidence,
-                warning=(
-                    f"The nearest labelled document ({nearest}) is {prediction.score:.2f} similar, "
-                    f"below the {self.minimum_similarity:.2f} this pipeline asks for."
-                ),
+        if prediction.nearest is not None:
+            nearest = f"{prediction.nearest.dataset}/{prediction.nearest.document}"
+            evidence = (
+                f"{self.artifact_name}: nearest {nearest}, similarity {prediction.score:.2f}"
+                + (f", {round(prediction.agreement * 100)}% of the vote" if getattr(self.model, "votes", 1) > 1 else "")
             )
+            below = (
+                f"The nearest labelled document ({nearest}) is {prediction.score:.2f} similar, "
+                f"below the {self.minimum_similarity:.2f} this pipeline asks for."
+            )
+        else:
+            nearest = "the model"
+            evidence = f"{self.artifact_name}: probability {prediction.score:.2f}"
+            below = (
+                f"The model gives its answer a probability of {prediction.score:.2f}, "
+                f"below the {self.minimum_similarity:.2f} this pipeline asks for."
+            )
+        if prediction.score < self.minimum_similarity:
+            return FieldExtraction(value=None, confidence="low", score=prediction.score, evidence=evidence, warning=below)
         if prediction.value is None:
             return FieldExtraction(value=None, confidence="low", score=prediction.score, evidence=evidence)
         confidence = "high" if prediction.score >= KNN_HIGH else "medium" if prediction.score >= KNN_MEDIUM else "low"
@@ -563,7 +574,7 @@ class PredictWithArtifact:
         except ValueError as exc:
             return FieldExtraction(
                 value=None, confidence="low", score=prediction.score, evidence=evidence,
-                warning=f"The label {prediction.value!r} of {nearest} was discarded: {exc}.",
+                warning=f"The answer {prediction.value!r} from {nearest} was discarded: {exc}.",
             )
         return field.model_copy(update={"score": prediction.score, "evidence": evidence})
 

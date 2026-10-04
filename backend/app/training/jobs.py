@@ -31,6 +31,8 @@ class TrainingJob:
     # The file an export job wrote, under the exports folder.
     output: str | None = None
     examples: int = 0
+    # What a running job is doing now: reading, validating a fold, fitting.
+    phase: str | None = None
     task: asyncio.Task[Any] | None = None
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
 

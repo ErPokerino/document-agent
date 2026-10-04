@@ -253,7 +253,7 @@ def test_training_reads_the_datasets_and_registers_a_validated_model(api) -> Non
     seed(api, "train", TEXTS)
     reading_pipeline()
 
-    started = api.post("/api/training/knn", json={
+    started = api.post("/api/training/models", json={
         "name": "suppliers", "datasets": ["train"], "pipeline": "Local text", "entities": ["supplier_class"],
     })
     assert started.status_code == 202
@@ -274,7 +274,7 @@ def test_a_temporal_cutoff_learns_only_from_earlier_documents(api) -> None:
         api.put(f"/api/datasets/train/documents/{name}/labels", json={"labels": {"supplier_class": TEXTS[name][1], "date": day}})
     reading_pipeline()
 
-    job = wait_for(api, api.post("/api/training/knn", json={
+    job = wait_for(api, api.post("/api/training/models", json={
         "name": "before 2026", "datasets": ["train"], "pipeline": "Local text", "entities": ["supplier_class"],
         "cutoff_entity": "date", "cutoff_before": "2026-01-01",
     }).json()["id"])
@@ -288,7 +288,7 @@ def test_a_temporal_cutoff_learns_only_from_earlier_documents(api) -> None:
 def test_the_lab_refuses_to_score_a_model_on_the_documents_it_learned_from(api) -> None:
     seed(api, "train", TEXTS)
     reading_pipeline()
-    job = wait_for(api, api.post("/api/training/knn", json={
+    job = wait_for(api, api.post("/api/training/models", json={
         "name": "suppliers", "datasets": ["train"], "pipeline": "Local text", "entities": ["supplier_class"],
     }).json()["id"])
     deps.pipeline_store.save(predictor_pipeline(job["artifact_id"]))
@@ -372,3 +372,87 @@ def test_an_export_writes_one_example_per_fully_labelled_document(api) -> None:
     exported = api.get(f"/api/training/exports/{job['output']}")
     [line] = exported.text.strip().splitlines()
     assert json.loads(line)["messages"][2]["role"] == "assistant"
+
+
+# -- many algorithms -----------------------------------------------------------------
+
+
+def test_every_algorithm_says_whether_it_can_train_here(api) -> None:
+    listed = {entry["id"]: entry for entry in api.get("/api/training/algorithms").json()}
+
+    assert listed["logistic_regression"]["status"] == "available"
+    assert listed["jev"]["status"] == "not_connected"
+    assert {"knn_tfidf", "lightgbm", "xgboost", "catboost", "tabpfn"} <= set(listed)
+    assert all(spec["name"] and spec["label"] for entry in listed.values() for spec in entry["parameters"])
+
+
+@pytest.mark.parametrize("algorithm", ["logistic_regression", "lightgbm", "xgboost", "catboost"])
+def test_a_classifier_is_trained_validated_stored_and_served_as_a_step(api, algorithm) -> None:
+    seed(api, "train", TEXTS)
+    reading_pipeline()
+
+    job = wait_for(api, api.post("/api/training/models", json={
+        "name": algorithm, "algorithm": algorithm, "datasets": ["train"], "pipeline": "Local text",
+        "entities": ["supplier_class"], "text": {"reduce_to": 3},
+    }).json()["id"])
+
+    assert job["status"] == "completed", job
+    model = next(entry for entry in api.get("/api/artifacts").json() if entry["id"] == job["artifact_id"])
+    assert model["kind"] == "classifier" and model["algorithm"] == algorithm
+    assert model["validation_method"].endswith("grouped by file")
+    field = run(predictor_pipeline(job["artifact_id"]), deps.artifact_store, TEXTS["globex-1.pdf"][0])
+    assert field.value in ("ACME", "Globex")
+    assert "probability" in field.evidence
+
+
+def test_a_classifier_travels_as_a_zip_with_only_declared_files(api, tmp_path) -> None:
+    seed(api, "train", TEXTS)
+    reading_pipeline()
+    job = wait_for(api, api.post("/api/training/models", json={
+        "name": "lr", "algorithm": "logistic_regression", "datasets": ["train"], "pipeline": "Local text", "entities": ["supplier_class"],
+    }).json()["id"])
+
+    exported = deps.artifact_store.export(job["artifact_id"])
+    arrived = ArtifactStore(tmp_path / "elsewhere").import_archive(exported)
+
+    assert arrived.id == job["artifact_id"]
+    with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+        assert all(name.endswith((".json", ".npy")) for name in archive.namelist())
+
+
+def test_extracted_fields_can_be_features_beside_the_text(api) -> None:
+    seed(api, "train", TEXTS)
+    for name, (_, label) in TEXTS.items():
+        api.put(f"/api/datasets/train/documents/{name}/labels", json={"labels": {"supplier_class": label, "currency": "EUR" if label == "ACME" else "USD"}})
+    reading_pipeline()
+
+    job = wait_for(api, api.post("/api/training/models", json={
+        "name": "with currency", "algorithm": "lightgbm", "datasets": ["train"], "pipeline": "Local text",
+        "entities": ["supplier_class"], "input_fields": ["currency"], "text": {"reduce_to": 2},
+    }).json()["id"])
+
+    assert job["status"] == "completed", job
+    [model] = [entry for entry in api.get("/api/artifacts").json() if entry["id"] == job["artifact_id"]]
+    assert model["input_fields"] == ["currency"]
+
+
+def test_unknown_parameters_and_unavailable_algorithms_are_refused(api) -> None:
+    seed(api, "train", TEXTS)
+    reading_pipeline()
+    base = {"name": "x", "datasets": ["train"], "pipeline": "Local text", "entities": ["supplier_class"]}
+
+    assert "no parameter named depth" in api.post("/api/training/models", json={**base, "algorithm": "logistic_regression", "parameters": {"depth": 3}}).json()["detail"]
+    assert "not connected" in api.post("/api/training/models", json={**base, "algorithm": "jev"}).json()["detail"]
+    assert "reads the text alone" in api.post("/api/training/models", json={**base, "algorithm": "knn_tfidf", "input_fields": ["currency"]}).json()["detail"]
+
+
+def test_folds_keep_every_copy_of_a_file_together() -> None:
+    from app.training.corpus import LabelledDocument, ReadDocument
+    from app.training.trainer import folds_for
+
+    items = [ReadDocument(LabelledDocument("d", f"{i}.pdf", sha, b"", {}), "t") for i, sha in enumerate(["a", "b", "a", "c", "d", "e", "f"])]
+
+    folds = folds_for(items)
+
+    assert len(folds) == 5
+    assert any({0, 2} <= set(fold) for fold in folds)

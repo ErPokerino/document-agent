@@ -12,6 +12,20 @@ export type Confidence = FieldExtraction["confidence"];
 
 export type ModelRuntimeState = ModelInfo["runtime_state"];
 
+export type AlgorithmInfo = {
+  id: string;
+  label: string;
+  family: "neighbours" | "linear" | "boosting" | "foundation";
+  description: string;
+  status: "available" | "not_installed" | "not_connected";
+  runs: "local" | "remote";
+  install: string | null;
+  reads_text: boolean;
+  takes_fields: boolean;
+  default_reduce_to: number | null;
+  parameters: ParameterSpec[];
+};
+
 export type AppSettings = {
   provider: "lm_studio" | "gemini";
   model: string;
@@ -35,6 +49,13 @@ export type ArtifactSummary = {
   id: string;
   name: string;
   kind: string;
+  algorithm: string;
+  algorithm_label: string;
+  family: string | null;
+  input_fields: string[];
+  features: string;
+  hyperparameters: Record<string, unknown>;
+  runnable: boolean;
   created_at: string;
   entities: string[];
   input: string;
@@ -462,29 +483,6 @@ export type HealthStatus = {
   lm_studio_error: string | null;
 };
 
-export type KnnParameters = {
-  analyzer: "char_wb" | "word";
-  ngram_min: number;
-  ngram_max: number;
-  sublinear_tf: boolean;
-  min_df: number;
-  max_df: number;
-  max_features: number | null;
-  max_characters: number;
-  k: number;
-  weighting: "distance" | "uniform";
-};
-
-export type KnnTrainingRequest = {
-  name: string;
-  datasets: string[];
-  pipeline: string;
-  entities: string[];
-  parameters: KnnParameters;
-  cutoff_entity: string | null;
-  cutoff_before: string | null;
-};
-
 export type LabelValue = {
   value: string;
   documents: number;
@@ -601,6 +599,18 @@ export type ModelLoadResponse = {
 export type ModelPricing = {
   input_per_million: number | null;
   output_per_million: number | null;
+};
+
+export type ParameterSpec = {
+  name: string;
+  label: string;
+  kind: "int" | "float" | "choice" | "bool";
+  default: boolean | number | string;
+  minimum: number | null;
+  maximum: number | null;
+  step: number | null;
+  choices: string[];
+  help: string;
 };
 
 export type PipelineActivity = {
@@ -759,6 +769,18 @@ export type SupplierRuleUpdate = {
   note: string | null;
 };
 
+export type TextFeatures = {
+  analyzer: "char_wb" | "word";
+  ngram_min: number;
+  ngram_max: number;
+  sublinear_tf: boolean;
+  min_df: number;
+  max_df: number;
+  max_features: number | null;
+  max_characters: number;
+  reduce_to: number | null;
+};
+
 export type TrainingJobModel = {
   id: number;
   kind: string;
@@ -772,6 +794,7 @@ export type TrainingJobModel = {
   skipped: string[];
   output: string | null;
   examples: number;
+  phase: string | null;
 };
 
 export type TrainingProvider = {
@@ -781,4 +804,17 @@ export type TrainingProvider = {
   trains: string;
   status: "available" | "not_connected";
   description: string;
+};
+
+export type TrainingRequest = {
+  name: string;
+  algorithm: string;
+  datasets: string[];
+  pipeline: string;
+  entities: string[];
+  input_fields: string[];
+  text: TextFeatures;
+  parameters: Record<string, boolean | number | string>;
+  cutoff_entity: string | null;
+  cutoff_before: string | null;
 };

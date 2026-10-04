@@ -92,7 +92,7 @@ function TrainedModelSettings({ config, artifacts, onChange, onModels }: {
         >
           <option value="">Choose a trained model…</option>
           {artifacts.map((artifact) => (
-            <option key={artifact.id} value={artifact.id}>{artifact.name} · {artifact.id.slice(0, 8)}</option>
+            <option key={artifact.id} value={artifact.id} disabled={!artifact.runnable}>{artifact.name} · {artifact.algorithm_label} · {artifact.id.slice(0, 8)}</option>
           ))}
           {config.artifact_id && !chosen && <option value={config.artifact_id}>Unavailable · {config.artifact_id.slice(0, 8)}</option>}
         </select>
@@ -108,20 +108,20 @@ function TrainedModelSettings({ config, artifacts, onChange, onModels }: {
                 onChange={() => onChange({ ...config, entities: fields.includes(name) ? fields.filter((field) => field !== name) : [...fields, name] })}
               />
               <span>{name}</span>
-              {chosen.validation[name]?.accuracy != null && <small>{Math.round((chosen.validation[name].accuracy ?? 0) * 100)}% leave-one-out</small>}
+              {chosen.validation[name]?.accuracy != null && <small>{Math.round((chosen.validation[name].accuracy ?? 0) * 100)}% validated</small>}
             </label>
           ))}
         </fieldset>
       )}
       <label className="flow-threshold">
-        <span>Accept from<InfoHint text="Below this similarity to the nearest labelled document, the field is left empty with the reason. 0 accepts every prediction. The Lab's coverage curve shows what each threshold would keep and how often it is right." align="end" /></span>
-        <input type="range" aria-label="Minimum similarity to the nearest document" min={0} max={1} step={0.01} value={threshold}
+        <span>Accept from<InfoHint text="Below this score the field is left empty with the reason: the similarity to the nearest labelled document for a nearest-neighbour model, the class probability for the others. 0 accepts every prediction. The Lab's coverage curve shows what each threshold would keep and how often it is right." align="end" /></span>
+        <input type="range" aria-label="Minimum score" min={0} max={1} step={0.01} value={threshold}
           onChange={(event) => onChange({ ...config, minimum_similarity: Number(event.target.value) })} />
         <output>{threshold.toFixed(2)}</output>
       </label>
       <p className="field-help">
         {chosen
-          ? `Learned from ${chosen.documents} documents of ${chosen.datasets.join(", ")}, read by ${chosen.reader.map(stepLabel).join(" → ")}. Serve it text read the same way. Runs on this machine.`
+          ? `${chosen.algorithm_label}, learned from ${chosen.documents} documents of ${chosen.datasets.join(", ")}, read by ${chosen.reader.map(stepLabel).join(" → ")}.${chosen.input_fields.length ? ` It also reads ${chosen.input_fields.join(", ")}, so place it after the steps that extract them.` : ""} Serve it text read the same way. Runs on this machine.`
           : artifacts.length ? "Choose the model this step predicts with." : "No model has been trained yet."}
         {" "}<button type="button" className="link-button" onClick={onModels}>Open Models</button>
       </p>

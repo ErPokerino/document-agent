@@ -11,9 +11,10 @@ from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 
 from app.api import deps
 from app.domain.models import (
+    AlgorithmInfo,
     ArtifactSummary,
     FineTuningExportRequest,
-    KnnTrainingRequest,
+    TrainingRequest,
     ReadingCacheStatus,
     TrainingJobModel,
     TrainingProvider,
@@ -24,7 +25,8 @@ from app.services.spreadsheet import content_disposition
 from app.training.artifacts import InvalidArtifact, StoredArtifact, UnknownArtifact
 from app.training.corpus import LabelledDocument, executable_readers, read_corpus, reader_signature, reading_steps
 from app.training.jobs import TrainingJob
-from app.training.trainer import progress_callback, select_documents, train_knn
+from app.training.algorithms import ALGORITHMS, algorithm as find_algorithm
+from app.training.trainer import progress_callback, select_documents, train_model
 
 router = APIRouter()
 
@@ -101,14 +103,34 @@ def _used_by(artifact: str) -> list[str]:
     ]
 
 
+def _features_summary(text: dict[str, Any]) -> str:
+    if not text:
+        return ""
+    unit = "character" if text.get("analyzer") == "char_wb" else "word"
+    summary = f"TF-IDF, {unit} {text.get('ngram_min')}–{text.get('ngram_max')}-grams"
+    if text.get("reduce_to"):
+        summary += f", reduced to {text['reduce_to']} dimensions"
+    return summary
+
+
 def _summary(stored: StoredArtifact) -> ArtifactSummary:
     manifest = stored.manifest
     training = manifest.get("training") or {}
     validation = manifest.get("validation") or {}
+    identity = str(manifest.get("algorithm") or "knn_tfidf")
+    known = ALGORITHMS.get(identity)
+    text = manifest.get("text") or manifest.get("parameters") or {}
     return ArtifactSummary(
         id=stored.id,
         name=str(manifest.get("name") or stored.id),
         kind=str(manifest.get("kind")),
+        algorithm=identity,
+        algorithm_label=known.label if known else identity,
+        family=known.family if known else None,
+        input_fields=list(manifest.get("input_fields") or []),
+        features=_features_summary(text),
+        hyperparameters={key: value for key, value in (manifest.get("parameters") or {}).items() if key in {spec.name for spec in (known.parameters if known else [])}},
+        runnable=known is not None and known.status() == "available",
         created_at=str(manifest.get("created_at") or ""),
         entities=list(manifest.get("entities") or []),
         input=str(manifest.get("input") or "text"),
@@ -196,7 +218,7 @@ def _job_model(job: TrainingJob) -> TrainingJobModel:
     return TrainingJobModel(
         id=job.id, kind=job.kind, name=job.name, created_at=job.created_at, status=job.status,  # type: ignore[arg-type]
         total=job.total, done=job.done, artifact_id=job.artifact_id, error=job.error, skipped=job.skipped,
-        output=job.output, examples=job.examples,
+        output=job.output, examples=job.examples, phase=job.phase,
     )
 
 
@@ -241,17 +263,39 @@ def _labelled_documents(datasets: list[str]) -> list[LabelledDocument]:
     return documents
 
 
-@router.post("/api/training/knn", response_model=TrainingJobModel, status_code=202)
-async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
+@router.get("/api/training/algorithms", response_model=list[AlgorithmInfo])
+async def training_algorithms() -> list[AlgorithmInfo]:
+    return [algorithm.info() for algorithm in ALGORITHMS.values()]
+
+
+@router.post("/api/training/models", response_model=TrainingJobModel, status_code=202)
+async def start_training(request: TrainingRequest) -> TrainingJobModel:
     if deps.training_jobs.running() is not None:
         raise HTTPException(status_code=409, detail="A training job is already running.")
+    try:
+        chosen = find_algorithm(request.algorithm)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if chosen.status() == "not_connected":
+        raise HTTPException(status_code=400, detail=f"{chosen.label} runs on a service DocuFlow is not connected to.")
+    if chosen.status() == "not_installed":
+        raise HTTPException(status_code=400, detail=f"{chosen.label} is not installed on this machine: {chosen.install}.")
+    try:
+        parameters = chosen.resolve(request.parameters)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     for dataset in request.datasets:
         deps.require_dataset(dataset)
     settings = deps.settings_store.read()
     configured = {entity.name: entity for entity in settings.prompts.entities}
-    unknown = [name for name in request.entities if name not in configured]
+    unknown = [name for name in [*request.entities, *request.input_fields] if name not in configured]
     if unknown:
         raise HTTPException(status_code=400, detail=f"These fields are not configured in Extraction: {', '.join(unknown)}")
+    if request.input_fields and not chosen.takes_fields:
+        raise HTTPException(status_code=400, detail=f"{chosen.label} reads the text alone; it takes no fields as input.")
+    both = sorted(set(request.entities) & set(request.input_fields))
+    if both:
+        raise HTTPException(status_code=400, detail=f"A field cannot be both predicted and read as input: {', '.join(both)}")
     cutoff: date | None = None
     if request.cutoff_before:
         if not request.cutoff_entity or request.cutoff_entity not in configured:
@@ -276,10 +320,12 @@ async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
             ),
         )
 
-    job = deps.training_jobs.start("knn_tfidf", request.name)
+    job = deps.training_jobs.start(chosen.id, request.name)
     job.total = len(selected)
+    job.phase = "reading"
     steps = executable_readers(readers, definition.page_limit)
-    entities = [configured[name] for name in request.entities]
+    targets = [configured[name] for name in request.entities]
+    inputs = [configured[name] for name in request.input_fields]
     training: dict[str, Any] = {
         "datasets": request.datasets,
         "pipeline": definition.name,
@@ -289,6 +335,9 @@ async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
         "cutoff_before": request.cutoff_before if cutoff else None,
         "excluded_by_cutoff": excluded,
     }
+
+    def on_phase(phase: str) -> None:
+        job.phase = phase
 
     async def drive() -> None:
         try:
@@ -305,13 +354,17 @@ async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
             if len(read) < 2:
                 raise ValueError(f"Text was read from {len(read)} of {len(selected)} documents; at least two are needed.")
             stored = await asyncio.to_thread(
-                train_knn,
+                train_model,
                 store=deps.artifact_store,
                 name=request.name,
+                algorithm=chosen,
                 read=read,
-                entities=entities,
-                parameters=request.parameters,
+                targets=targets,
+                input_fields=inputs,
+                text=request.text,
+                parameters=parameters,
                 training={**training, "unreadable": len(skipped)},
+                on_phase=on_phase,
             )
             job.artifact_id = stored.id
             job.status = "completed"
@@ -320,6 +373,8 @@ async def start_knn_training(request: KnnTrainingRequest) -> TrainingJobModel:
         except Exception as exc:  # noqa: BLE001 - a job must never end silently
             job.status = "failed"
             job.error = str(exc)
+        finally:
+            job.phase = None
 
     job.task = asyncio.create_task(drive())
     return _job_model(job)
