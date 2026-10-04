@@ -1,3 +1,4 @@
+import pytest
 """Where a run's model happened, recorded on the run.
 
 Past runs can be filtered by where the model ran, and that cannot be worked
@@ -52,6 +53,7 @@ def test_a_pipeline_that_called_no_model_records_none(tmp_path) -> None:
     assert store.get_evaluation(run).provider == "none"
 
 
+@pytest.mark.sqlite_only
 def test_runs_from_before_this_column_are_placed_by_their_model(tmp_path) -> None:
     """The registry of hosted models is the best evidence available in hindsight."""
     path = tmp_path / "runs.db"

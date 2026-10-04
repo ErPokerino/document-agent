@@ -49,6 +49,7 @@ def test_an_empty_table_still_exports_its_header(tmp_path) -> None:
 # -- reading ------------------------------------------------------------------
 
 
+@pytest.mark.sqlite_only
 def test_a_round_trip_reproduces_the_register(store, tmp_path) -> None:
     csv_text = rows_to_csv(store, "suppliers")
     target = MasterDataStore(tmp_path / "copy.db")

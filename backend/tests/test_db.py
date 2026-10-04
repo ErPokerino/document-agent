@@ -2,10 +2,15 @@
 
 import sqlite3
 
+import pytest
+
 from app.evaluation.store import EvaluationStore
 from app.services import db
 from app.services.master_data import MasterDataStore
 from app.services.run_store import RunStore
+
+# Write-ahead logging, PRAGMA and file locking are SQLite's own.
+pytestmark = pytest.mark.sqlite_only
 from app.services.supplier_rules import SupplierRuleStore
 
 

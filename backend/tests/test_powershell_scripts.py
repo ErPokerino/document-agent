@@ -38,7 +38,7 @@ def test_runtime_scripts_are_valid_powershell() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is required by this Windows project")
+@pytest.mark.skipif(POWERSHELL is None or os.name != "nt", reason="The guard reads Windows process information")
 def test_process_guard_rejects_a_listener_from_another_project() -> None:
     """Starting DocuFlow must never stop or adopt an unrelated service on its ports."""
     command = """

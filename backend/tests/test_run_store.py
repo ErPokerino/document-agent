@@ -161,6 +161,7 @@ def test_a_run_records_the_pipeline_that_produced_it(store) -> None:
     assert store.get_run(run_id).pipeline == "ocr-then-llm"
 
 
+@pytest.mark.sqlite_only
 def test_a_run_recorded_before_pipelines_existed_reads_as_the_default(tmp_path) -> None:
     import sqlite3
 

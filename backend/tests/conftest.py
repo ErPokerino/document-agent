@@ -20,6 +20,15 @@ from app.api import deps
 from app.pipeline.store import PipelineStore
 
 
+def pytest_collection_modifyitems(config, items):
+    if not os.environ.get("DOCUFLOW_TEST_DATABASE_URL", "").strip():
+        return
+    skip = pytest.mark.skip(reason="Exercises SQLite itself; this run is against PostgreSQL")
+    for item in items:
+        if item.get_closest_marker("sqlite_only"):
+            item.add_marker(skip)
+
+
 @pytest.fixture(autouse=True)
 def database(monkeypatch):
     url = os.environ.get("DOCUFLOW_TEST_DATABASE_URL", "").strip()
@@ -44,7 +53,7 @@ def database(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def never_touch_real_data(database, tmp_path, monkeypatch):
+def never_touch_real_data(database, tmp_path, tmp_path_factory, monkeypatch):
     # Nothing is written until a test writes: a directory appearing on its own
     # would break the tests that check what a store leaves on disk.
     isolated = tmp_path / ".isolated"
@@ -93,7 +102,9 @@ def never_touch_real_data(database, tmp_path, monkeypatch):
         from app.services.run_store import RunStore
         from app.services.supplier_rules import SupplierRuleStore
 
-        monkeypatch.setattr(deps, "run_store", RunStore(isolated / "docuflow.db"))
-        monkeypatch.setattr(deps, "evaluation_store", EvaluationStore(isolated / "docuflow.db"))
-        monkeypatch.setattr(deps, "master_data_store", MasterDataStore(isolated / "docuflow.db"))
-        monkeypatch.setattr(deps, "supplier_rule_store", SupplierRuleStore(isolated / "docuflow.db"))
+        # Outside tmp_path, which some tests list.
+        beside = tmp_path_factory.mktemp("postgres-stores") / "docuflow.db"
+        monkeypatch.setattr(deps, "run_store", RunStore(beside))
+        monkeypatch.setattr(deps, "evaluation_store", EvaluationStore(beside))
+        monkeypatch.setattr(deps, "master_data_store", MasterDataStore(beside))
+        monkeypatch.setattr(deps, "supplier_rule_store", SupplierRuleStore(beside))
