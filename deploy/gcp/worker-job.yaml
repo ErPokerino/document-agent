@@ -38,7 +38,17 @@ ${BACKEND_ENV}
               volumeMounts:
                 - name: data
                   mountPath: /data
+                # Read only: the catalog describing the model server's models.
+                - name: models
+                  mountPath: /models
+                  readOnly: true
           volumes:
+            - name: models
+              csi:
+                driver: gcsfuse.run.googleapis.com
+                readOnly: true
+                volumeAttributes:
+                  bucketName: ${MODELS_BUCKET}
             - name: data
               csi:
                 driver: gcsfuse.run.googleapis.com

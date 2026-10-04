@@ -75,7 +75,8 @@ class ModelLoadResponse(BaseModel):
     unloaded_models: int
     # "compatibility_partial" is the CPU-safe profile minus the one part
     # only the LM Studio CLI can set: holding the layers off the GPU.
-    profile: Literal["standard", "compatibility", "compatibility_partial"]
+    # "server": loaded by a model server, which holds its own load settings.
+    profile: Literal["standard", "compatibility", "compatibility_partial", "server"]
     already_loaded: bool = False
     already_ready: bool = False
     warmup_mode: Literal["vision", "schema", "vision_and_schema"]

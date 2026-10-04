@@ -45,6 +45,13 @@ const profileLabels: Record<ModelLoadResponse["profile"], string> = {
   compatibility: "CPU-safe",
   compatibility_partial: "CPU-safe without GPU offload (no lms CLI here)",
   standard: "DocuFlow standard",
+  server: "Model server",
+};
+
+const warmupLabels: Record<ModelLoadResponse["warmup_mode"], string> = {
+  vision: "Vision",
+  schema: "Schema",
+  vision_and_schema: "Vision + schema",
 };
 
 export const modelBadgeLabels: Record<ModelRuntimeState, string> = {
@@ -156,7 +163,7 @@ export function LanguageModels(props: Props) {
 
   const selectedDraftModel = models.find((model) => model.id === draftSettings.model);
   const selectedRuntimeState = selectedDraftModel?.runtime_state ?? "not_loaded";
-  const engineNote = selectedDraftModel
+  const engineNote = selectedDraftModel?.provider === "lm_studio"
     ? describeRuntimeEngine(runtimeEngine, {
         vision: selectedDraftModel.vision,
         safeProfile: selectedDraftModel.requires_safe_profile,
@@ -196,8 +203,8 @@ export function LanguageModels(props: Props) {
       <div className="settings-card" hidden={runsFilter !== "local" || lmStudioEnabled}>
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Server size={18} /></span>
-          <div><h3>Model server</h3><p>Open models served for this deployment, behind an OpenAI-compatible API. They are loaded by the server when it starts.</p></div>
-          <span className={`connection-badge ${servedModels.length ? "online" : ""}`}><CircleDot size={12} /> {servedModels.length ? `${servedModels.length} served` : "Not answering"}</span>
+          <div><h3>Model server</h3><p>Open models served for this deployment, behind an OpenAI-compatible API. It holds one model at a time: Load &amp; warm up loads the one selected and unloads the previous, as LM Studio does locally.</p></div>
+          <span className={`connection-badge ${servedModels.length ? "online" : ""}`}><CircleDot size={12} /> {servedModels.length ? `${servedModels.length} models · ${servedModels.filter((model) => model.ready).length} loaded` : "Not answering"}</span>
         </div>
         {!servedModels.length && (
           <p className="connection-problem">
@@ -296,17 +303,7 @@ export function LanguageModels(props: Props) {
           </div>
         )}
 
-        {selectedDraftModel && selectedDraftModel.provider === "model_server" && (
-          <div className="model-loader ready">
-            <span className="model-loader-icon"><Server size={17} /></span>
-            <div className="model-loader-copy">
-              <strong>Served by the model server</strong>
-              <span>The server holds the model it was started with, so there is nothing to load or warm up from here. A server that scales to zero takes a while to answer its first request.</span>
-            </div>
-          </div>
-        )}
-
-        {runsFilter === "local" && selectedDraftModel && selectedDraftModel.provider === "lm_studio" && (
+        {runsFilter === "local" && selectedDraftModel && selectedDraftModel.provider !== "gemini" && (
           <div className={`model-loader ${selectedRuntimeState}`}>
             <span className="model-loader-icon"><Power size={17} /></span>
             <div className="model-loader-copy">
@@ -325,10 +322,10 @@ export function LanguageModels(props: Props) {
                   : "Loading and warm-up are timed separately from document processing. This model reads text only, so nothing is prepared for images."}</span>
               {engineNote && <small className="model-loader-engine">{engineNote}</small>}
               {modelLoadReport && modelLoadReport.model === selectedDraftModel.id && (
-                <small>{profileLabels[modelLoadReport.profile]} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${modelLoadReport.warmup_mode === "vision" ? "Vision" : "Vision + schema"} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
+                <small>{profileLabels[modelLoadReport.profile]} profile · {modelLoadReport.already_ready ? "Already ready" : `Load ${formatDuration(modelLoadReport.load_ms)} · ${warmupLabels[modelLoadReport.warmup_mode]} warm-up ${formatDuration(modelLoadReport.warmup_ms)}${modelLoadReport.preparation_attempts > 1 ? ` · ${modelLoadReport.preparation_attempts} preparation attempts` : ""} · Total ${formatDuration(modelLoadReport.total_ms)}`}</small>
               )}
             </div>
-            <button className="model-load-button" disabled={!isConnected || selectedModelPreparing || selectedRuntimeState === "ready" || processState === "processing" || processState === "cancelling"} onClick={loadSelectedModel}>
+            <button className="model-load-button" disabled={!(selectedDraftModel.provider === "model_server" ? servedModels.length > 0 : isConnected) || selectedModelPreparing || selectedRuntimeState === "ready" || processState === "processing" || processState === "cancelling"} onClick={loadSelectedModel}>
               {selectedModelPreparing ? <><LoaderCircle className="spin" size={14} /> {selectedRuntimeState === "warming_up" ? "Warming up…" : "Loading…"}</> : selectedRuntimeState === "ready" ? <><Check size={14} /> Ready</> : <><Power size={14} /> {selectedRuntimeState === "profile_mismatch" ? "Reload safely" : selectedRuntimeState === "loaded" || selectedRuntimeState === "error" ? "Warm up" : "Load & warm up"}</>}
             </button>
           </div>

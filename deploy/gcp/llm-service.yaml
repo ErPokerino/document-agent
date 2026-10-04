@@ -1,8 +1,16 @@
-# An open model served by llama.cpp on Cloud Run CPUs, behind Google sign-in:
+# Open models served by llama.cpp on Cloud Run CPUs, behind Google sign-in:
 # only the app's service account may call it. It answers the OpenAI-compatible
 # API DocuFlow's model server provider speaks (backend/app/services/model_server.py).
-# Scales to zero; the first request after a pause waits for the model to load.
-# Context and parallelism match the profile DocuFlow loads LM Studio with.
+#
+# Router mode: the server knows every model in models.ini (written by
+# upload-models.sh beside the GGUF files) and holds one at a time. DocuFlow
+# loads the selected one explicitly (POST /models/load) and warms it, as it
+# does with LM Studio; loading another unloads the previous. Context and
+# parallelism match the profile DocuFlow loads LM Studio with.
+#
+# CPU stays allocated between requests, because a model goes on loading after
+# the request that asked for it has returned. The service still scales to
+# zero when idle, and the model it held is then gone until loaded again.
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
@@ -17,23 +25,22 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "1"
-        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/cpu-throttling: "false"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/execution-environment: gen2
     spec:
       serviceAccountName: ${LLM_SA}
       # Requests queue inside llama.cpp rather than start another instance.
-      containerConcurrency: 4
+      containerConcurrency: 8
       timeoutSeconds: 900
       containers:
         - image: ${IMAGE_REPO}/llama-cpp-server:${TAG}
           args:
-            - "--model"
-            - "/models/${LLM_MODEL_FILE}"
-            - "--mmproj"
-            - "/models/${LLM_PROJECTOR_FILE}"
-            - "--alias"
-            - "${LLM_MODEL_NAME}"
+            - "--models-preset"
+            - "/models/models.ini"
+            - "--models-max"
+            - "1"
+            - "--no-models-autoload"
             - "--host"
             - "0.0.0.0"
             - "--port"
@@ -43,22 +50,22 @@ spec:
             - "--parallel"
             - "1"
             - "--threads"
-            - "8"
+            - "${LLM_CPU}"
             - "--jinja"
           ports:
             - name: http1
               containerPort: 8080
           resources:
             limits:
-              cpu: "8"
-              memory: 16Gi
+              cpu: "${LLM_CPU}"
+              memory: ${LLM_MEMORY}
           startupProbe:
             httpGet:
               path: /health
               port: 8080
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 30
           volumeMounts:
             - name: models
               mountPath: /models

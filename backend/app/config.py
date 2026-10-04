@@ -22,6 +22,7 @@ from depending on one provider.
 | `DOCUFLOW_LM_STUDIO` | `on` | `off` where no LM Studio runs, such as a cloud deployment |
 | `DOCUFLOW_MODEL_SERVER_URL` | unset | An OpenAI-compatible model server (llama.cpp, vLLM, Ollama…) |
 | `DOCUFLOW_MODEL_SERVER_AUTH` | `none` | `bearer` (with `DOCUFLOW_MODEL_SERVER_TOKEN`) or `google_id_token` |
+| `DOCUFLOW_MODEL_SERVER_CATALOG` | unset | A JSON file describing the server's models: parameters, quantization, size, vision |
 """
 
 import os
@@ -95,3 +96,7 @@ def model_server_auth() -> str:
 
 def model_server_token() -> str:
     return _env("DOCUFLOW_MODEL_SERVER_TOKEN")
+
+
+def model_server_catalog() -> str:
+    return _env("DOCUFLOW_MODEL_SERVER_CATALOG")

@@ -592,7 +592,7 @@ export type ModelLoadResponse = {
   warmup_ms: number;
   total_ms: number;
   unloaded_models: number;
-  profile: "standard" | "compatibility" | "compatibility_partial";
+  profile: "standard" | "compatibility" | "compatibility_partial" | "server";
   already_loaded: boolean;
   already_ready: boolean;
   warmup_mode: "vision" | "schema" | "vision_and_schema";

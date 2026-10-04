@@ -246,6 +246,26 @@ async def load_local_model(settings: AppSettings, model: str, *, warm_vision: bo
     return result
 
 
+async def load_served_model(settings: AppSettings, model: str, *, warm_vision: bool, phase: str) -> dict[str, Any]:
+    """Have the model server load and warm one model; the caller holds the model operation.
+
+    The server knows what it holds, so unlike LM Studio's nothing is tracked
+    here: every process — the API, a worker — asks it.
+    """
+    global active_model_operation
+
+    def update_phase(step: str) -> None:
+        global active_model_operation
+        active_model_operation = step
+
+    try:
+        return await ModelServerClient().load_and_warm_model(
+            model, entities=settings.prompts.entities, warm_vision=warm_vision, phase_callback=update_phase,
+        )
+    finally:
+        active_model_operation = phase
+
+
 def models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
     enriched: list[ModelInfo] = []
     for model in models:
@@ -352,6 +372,11 @@ async def ensure_model_ready(
         selected = next((model for model in served if model.id == settings.model), None)
         if selected is None:
             raise HTTPException(status_code=409, detail=f"The model server does not serve {settings.model}.")
+        if not selected.ready:
+            raise HTTPException(
+                status_code=409,
+                detail="The active model is not loaded on the model server. Open LLM and use Load & warm up first.",
+            )
         return selected
 
     if not config.lm_studio_enabled():

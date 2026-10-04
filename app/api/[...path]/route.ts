@@ -5,27 +5,26 @@
 // where this server finds it (http://127.0.0.1:8000 beside it in one Cloud
 // Run service, http://backend:8000 in compose). Unset, there is no proxy: on
 // a developer machine the browser calls the API directly.
+//
+// node:http rather than fetch: fetch gives up on an answer that takes more
+// than five minutes to start, and loading a large model on the model server
+// legitimately takes longer than that.
+
+import http from "node:http";
+import { Readable } from "node:stream";
 
 export const dynamic = "force-dynamic";
 
-// Headers that describe one hop, or that fetch has already undone (it
-// decompresses, so the original encoding and length no longer apply).
-const HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "transfer-encoding",
-  "upgrade",
-  "host",
-  "content-encoding",
-  "content-length",
-]);
+// Headers that describe one hop, not the request or the answer.
+const HOP_HEADERS = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "host", "content-length"]);
 
-function forwardable(headers: Headers): Headers {
-  const result = new Headers();
-  headers.forEach((value, key) => {
-    if (!HOP_HEADERS.has(key.toLowerCase()) && key.toLowerCase() !== "set-cookie") result.append(key, value);
+function forwardedHeaders(request: Request, incoming: URL): Record<string, string> {
+  const headers: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    if (!HOP_HEADERS.has(key.toLowerCase())) headers[key] = value;
   });
-  return result;
+  headers["x-forwarded-proto"] = request.headers.get("x-forwarded-proto") ?? incoming.protocol.replace(":", "");
+  return headers;
 }
 
 async function proxy(request: Request): Promise<Response> {
@@ -34,28 +33,32 @@ async function proxy(request: Request): Promise<Response> {
     return Response.json({ detail: "This server does not forward /api; the API is called directly." }, { status: 404 });
   }
   const incoming = new URL(request.url);
-  const target = `${upstream.replace(/\/+$/, "")}${incoming.pathname}${incoming.search}`;
-  const headers = forwardable(request.headers);
-  headers.set("x-forwarded-proto", request.headers.get("x-forwarded-proto") ?? incoming.protocol.replace(":", ""));
-  const client = request.headers.get("x-forwarded-for");
-  if (client) headers.set("x-forwarded-for", client);
-  const hasBody = request.method !== "GET" && request.method !== "HEAD";
-  let answer: Response;
-  try {
-    answer = await fetch(target, {
-      method: request.method,
-      headers,
-      body: hasBody ? request.body : undefined,
-      redirect: "manual",
-      // Streams the upload rather than buffering a dataset archive in memory.
-      ...(hasBody ? { duplex: "half" } : {}),
-    } as RequestInit);
-  } catch {
-    return Response.json({ detail: "The DocuFlow API is not reachable from the frontend server." }, { status: 502 });
-  }
-  const responseHeaders = forwardable(answer.headers);
-  for (const cookie of answer.headers.getSetCookie()) responseHeaders.append("set-cookie", cookie);
-  return new Response(answer.body, { status: answer.status, statusText: answer.statusText, headers: responseHeaders });
+  const target = new URL(`${incoming.pathname}${incoming.search}`, upstream);
+  const hasBody = request.method !== "GET" && request.method !== "HEAD" && request.body !== null;
+
+  return new Promise<Response>((resolve) => {
+    const outgoing = http.request(target, { method: request.method, headers: forwardedHeaders(request, incoming) }, (answer) => {
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(answer.headers)) {
+        if (value === undefined || HOP_HEADERS.has(key.toLowerCase())) continue;
+        for (const item of Array.isArray(value) ? value : [value]) headers.append(key, item);
+      }
+      const status = answer.statusCode ?? 502;
+      const empty = request.method === "HEAD" || status === 204 || status === 304;
+      if (empty) answer.resume();
+      resolve(new Response(empty ? null : (Readable.toWeb(answer) as ReadableStream), { status, headers }));
+    });
+    // No idle limit: the API decides how long its work takes.
+    outgoing.setTimeout(0);
+    outgoing.on("error", () => {
+      resolve(Response.json({ detail: "The DocuFlow API is not reachable from the frontend server." }, { status: 502 }));
+    });
+    if (hasBody) {
+      Readable.fromWeb(request.body as import("node:stream/web").ReadableStream).pipe(outgoing);
+    } else {
+      outgoing.end();
+    }
+  });
 }
 
 export const GET = proxy;

@@ -110,13 +110,20 @@ async def _served_models() -> list[ModelInfo]:
 @router.post("/api/models/load", response_model=ModelLoadResponse)
 async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
     settings = deps.settings_store.read()
+    if any(model.id == request.model for model in await _served_models()):
+        async with deps.exclusive_model_operation("loading"):
+            try:
+                result = await deps.load_served_model(
+                    settings, request.model, warm_vision=requires_vision(deps.selected_pipeline(settings)), phase="loading",
+                )
+            except LMStudioError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            deps.settings_store.update(
+                lambda latest: latest.model_copy(update={"model": request.model, "provider": "model_server"})
+            )
+            return ModelLoadResponse.model_validate(result)
     if not config.lm_studio_enabled():
         raise HTTPException(status_code=400, detail="LM Studio is not part of this deployment, so there is nothing to load.")
-    if any(model.id == request.model for model in await _served_models()):
-        raise HTTPException(
-            status_code=400,
-            detail="This model is held by the model server, which loaded it when it started. It needs no loading here.",
-        )
     if find_model(request.model) is not None:
         raise HTTPException(
             status_code=400,

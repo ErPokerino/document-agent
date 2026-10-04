@@ -134,13 +134,14 @@ async def start_experiment(request: ExperimentRequest) -> Experiment:
             continue
         if choice.provider == "model_server":
             try:
-                served = {model.id for model in await deps.ModelServerClient().list_models()}
+                served = {model.id: model for model in await deps.ModelServerClient().list_models()}
             except LMStudioError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
             if choice.model not in served:
                 raise HTTPException(status_code=400, detail=f"The model server does not serve {choice.model}.")
-            # Its listing says nothing about vision, which is not assumed absent.
-            choices.append(ModelChoice("model_server", choice.model, vision=True))
+            # A model whose capabilities were not reported is not assumed blind.
+            found = served[choice.model]
+            choices.append(ModelChoice("model_server", choice.model, vision=found.vision or not found.capabilities_known))
             continue
         if local is None:
             try:
@@ -214,6 +215,13 @@ async def run_experiment_job(job: Any, cancelled: asyncio.Event) -> None:
                 if cell.provider == "lm_studio" and deps.model_runtime_states.get(cell.model) != "ready":
                     deps.experiment_store.update_cell(experiment_id, index, phase="loading")
                     await deps.load_local_model(cell_settings, cell.model, warm_vision=vision_for.get(cell.model, False), phase="evaluating")
+                if cell.provider == "model_server":
+                    # The server holds one model at a time; cells are grouped by
+                    # model, so each is loaded once, as with LM Studio.
+                    served = {model.id: model for model in await deps.ModelServerClient().list_models()}
+                    if not (served.get(cell.model) and served[cell.model].ready):
+                        deps.experiment_store.update_cell(experiment_id, index, phase="loading")
+                        await deps.load_served_model(cell_settings, cell.model, warm_vision=vision_for.get(cell.model, False), phase="evaluating")
                 deps.experiment_store.update_cell(experiment_id, index, phase="running")
                 evaluation_id = await prepare_evaluation(
                     dataset, cell_settings, reuse_readings=reuse_readings, claim=False,

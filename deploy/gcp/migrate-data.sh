@@ -31,7 +31,9 @@ target.close(); source.close()
 EOF
 
 step "Settings, without keys"
-"$PYTHON" - "$DATA_DIR/settings.json" "$work/settings.json" "$LLM_MODEL_NAME" <<'EOF'
+# The first model the server can load becomes the selected one.
+first_model=$(printf '%s\n' "$LLM_MODELS" | awk -F'|' 'NF > 1 {gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1; exit}')
+"$PYTHON" - "$DATA_DIR/settings.json" "$work/settings.json" "$first_model" <<'EOF'
 import json, sys
 settings = json.load(open(sys.argv[1], encoding="utf-8"))
 settings.setdefault("gemini", {})["api_key"] = ""

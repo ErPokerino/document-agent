@@ -14,7 +14,7 @@ source "$ENV_FILE"
 cd "$(dirname "$0")/../.."
 
 P=(--project "$PROJECT_ID" --region "$REGION" --quiet)
-export PREFIX REGION PROJECT_ID DATA_BUCKET MODELS_BUCKET SQL_INSTANCE LLM_MODEL_FILE LLM_PROJECTOR_FILE LLM_MODEL_NAME
+export PREFIX REGION PROJECT_ID DATA_BUCKET MODELS_BUCKET SQL_INSTANCE LLM_CPU LLM_MEMORY
 export RUN_SA="$PREFIX-run@$PROJECT_ID.iam.gserviceaccount.com"
 export LLM_SA="$PREFIX-llm@$PROJECT_ID.iam.gserviceaccount.com"
 BUILD_SA="$PREFIX-build@$PROJECT_ID.iam.gserviceaccount.com"
@@ -66,6 +66,8 @@ backend_env() {
   value: "$LLM_URL"
 - name: DOCUFLOW_MODEL_SERVER_AUTH
   value: google_id_token
+- name: DOCUFLOW_MODEL_SERVER_CATALOG
+  value: /models/models.json
 - name: DOCUFLOW_LM_STUDIO
   value: "off"
 EOF

@@ -96,8 +96,11 @@ for secret in database-url session-secret login-password; do
 done
 gcloud storage buckets add-iam-policy-binding "gs://$DATA_BUCKET" \
   --member "serviceAccount:$RUN_SA" --role roles/storage.objectUser "${P[@]}" >/dev/null
-gcloud storage buckets add-iam-policy-binding "gs://$MODELS_BUCKET" \
-  --member "serviceAccount:$LLM_SA" --role roles/storage.objectViewer "${P[@]}" >/dev/null
+# The model server reads the models; the app and the worker read their catalog.
+for account in "$LLM_SA" "$RUN_SA"; do
+  gcloud storage buckets add-iam-policy-binding "gs://$MODELS_BUCKET" \
+    --member "serviceAccount:$account" --role roles/storage.objectViewer "${P[@]}" >/dev/null
+done
 for role in roles/artifactregistry.writer roles/logging.logWriter roles/storage.objectViewer; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:$BUILD_SA" \
     --role "$role" --condition None "${P[@]}" >/dev/null

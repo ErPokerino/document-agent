@@ -60,8 +60,8 @@ async def test_the_server_lists_what_it_serves_as_ready(server) -> None:
     assert (model.parameters, model.quantization, model.size_bytes) == ("7.5B", "Q4_K_M", 5319465128)
     assert (model.context_length, model.parallel) == (8192, 1)
     assert model.capabilities_known and model.vision
-    assert server[0][1] == "https://llm.example/v1/models"
-    assert server[0][2] == {"Authorization": "Bearer tok"}
+    listing = next(call for call in server if call[1] == "https://llm.example/v1/models")
+    assert listing[2] == {"Authorization": "Bearer tok"}
 
 
 @pytest.mark.asyncio
