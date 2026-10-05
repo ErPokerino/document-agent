@@ -129,6 +129,8 @@ export function LanguageModels(props: Props) {
     processState,
   } = props;
   const servedModels = models.filter((model) => model.provider === "model_server");
+  // A deployment reaching Gemini through Vertex AI has no key to manage.
+  const throughVertex = keyStatus?.access === "vertex";
 
   const [runsFilter, setRunsFilter] = useState<RunsFilter>(draftSettings.provider === "gemini" ? "api" : "local");
   const [visionFilter, setVisionFilter] = useState<VisionFilter>("any");
@@ -297,8 +299,8 @@ export function LanguageModels(props: Props) {
           <div className="model-loader ready hosted">
             <span className="model-loader-icon"><KeyRound size={17} /></span>
             <div className="model-loader-copy">
-              <strong>{keyStatus?.configured ? "Ready when the key is valid" : "An API key is required"}</strong>
-              <span>Nothing is loaded for a hosted model: it answers as soon as the key works. Add the key below.</span>
+              <strong>{throughVertex ? "Ready through Vertex AI" : keyStatus?.configured ? "Ready when the key is valid" : "An API key is required"}</strong>
+              <span>{throughVertex ? "Nothing is loaded for a hosted model: it answers as this deployment's service account." : "Nothing is loaded for a hosted model: it answers as soon as the key works. Add the key below."}</span>
             </div>
           </div>
         )}
@@ -336,14 +338,36 @@ export function LanguageModels(props: Props) {
       <div className="settings-card" hidden={runsFilter !== "api"}>
         <div className="settings-card-heading">
           <span className="settings-card-icon"><KeyRound size={18} /></span>
-          <div><h3>Google Gemini</h3><p>Create a key in Google AI Studio. It is stored on this machine and never sent back to the browser.</p></div>
+          <div><h3>Google Gemini</h3><p>{throughVertex ? "Reached through Vertex AI in this deployment's Google Cloud project, as its own service account: no key is needed, and usage is billed to the project." : "Create a key in Google AI Studio. It is stored on this machine and never sent back to the browser."}</p></div>
           <span className={`connection-badge ${keyStatus?.configured ? "online" : ""}`}>
-            <CircleDot size={12} /> {keyStatus?.configured ? `Key ${keyStatus.hint}` : "No key"}
+            <CircleDot size={12} /> {throughVertex ? `Vertex AI · ${keyStatus?.vertex_location}` : keyStatus?.configured ? `Key ${keyStatus.hint}` : "No key"}
           </span>
         </div>
 
-        <label className="input-label" htmlFor="gemini-key">API key</label>
-        <div className="key-row">
+        {throughVertex && (
+          <div className="key-row">
+            <p className="field-help">
+              Documents sent to Gemini are processed in the <code>{keyStatus?.vertex_location}</code> location.
+              Verify asks each model for one token and lists those this location offers.
+            </p>
+          <button
+            className="secondary-button"
+            disabled={!keyStatus?.configured || verifying}
+            onClick={() => {
+              setVerifying(true);
+              setSettingsError(null);
+              void api.verifyGeminiKey()
+                .then(setKeyStatus)
+                .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)))
+                .finally(() => setVerifying(false));
+            }}
+          >
+            {verifying ? <LoaderCircle className="spin" size={14} /> : <ShieldCheck size={14} />} Verify
+          </button>
+          </div>
+        )}
+        <label className="input-label" htmlFor="gemini-key" hidden={throughVertex}>API key</label>
+        <div className="key-row" hidden={throughVertex}>
           <input
             id="gemini-key"
             className="text-input"
@@ -382,13 +406,13 @@ export function LanguageModels(props: Props) {
             </button>
           )}
         </div>
-        <p className="field-help">
+        <p className="field-help" hidden={throughVertex}>
           Saving with the field empty keeps the key already stored. The key is written to
           backend/data/settings.json on this machine.
         </p>
         {keyStatus && keyStatus.verified_models.length > 0 && (
           <p className="field-help good-note">
-            <Check size={12} /> The key can use: {keyStatus.verified_models.join(", ")}.
+            <Check size={12} /> {throughVertex ? "Answering here" : "The key can use"}: {keyStatus.verified_models.join(", ")}.
           </p>
         )}
 

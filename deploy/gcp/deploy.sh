@@ -70,6 +70,12 @@ backend_env() {
   value: /models/models.json
 - name: DOCUFLOW_LM_STUDIO
   value: "off"
+- name: DOCUFLOW_GEMINI_VERTEX_PROJECT
+  value: $PROJECT_ID
+- name: DOCUFLOW_GEMINI_VERTEX_LOCATION
+  value: $GEMINI_VERTEX_LOCATION
+- name: DOCUFLOW_RUNTIME_SERVICE_ACCOUNT
+  value: $RUN_SA
 EOF
 }
 

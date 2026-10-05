@@ -128,7 +128,7 @@ async def start_experiment(request: ExperimentRequest) -> Experiment:
         if choice.provider == "gemini":
             if find_model(choice.model) is None:
                 raise HTTPException(status_code=400, detail=f"{choice.model} is not one of the supported hosted models.")
-            if not settings.gemini.api_key.strip():
+            if not deps.gemini_available(settings):
                 raise HTTPException(status_code=409, detail="No Gemini API key is configured. Add one in LLM.")
             choices.append(ModelChoice("gemini", choice.model, vision=True))
             continue

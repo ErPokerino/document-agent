@@ -25,6 +25,8 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
     void api.gcpKeyStatus().then(setStatus).catch(() => setStatus(null));
   }, []);
 
+  const runtimeIdentity = status?.access === "runtime_identity";
+
   function setGcp(update: Partial<AppSettings["gcp"]>) {
     setDraftSettings({ ...draftSettings, gcp: { ...draftSettings.gcp, ...update } });
   }
@@ -39,11 +41,20 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           <p>Used by the OCR, Layout Parser and Custom Extractor steps. Billed by Google per page.</p>
         </div>
         <span className={`connection-badge ${status?.configured ? "online" : ""}`}>
-          <CircleDot size={12} /> {status?.configured ? "Key found" : "No key"}
+          <CircleDot size={12} /> {runtimeIdentity ? "Service identity" : status?.configured ? "Key found" : "No key"}
         </span>
       </div>
 
-      <ol className="key-steps">
+      {runtimeIdentity && (
+        <p className="field-help good-note">
+          <FileKey size={12} /> This deployment calls Document AI as its own service account,{" "}
+          <code>{status?.client_email}</code>. There is no key file: the account needs the roles
+          {" "}<code>Document AI API User</code> and <code>Document AI Viewer</code> on the project, which the
+          deployment grants.
+        </p>
+      )}
+
+      <ol className="key-steps" hidden={runtimeIdentity}>
         <li>
           In the Google Cloud console, open <strong>IAM &amp; Admin → Service Accounts</strong> and
           create one (or open an existing one). Give it the role
@@ -68,7 +79,7 @@ export function GcpSettingsCard({ draftSettings, setDraftSettings }: Props) {
           <span>{status.problem}</span>
         </div>
       )}
-      {status?.configured && (
+      {status?.configured && !runtimeIdentity && (
         <p className="field-help good-note">
           <FileKey size={12} /> Key for <code>{status.client_email}</code>
         </p>

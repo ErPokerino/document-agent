@@ -297,7 +297,7 @@ def models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
 
 def hosted_models(settings: AppSettings) -> list[ModelInfo]:
     """Hosted models need no loading: a valid key is the whole readiness story."""
-    ready = bool(settings.gemini.api_key.strip())
+    ready = gemini_available(settings)
     return [
         ModelInfo(
             id=model.id,
@@ -357,7 +357,7 @@ async def ensure_model_ready(
                 status_code=409,
                 detail=f"{settings.model} is not one of the supported hosted models.",
             )
-        if not settings.gemini.api_key.strip():
+        if not gemini_available(settings):
             raise HTTPException(
                 status_code=409,
                 detail="No Gemini API key is configured. Add one in LLM.",
@@ -506,7 +506,15 @@ def masked(settings: AppSettings) -> AppSettings:
     )
 
 
+def gemini_available(settings: AppSettings) -> bool:
+    """Whether hosted models can be called: through Vertex AI as this deployment, or with a key."""
+    return config.gemini_vertex() is not None or bool(settings.gemini.api_key.strip())
+
+
 def key_status(settings: AppSettings, verified: list[str] | None = None) -> GeminiKeyStatus:
+    vertex = config.gemini_vertex()
+    if vertex is not None:
+        return GeminiKeyStatus(configured=True, verified_models=verified or [], access="vertex", vertex_location=vertex[1])
     key = settings.gemini.api_key.strip()
     return GeminiKeyStatus(
         configured=bool(key),
@@ -781,8 +789,9 @@ def gcp_status(settings: AppSettings) -> GcpKeyStatus:
         # No key to show: the deployment calls Google as its own service account.
         return GcpKeyStatus(
             configured=True,
+            access="runtime_identity",
             path="",
-            client_email="the runtime identity of this deployment",
+            client_email=config.runtime_service_account() or "this deployment's service account",
             project_id=settings.gcp.project_id,
         )
     try:

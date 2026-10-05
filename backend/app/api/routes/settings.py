@@ -69,7 +69,7 @@ async def gemini_key_status() -> GeminiKeyStatus:
 async def verify_gemini_key() -> GeminiKeyStatus:
     """Ask Google what this key can see, so a bad key fails here and not mid-run."""
     settings = deps.settings_store.read()
-    if not settings.gemini.api_key.strip():
+    if not deps.gemini_available(settings):
         raise HTTPException(status_code=400, detail="Add a Gemini API key first.")
     try:
         available = await deps.GeminiClient(settings.gemini.api_key).list_models()

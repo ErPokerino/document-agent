@@ -10,6 +10,12 @@ providers end at the same `validate_result`.
 
 There is also no load or warm-up step. A hosted model is ready as soon as the
 key is valid, which is why readiness for this provider means "the key works".
+
+Two ways in. The Gemini API takes an API key. Vertex AI, when a deployment
+configures it (DOCUFLOW_GEMINI_VERTEX_*), takes the identity the platform gives
+the container instead: no key to hold, the project's own billing, and a
+location that decides where documents are processed. The request and the
+answer are the same.
 """
 
 import json
@@ -18,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from app import config
 from app.domain.models import (
     EntityDefinition,
     EntityFormat,
@@ -69,11 +76,35 @@ def find_model(model_id: str) -> GeminiModel | None:
     return next((model for model in (*GEMINI_MODELS, *LEGACY_GEMINI_MODELS) if model.id == model_id), None)
 
 
+def vertex_host(location: str) -> str:
+    """Vertex AI's endpoint for a location: global, a multi-region such as eu, or a region."""
+    if location == "global":
+        return "https://aiplatform.googleapis.com"
+    if location in ("eu", "us"):
+        return f"https://aiplatform.{location}.rep.googleapis.com"
+    return f"https://{location}-aiplatform.googleapis.com"
+
+
 class GeminiClient(ExtractionProvider):
     def __init__(self, api_key: str, thinking_level: str = "low") -> None:
         self.api_key = (api_key or "").strip()
         self.thinking_level = thinking_level if thinking_level in THINKING_LEVELS else "low"
         self.last_prediction_stats: dict[str, int | float] | None = None
+        # A deployment that names Vertex AI uses it; the key is then not needed.
+        self.vertex = config.gemini_vertex()
+
+    @property
+    def available(self) -> bool:
+        return self.vertex is not None or bool(self.api_key)
+
+    def _url(self, model: str) -> str:
+        if self.vertex is not None:
+            project, location = self.vertex
+            return (
+                f"{vertex_host(location)}/v1/projects/{project}/locations/{location}"
+                f"/publishers/google/models/{model}:generateContent"
+            )
+        return f"{BASE_URL}/models/{model}:generateContent"
 
     # -- schema ---------------------------------------------------------------
 
@@ -124,7 +155,11 @@ class GeminiClient(ExtractionProvider):
 
     # -- requests -------------------------------------------------------------
 
-    def _headers(self) -> dict[str, str]:
+    async def _headers(self) -> dict[str, str]:
+        if self.vertex is not None:
+            from app.services import gcp_runtime
+
+            return {"Authorization": f"Bearer {await gcp_runtime.access_token()}", "Content-Type": "application/json"}
         if not self.api_key:
             raise GeminiError("No Gemini API key is configured. Add one in LLM.")
         # Never the `?key=` query form: keys do not belong in URLs, which end up
@@ -132,8 +167,14 @@ class GeminiClient(ExtractionProvider):
         return {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
 
     async def list_models(self) -> list[str]:
-        """Names the key can actually see. Used to check a key before relying on it."""
-        headers = self._headers()
+        """Names the key can actually see. Used to check a key before relying on it.
+
+        Through Vertex AI there is no listing for a key: each model DocuFlow
+        offers is asked for one token, and those that answer are reported.
+        """
+        if self.vertex is not None:
+            return await self._vertex_models()
+        headers = await self._headers()
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(f"{BASE_URL}/models", headers=headers)
@@ -155,7 +196,7 @@ class GeminiClient(ExtractionProvider):
         processed_pages: int,
         document_text: str = "",
     ) -> dict[str, FieldExtraction]:
-        headers = self._headers()
+        headers = await self._headers()
         user_text = self._user_text(
             prompts,
             page_range,
@@ -193,11 +234,7 @@ class GeminiClient(ExtractionProvider):
 
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    f"{BASE_URL}/models/{model}:generateContent",
-                    json=payload,
-                    headers=headers,
-                )
+                response = await client.post(self._url(model), json=payload, headers=headers)
         except httpx.TimeoutException as exc:
             raise GeminiError(
                 f"Gemini did not answer within {REQUEST_TIMEOUT_SECONDS} seconds."
@@ -210,10 +247,28 @@ class GeminiClient(ExtractionProvider):
         self.last_prediction_stats = self._prediction_stats(body)
         return self._parse(body, prompts.entities)
 
+    async def _vertex_models(self) -> list[str]:
+        headers = await self._headers()
+        probe = {
+            "contents": [{"role": "user", "parts": [{"text": "Reply with OK"}]}],
+            "generationConfig": {"maxOutputTokens": 1},
+        }
+        answering = []
+        async with httpx.AsyncClient(timeout=60) as client:
+            for model in GEMINI_MODELS:
+                try:
+                    response = await client.post(self._url(model.id), json=probe, headers=headers)
+                except httpx.HTTPError as exc:
+                    raise GeminiError(f"Could not reach Vertex AI: {exc}") from exc
+                if response.status_code < 400:
+                    answering.append(model.id)
+                elif response.status_code in (401, 403):
+                    self._raise_for_status(response)
+        return answering
+
     # -- responses ------------------------------------------------------------
 
-    @staticmethod
-    def _raise_for_status(response: Any) -> None:
+    def _raise_for_status(self, response: Any) -> None:
         if response.status_code < 400:
             return
         detail = ""
@@ -222,6 +277,14 @@ class GeminiClient(ExtractionProvider):
         except Exception:  # noqa: BLE001 - the body may not be JSON at all
             detail = (response.text or "")[:300]
 
+        if response.status_code in (401, 403) and self.vertex is not None:
+            raise GeminiError(
+                f"Vertex AI refused this deployment's identity ({response.status_code}). {detail}".strip()
+            )
+        if response.status_code == 404 and self.vertex is not None:
+            raise GeminiError(
+                f"Vertex AI does not offer this model in location {self.vertex[1]}. {detail}".strip()
+            )
         if response.status_code in (401, 403):
             raise GeminiError(
                 f"Gemini rejected the API key ({response.status_code}). "

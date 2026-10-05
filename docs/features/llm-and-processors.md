@@ -90,6 +90,19 @@ pinned when processor metadata is available. Other remote processors remain
 whatever Google serves. A run recorded before the register snapshot uses today's
 tables on retry, and the Lab says so.
 
+## Gemini through Vertex AI
+
+A deployment on Google Cloud can reach Gemini through Vertex AI instead of the
+Gemini API (`DOCUFLOW_GEMINI_VERTEX_PROJECT` and `_LOCATION`). The request and
+the answer are the same; what changes is who is calling and where. Calls are
+made as the deployment's service account, so there is no key to enter or
+store — the API tab says *Vertex AI* with the location in place of the key
+field — and the location decides where documents are processed. Not every
+model is offered everywhere: Verify asks each one for a single token and lists
+those that answer. A run on a model the location does not offer fails with
+that reason. Document AI works the same way in such a deployment: Processors
+names the service account instead of asking for a key file.
+
 ## A model server
 
 A deployment can serve open models from its own server instead of LM Studio:

@@ -20,6 +20,7 @@ from depending on one provider.
 | `DOCUFLOW_JOBS` | `in_process` | `cloud_run`: Lab runs, experiments and training run as Cloud Run job executions |
 | `DOCUFLOW_JOBS_CLOUD_RUN_JOB` | — | With `cloud_run`: `projects/<p>/locations/<r>/jobs/<name>` |
 | `DOCUFLOW_LM_STUDIO` | `on` | `off` where no LM Studio runs, such as a cloud deployment |
+| `DOCUFLOW_GEMINI_VERTEX_PROJECT`, `DOCUFLOW_GEMINI_VERTEX_LOCATION` | unset: the Gemini API with a key | Gemini through Vertex AI in that project and location (`eu`, `global`, a region), as the runtime identity |
 | `DOCUFLOW_MODEL_SERVER_URL` | unset | An OpenAI-compatible model server (llama.cpp, vLLM, Ollama…) |
 | `DOCUFLOW_MODEL_SERVER_AUTH` | `none` | `bearer` (with `DOCUFLOW_MODEL_SERVER_TOKEN`) or `google_id_token` |
 | `DOCUFLOW_MODEL_SERVER_CATALOG` | unset | A JSON file describing the server's models: parameters, quantization, size, vision |
@@ -80,6 +81,17 @@ def jobs_backend() -> str:
 
 def cloud_run_job() -> str:
     return _env("DOCUFLOW_JOBS_CLOUD_RUN_JOB")
+
+
+def runtime_service_account() -> str:
+    """The service account a deployment runs as, when it says so (shown, never used to sign)."""
+    return _env("DOCUFLOW_RUNTIME_SERVICE_ACCOUNT")
+
+
+def gemini_vertex() -> tuple[str, str] | None:
+    """The project and location to reach Gemini through Vertex AI, or None for the Gemini API."""
+    project, location = _env("DOCUFLOW_GEMINI_VERTEX_PROJECT"), _env("DOCUFLOW_GEMINI_VERTEX_LOCATION")
+    return (project, location) if project and location else None
 
 
 def lm_studio_enabled() -> bool:

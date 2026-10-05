@@ -442,6 +442,7 @@ export type FineTuningExportRequest = {
 };
 
 export type GcpKeyStatus = {
+  access: "key_file" | "runtime_identity";
   configured: boolean;
   path: string;
   client_email: string;
@@ -467,6 +468,8 @@ export type GeminiKeyStatus = {
   configured: boolean;
   hint: string;
   verified_models: string[];
+  access: "api_key" | "vertex";
+  vertex_location: string | null;
 };
 
 export type GeminiSettings = {

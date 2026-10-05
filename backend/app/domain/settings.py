@@ -124,10 +124,18 @@ class GeminiKeyStatus(BaseModel):
     configured: bool
     hint: str = ""
     verified_models: list[str] = Field(default_factory=list)
+    # "vertex": the deployment reaches Gemini through Vertex AI as its own
+    # identity, in `vertex_location`; no key is used or needed.
+    access: Literal["api_key", "vertex"] = "api_key"
+    vertex_location: str | None = None
 
 
 class GcpKeyStatus(BaseModel):
     """What the backend can say about the key file without revealing it."""
+
+    # "runtime_identity": the deployment calls Google as its own service
+    # account, named in `client_email`; there is no key file.
+    access: Literal["key_file", "runtime_identity"] = "key_file"
 
     configured: bool
     path: str
