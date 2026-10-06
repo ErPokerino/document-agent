@@ -29,7 +29,8 @@ def refusal_fact(status_code: int, message: str) -> str:
             metric = found.group(1).rsplit("/", 1)[-1]
             base = f" for {found.group(2)}" if found.group(2) else ""
             return f"Google refused the request with 429: the project's quota {metric}{base} is used up or zero."
-        return f"Google refused the request with 429: {_first_sentence(message)}"
+        detail = _first_sentence(message) if message.strip() else ""
+        return f"Google refused the request with 429 (rate limit or quota). {detail}".strip()
     if status_code == 404:
         return "Google returned 404: the model is not offered in this location, or this project has no access to it."
     return f"Google returned {status_code}: {_first_sentence(message)}"

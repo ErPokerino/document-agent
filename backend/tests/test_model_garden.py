@@ -335,3 +335,11 @@ def test_a_gemini_location_chosen_in_llm_replaces_the_deployments_and_is_recorde
     settings.gemini.location = None
     assert deps.pipeline_context(settings, "a.pdf", b"", recorded_profile=profile).gemini_location == "global"
     assert deps.key_status(settings).vertex_location == "eu"
+
+
+def test_a_gemini_429_states_what_google_refused_without_its_advice():
+    from app.services.gemini import GeminiClient, GeminiError
+    response = httpx.Response(429, json={"error": {"message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/x for more details."}})
+    with pytest.raises(GeminiError) as raised:
+        GeminiClient("key")._raise_for_status(response)
+    assert str(raised.value) == "Gemini: Google refused the request with 429 (rate limit or quota). Resource exhausted."

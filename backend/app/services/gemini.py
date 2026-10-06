@@ -306,7 +306,9 @@ class GeminiClient(ExtractionProvider):
                 f"The key is under LLM. {detail}".strip()
             )
         if response.status_code == 429:
-            raise GeminiError(f"Gemini rate limit or quota reached. {detail}".strip())
+            from app.services.hosted_checks import refusal_fact
+
+            raise GeminiError(f"Gemini: {refusal_fact(429, detail)}")
         if response.status_code == 404:
             raise GeminiError(
                 f"Gemini does not know this model, or your key cannot use it. {detail}".strip()
