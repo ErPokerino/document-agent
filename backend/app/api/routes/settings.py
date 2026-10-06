@@ -8,6 +8,9 @@ from app.domain.models import (
     AppSettings,
     GcpKeyStatus,
     GeminiKeyStatus,
+    HostedModelCheck,
+    HostedVerifyRequest,
+    PartnerTariff,
     PromptPreview,
     PromptPreviewRequest,
 )
@@ -16,6 +19,8 @@ from app.pipeline.store import InvalidPipelineName, UnknownPipeline
 from app.services.document_ai import DocumentAiClient, DocumentAiError
 from app.services.gemini import GEMINI_MODELS, GeminiError, find_model
 from app.services.lm_studio import LMStudioError
+from app.services.errors import ProviderError
+from app.services import hosted_checks
 
 router = APIRouter()
 
@@ -81,6 +86,52 @@ async def verify_gemini_key() -> GeminiKeyStatus:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     supported = {model.id for model in GEMINI_MODELS}
     return deps.key_status(settings, verified=[name for name in available if name in supported])
+
+
+@router.get("/api/settings/hosted/checks", response_model=list[HostedModelCheck])
+async def hosted_model_checks() -> list[HostedModelCheck]:
+    """What each hosted model answered when it was last checked, per location."""
+    return hosted_checks.all_checks()
+
+
+@router.get("/api/settings/model-garden/tariffs", response_model=list[PartnerTariff])
+async def model_garden_tariffs() -> list[PartnerTariff]:
+    """The rates each partner request is costed at, per location, up to 200k tokens of context."""
+    from app.services.billing import tariff
+    from app.services.model_garden import LOCATIONS, PARTNER_MODELS
+
+    return [
+        PartnerTariff.model_validate(tariff(model.id, location) | {"model": model.id})
+        for model in PARTNER_MODELS
+        for location in LOCATIONS[model.publisher]
+    ]
+
+
+@router.post("/api/settings/hosted/verify", response_model=list[HostedModelCheck])
+async def verify_hosted_models(request: HostedVerifyRequest) -> list[HostedModelCheck]:
+    """Ask each model of one publisher for one token in the location given.
+
+    The location is the one on screen, saved or not, so a location can be
+    checked before it is chosen. Every check made so far is returned.
+    """
+    if request.publisher == "google":
+        if config.gemini_vertex() is None:
+            raise HTTPException(status_code=400, detail="Gemini is reached with an API key here, not through Vertex AI.")
+        try:
+            await deps.GeminiClient("", location=request.location).check_models()
+        except GeminiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return hosted_checks.all_checks()
+    from app.services.model_garden import PARTNER_MODELS, ModelGardenClient
+
+    client = ModelGardenClient(deps.settings_store.read().model_garden)
+    try:
+        for model in PARTNER_MODELS:
+            if model.publisher == request.publisher:
+                await client.check(model.id, request.location)
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return hosted_checks.all_checks()
 
 
 @router.delete("/api/settings/gemini", status_code=204, response_class=Response)

@@ -36,6 +36,13 @@ and unpublished long-context cache rates, remain incomplete estimates.
 Document AI page prices are also snapshotted in partner runs. Existing Gemini
 and local histories retain their prior accounting behavior.
 
+Amended 2026-10-06: availability is checked, not assumed. Verify asks each
+hosted model, Gemini included, for one token in the location on screen and
+keeps the answer per model and location in the backend process. Gemini's
+Vertex AI location can be chosen in LLM and is recorded on the run, since a
+preview model may exist in `global` only. Claude and Grok have separate output
+limits. LLM shows one card per publisher with the same structure.
+
 ## Alternatives
 
 Direct partner keys would bypass Google billing and the requested platform.

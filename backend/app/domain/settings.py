@@ -1,8 +1,8 @@
 """What is configured: providers, prices, the Document AI catalog, and the app settings that hold them."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.extraction import PromptConfiguration
 from app.pipeline.definition import DEFAULT_PIPELINE_NAME
@@ -43,6 +43,9 @@ class GeminiSettings(BaseModel):
     # Write-only over HTTP: the API masks it on the way out.
     api_key: str = ""
     thinking_level: Literal["low", "medium", "high"] = "low"
+    # Through Vertex AI only. None is the deployment's location; a preview
+    # model may be offered in `global` alone.
+    location: Literal["eu", "us", "global"] | None = None
     pricing: dict[str, ModelPricing] = Field(default_factory=default_gemini_pricing)
     pricing_checked_on: str = "2026-08-21"
     # Models whose default rate has been offered once. A default is added to
@@ -58,7 +61,22 @@ class ModelGardenSettings(BaseModel):
     claude_location: Literal["eu", "us", "global"] = "eu"
     grok_location: Literal["us", "global"] = "global"
     effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
-    max_output_tokens: Annotated[int, Field(ge=256, le=10000)] = 4096
+    claude_max_output_tokens: Annotated[int, Field(ge=256, le=10000)] = 4096
+    grok_max_output_tokens: Annotated[int, Field(ge=256, le=10000)] = 4096
+
+    @model_validator(mode="before")
+    @classmethod
+    def _per_publisher_limit(cls, data: Any) -> Any:
+        """Settings saved before each publisher had its own limit hold one shared value."""
+        if isinstance(data, dict) and "max_output_tokens" in data:
+            data = dict(data)
+            shared = data.pop("max_output_tokens")
+            data.setdefault("claude_max_output_tokens", shared)
+            data.setdefault("grok_max_output_tokens", shared)
+        return data
+
+    def output_limit(self, publisher: str | None) -> int:
+        return self.claude_max_output_tokens if publisher == "anthropic" else self.grok_max_output_tokens
 
 
 class DocumentProcessor(BaseModel):
@@ -131,6 +149,41 @@ class AppSettings(BaseModel):
     prompts: PromptConfiguration = Field(default_factory=PromptConfiguration)
 
 
+class HostedModelCheck(BaseModel):
+    """What one hosted model answered to a one-token request, in one location."""
+
+    model: str
+    publisher: str
+    location: str
+    # answering: it replied. no_quota: Google refused it with 429 (the
+    # project has no quota left, or none at all). not_offered: 404, the model
+    # does not exist in that location. refused: any other refusal.
+    status: Literal["answering", "no_quota", "not_offered", "refused"]
+    detail: str = ""
+    checked_at: str
+
+
+class PartnerTariff(BaseModel):
+    """The recorded Model Garden rate for one model in one location, USD per million tokens."""
+
+    model: str
+    location: str
+    input: float | None = None
+    output: float | None = None
+    cache_read: float | None = None
+    cache_write_5m: float | None = None
+    cache_write_1h: float | None = None
+    checked_on: str
+    source: str
+
+
+class HostedVerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    publisher: Literal["google", "anthropic", "xai"]
+    location: Literal["eu", "us", "global"]
+
+
 class GeminiKeyStatus(BaseModel):
     configured: bool
     hint: str = ""
@@ -139,6 +192,8 @@ class GeminiKeyStatus(BaseModel):
     # identity, in `vertex_location`; no key is used or needed.
     access: Literal["api_key", "vertex"] = "api_key"
     vertex_location: str | None = None
+    # The deployment's own location, used while none is chosen in LLM.
+    deployment_location: str | None = None
 
 
 class GcpKeyStatus(BaseModel):

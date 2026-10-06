@@ -158,6 +158,9 @@ export const api = {
   geminiKeyStatus: () => request<GeminiKeyStatus>("/api/settings/gemini"),
   verifyGeminiKey: () => request<GeminiKeyStatus>("/api/settings/gemini/verify", { method: "POST" }),
   clearGeminiKey: () => request<void>("/api/settings/gemini", { method: "DELETE" }),
+  hostedChecks: () => request<import("./types").HostedModelCheck[]>("/api/settings/hosted/checks"),
+  verifyHosted: (body: import("./types").HostedVerifyRequest) => request<import("./types").HostedModelCheck[]>("/api/settings/hosted/verify", json("POST", body)),
+  modelGardenTariffs: () => request<import("./types").PartnerTariff[]>("/api/settings/model-garden/tariffs"),
   gcpKeyStatus: () => request<GcpKeyStatus>("/api/settings/gcp"),
   verifyGcpKey: () => request<GcpKeyStatus>("/api/settings/gcp/verify", { method: "POST" }),
 

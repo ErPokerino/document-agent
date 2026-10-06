@@ -86,12 +86,15 @@ def vertex_host(location: str) -> str:
 
 
 class GeminiClient(ExtractionProvider):
-    def __init__(self, api_key: str, thinking_level: str = "low") -> None:
+    def __init__(self, api_key: str, thinking_level: str = "low", location: str | None = None) -> None:
         self.api_key = (api_key or "").strip()
         self.thinking_level = thinking_level if thinking_level in THINKING_LEVELS else "low"
         self.last_prediction_stats: dict[str, int | float] | None = None
         # A deployment that names Vertex AI uses it; the key is then not needed.
+        # The location chosen in LLM replaces the deployment's, never silently.
         self.vertex = config.gemini_vertex()
+        if self.vertex is not None and location:
+            self.vertex = (self.vertex[0], location)
 
     @property
     def available(self) -> bool:
@@ -248,23 +251,35 @@ class GeminiClient(ExtractionProvider):
         return self._parse(body, prompts.entities)
 
     async def _vertex_models(self) -> list[str]:
+        return [check.model for check in await self.check_models() if check.status == "answering"]
+
+    async def check_models(self) -> list[Any]:
+        """One token from each model in this client's Vertex AI location."""
+        from app.services import hosted_checks
+
+        assert self.vertex is not None
         headers = await self._headers()
         probe = {
             "contents": [{"role": "user", "parts": [{"text": "Reply with OK"}]}],
             "generationConfig": {"maxOutputTokens": 1},
         }
-        answering = []
+        checks = []
         async with httpx.AsyncClient(timeout=60) as client:
             for model in GEMINI_MODELS:
                 try:
                     response = await client.post(self._url(model.id), json=probe, headers=headers)
                 except httpx.HTTPError as exc:
                     raise GeminiError(f"Could not reach Vertex AI: {exc}") from exc
-                if response.status_code < 400:
-                    answering.append(model.id)
-                elif response.status_code in (401, 403):
+                if response.status_code in (401, 403):
                     self._raise_for_status(response)
-        return answering
+                detail = ""
+                if response.status_code >= 400:
+                    try:
+                        detail = str((response.json().get("error") or {}).get("message", ""))
+                    except Exception:  # noqa: BLE001 - the body may not be JSON at all
+                        detail = (response.text or "")[:300]
+                checks.append(hosted_checks.record(model.id, "google", self.vertex[1], response.status_code, detail))
+        return checks
 
     # -- responses ------------------------------------------------------------
 

@@ -11,7 +11,7 @@ from app.domain.models import FieldExtraction, PromptConfiguration
 from app.services.errors import ProviderError
 from app.services.extraction_provider import ExtractionProvider
 from app.services.gemini import GeminiClient, vertex_host
-from app.services import gcp_runtime
+from app.services import gcp_runtime, hosted_checks
 
 
 @dataclass(frozen=True)
@@ -30,8 +30,26 @@ PARTNER_MODELS = (
 )
 
 
+# Where each publisher's models can be asked. Grok has no EU endpoint.
+LOCATIONS = {"anthropic": ("eu", "us", "global"), "xai": ("us", "global")}
+
+
 def find_partner(model: str) -> PartnerModel | None:
     return next((item for item in PARTNER_MODELS if item.id == model), None)
+
+
+def endpoint(selected: PartnerModel, project: str, location: str) -> str:
+    base = f"{vertex_host(location)}/v1/projects/{project}/locations/{location}"
+    if selected.publisher == "anthropic":
+        return f"{base}/publishers/anthropic/models/{selected.id}:rawPredict"
+    return f"{base}/endpoints/openapi/chat/completions"
+
+
+def refusal_detail(body: object) -> str:
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict):
+        return str(error.get("message", ""))
+    return str(error or "")
 
 
 def connection(model: str, settings: Any) -> tuple[str, str]:
@@ -97,19 +115,19 @@ class ModelGardenClient(ExtractionProvider):
         location = self.location_override or location
         selected = find_partner(model)
         assert selected is not None
-        if location not in (("eu", "us", "global") if selected.publisher == "anthropic" else ("us", "global")):
-            raise ProviderError(f"{model} is not offered in location {location}.")
+        if location not in LOCATIONS[selected.publisher]:
+            raise ProviderError(f"{selected.name} is not offered in location {location}.")
         text = self._user_text(prompts, page_range, total_pages=total_pages,
                                processed_pages=processed_pages, document_text=document_text)
         schema = generation_schema(prompts.entities)
         if selected.publisher == "anthropic":
-            url = f"{vertex_host(location)}/v1/projects/{project}/locations/{location}/publishers/anthropic/models/{model}:rawPredict"
+            url = endpoint(selected, project, location)
             content = [{"type": "text", "text": text}, *[
                 {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": value}}
                 for value in images
             ]]
             payload = {
-                "anthropic_version": "vertex-2023-10-16", "max_tokens": self.settings.max_output_tokens,
+                "anthropic_version": "vertex-2023-10-16", "max_tokens": self.settings.output_limit(selected.publisher),
                 "system": GeminiClient._system_prompt(prompts),
                 "messages": [{"role": "user", "content": content}],
                 "thinking": {"type": "adaptive"},
@@ -117,13 +135,13 @@ class ModelGardenClient(ExtractionProvider):
                                   "format": {"type": "json_schema", "schema": schema}},
             }
         else:
-            url = f"{vertex_host(location)}/v1/projects/{project}/locations/{location}/endpoints/openapi/chat/completions"
+            url = endpoint(selected, project, location)
             content = [{"type": "text", "text": text}, *[
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{value}"}}
                 for value in images
             ]]
             payload = {
-                "model": f"xai/{model}", "max_completion_tokens": self.settings.max_output_tokens,
+                "model": f"xai/{model}", "max_completion_tokens": self.settings.output_limit(selected.publisher),
                 "messages": [{"role": "system", "content": GeminiClient._system_prompt(prompts)},
                              {"role": "user", "content": content}],
                 "response_format": {"type": "json_schema", "json_schema": {"name": "extraction", "strict": True, "schema": schema}},
@@ -148,9 +166,8 @@ class ModelGardenClient(ExtractionProvider):
         if not isinstance(body, dict):
             raise ProviderError(f"Model Garden returned {response.status_code} without a JSON object.")
         if response.status_code != 200:
-            error = body.get("error") or {}
-            detail = error.get("message", "Request refused") if isinstance(error, dict) else str(error)
-            raise ProviderError(f"Model Garden returned {response.status_code} for {model} in {location}: {detail}")
+            fact = hosted_checks.refusal_fact(response.status_code, refusal_detail(body))
+            raise ProviderError(f"{selected.name} in {location}, project {project}: {fact}")
         self.last_usage = body.get("usage") or {}
         usage = self.last_usage
         if selected.publisher == "anthropic":
@@ -182,3 +199,36 @@ class ModelGardenClient(ExtractionProvider):
             raise ProviderError(f"{model} returned no JSON object.")
         # Share validation and value bounds with the existing hosted extractor.
         return GeminiClient._parse({"candidates": [{"content": {"parts": [{"text": json.dumps(parsed)}]}}]}, prompts.entities)
+
+    async def check(self, model: str, location: str) -> "hosted_checks.HostedModelCheck":
+        """Ask for one token, so a refusal shows up before a run and not inside it.
+
+        Google checks quota before it reads the request, so a model with no
+        quota is refused here exactly as it would be by an extraction.
+        """
+        selected = find_partner(model)
+        if selected is None:
+            raise ProviderError(f"Model Garden has no configured model named {model}.")
+        project = self.project_override or config.model_garden_project()
+        if not project:
+            raise ProviderError("No Model Garden project is configured for this deployment.")
+        if location not in LOCATIONS[selected.publisher]:
+            return hosted_checks.record(model, selected.publisher, location, 404)
+        prompt = [{"role": "user", "content": "Reply with OK"}]
+        payload: dict[str, Any] = (
+            {"anthropic_version": "vertex-2023-10-16", "max_tokens": 1, "messages": prompt}
+            if selected.publisher == "anthropic"
+            else {"model": f"xai/{model}", "max_completion_tokens": 1, "messages": prompt}
+        )
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(endpoint(selected, project, location), json=payload, headers={
+                    "Authorization": f"Bearer {await gcp_runtime.access_token()}", "Content-Type": "application/json",
+                })
+        except httpx.HTTPError as exc:
+            return hosted_checks.record_unreachable(model, selected.publisher, location, f"Model Garden was not reachable: {exc}")
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        return hosted_checks.record(model, selected.publisher, location, response.status_code, refusal_detail(body))

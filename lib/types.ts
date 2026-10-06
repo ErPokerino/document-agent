@@ -486,11 +486,13 @@ export type GeminiKeyStatus = {
   verified_models: string[];
   access: "api_key" | "vertex";
   vertex_location: string | null;
+  deployment_location: string | null;
 };
 
 export type GeminiSettings = {
   api_key: string;
   thinking_level: "low" | "medium" | "high";
+  location: "eu" | "us" | "global" | null;
   pricing: Record<string, ModelPricing>;
   pricing_checked_on: string;
   pricing_defaults_offered: string[];
@@ -503,6 +505,20 @@ export type HealthStatus = {
   model_server: boolean;
   active_model: string;
   lm_studio_error: string | null;
+};
+
+export type HostedModelCheck = {
+  model: string;
+  publisher: string;
+  location: string;
+  status: "answering" | "no_quota" | "not_offered" | "refused";
+  detail: string;
+  checked_at: string;
+};
+
+export type HostedVerifyRequest = {
+  publisher: "google" | "anthropic" | "xai";
+  location: "eu" | "us" | "global";
 };
 
 export type LabelValue = {
@@ -590,7 +606,8 @@ export type ModelGardenSettings = {
   claude_location: "eu" | "us" | "global";
   grok_location: "us" | "global";
   effort: "low" | "medium" | "high" | "xhigh" | "max";
-  max_output_tokens: number;
+  claude_max_output_tokens: number;
+  grok_max_output_tokens: number;
 };
 
 export type ModelInfo = {
@@ -647,6 +664,18 @@ export type ParameterSpec = {
   step: number | null;
   choices: string[];
   help: string;
+};
+
+export type PartnerTariff = {
+  model: string;
+  location: string;
+  input: number | null;
+  output: number | null;
+  cache_read: number | null;
+  cache_write_5m: number | null;
+  cache_write_1h: number | null;
+  checked_on: string;
+  source: string;
 };
 
 export type PipelineActivity = {

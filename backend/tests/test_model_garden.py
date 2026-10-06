@@ -192,11 +192,11 @@ def test_model_garden_profiles_pin_the_project_region_and_generation_controls(mo
     profile = deps.execution_profile(settings, None, find_partner(settings.model))
     monkeypatch.setenv("DOCUFLOW_MODEL_GARDEN_PROJECT", "new-project")
     settings.model_garden.effort = "high"
-    settings.model_garden.max_output_tokens = 8000
+    settings.model_garden.claude_max_output_tokens = 8000
     context = deps.pipeline_context(settings, "a.pdf", b"", recorded_profile=profile)
     assert (context.model_garden_project, context.model_garden_location) == ("original-project", "eu")
     assert context.model_garden_settings.effort == "low"
-    assert context.model_garden_settings.max_output_tokens == 4096
+    assert context.model_garden_settings.claude_max_output_tokens == 4096
 
 
 def test_workspace_persists_partner_usage_and_exposes_the_original_tariff(tmp_path, monkeypatch):
@@ -257,3 +257,81 @@ async def test_evaluation_cost_keeps_a_failed_paid_attempt_and_its_retry(tmp_pat
     second = first.model_copy(update={"id": "retry", "status": "succeeded"})
     context.usage_store.save(second, "test")
     assert evaluations.get_evaluation(evaluation_id).cost.total_usd == pytest.approx(.00064)
+
+
+CLAUDE_QUOTA = ("Quota exceeded for aiplatform.googleapis.com/eu_multi_region_online_prediction_requests_per_base_model "
+                "with base model: anthropic-claude-sonnet. Please submit a quota increase request. "
+                "https://cloud.google.com/vertex-ai/docs/generative-ai/quotas-genai.")
+
+
+def test_settings_saved_with_one_output_limit_give_it_to_each_publisher():
+    """Settings written before the limits were split must still load, unchanged in effect."""
+    loaded = ModelGardenSettings.model_validate({"claude_location": "eu", "max_output_tokens": 2048})
+    assert (loaded.claude_max_output_tokens, loaded.grok_max_output_tokens) == (2048, 2048)
+    assert loaded.output_limit("anthropic") == loaded.output_limit("xai") == 2048
+
+
+def test_a_quota_refusal_is_reported_as_what_happened_without_googles_advice():
+    from app.services.hosted_checks import refusal_fact
+    fact = refusal_fact(429, CLAUDE_QUOTA)
+    assert "eu_multi_region_online_prediction_requests_per_base_model" in fact
+    assert "anthropic-claude-sonnet" in fact
+    assert "submit" not in fact.lower() and "http" not in fact
+
+
+@pytest.mark.asyncio
+async def test_an_extraction_refused_for_quota_names_the_model_location_and_quota(monkeypatch):
+    monkeypatch.setenv("DOCUFLOW_MODEL_GARDEN_PROJECT", "test-project")
+    monkeypatch.setattr(gcp_runtime, "access_token", AsyncMock(return_value="test-token"))
+    original = httpx.AsyncClient
+    monkeypatch.setattr("app.services.model_garden.httpx.AsyncClient", lambda **kwargs: original(
+        transport=httpx.MockTransport(lambda request: httpx.Response(429, json={"error": {"code": 429, "message": CLAUDE_QUOTA}})), **kwargs))
+    with pytest.raises(ProviderError) as raised:
+        await ModelGardenClient(ModelGardenSettings()).extract_entities("claude-sonnet-5-5", [], PROMPTS, "1", 1, 1)
+    message = str(raised.value)
+    assert message.startswith("Claude Sonnet 5.5 in eu, project test-project:")
+    assert "requests_per_base_model" in message and "submit" not in message.lower()
+
+
+@pytest.mark.parametrize("status,expected", [(200, "answering"), (429, "no_quota"), (404, "not_offered"), (403, "refused")])
+@pytest.mark.asyncio
+async def test_a_check_asks_for_one_token_and_records_the_answer_per_location(monkeypatch, status, expected):
+    from app.services import hosted_checks
+    hosted_checks.clear()
+    monkeypatch.setenv("DOCUFLOW_MODEL_GARDEN_PROJECT", "test-project")
+    monkeypatch.setattr(gcp_runtime, "access_token", AsyncMock(return_value="test-token"))
+    seen = []
+    def respond(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(status, json={"content": []} if status == 200 else {"error": {"message": CLAUDE_QUOTA}})
+    original = httpx.AsyncClient
+    monkeypatch.setattr("app.services.model_garden.httpx.AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs))
+    check = await ModelGardenClient(ModelGardenSettings()).check("claude-opus-5-5", "global")
+    assert seen[0]["max_tokens"] == 1 and "thinking" not in seen[0]
+    assert (check.status, check.location, check.publisher) == (expected, "global", "anthropic")
+    assert bool(check.detail) is (status != 200)
+    assert hosted_checks.all_checks() == [check]
+
+
+@pytest.mark.asyncio
+async def test_grok_is_never_asked_in_a_location_without_an_endpoint(monkeypatch):
+    monkeypatch.setenv("DOCUFLOW_MODEL_GARDEN_PROJECT", "test-project")
+    monkeypatch.setattr("app.services.model_garden.httpx.AsyncClient", lambda **kwargs: pytest.fail("no request expected"))
+    check = await ModelGardenClient(ModelGardenSettings()).check("grok-4.7", "eu")
+    assert check.status == "not_offered"
+
+
+def test_a_gemini_location_chosen_in_llm_replaces_the_deployments_and_is_recorded(monkeypatch):
+    """Gemini 3.1 Pro Preview is offered in global only; the run must say where it ran."""
+    from app.services.gemini import GeminiClient, find_model
+    monkeypatch.setenv("DOCUFLOW_GEMINI_VERTEX_PROJECT", "test-project")
+    monkeypatch.setenv("DOCUFLOW_GEMINI_VERTEX_LOCATION", "eu")
+    assert "/locations/eu/" in GeminiClient("")._url("gemini-3.8-flash")
+    assert "aiplatform.googleapis.com/v1/projects/test-project/locations/global/" in GeminiClient("", location="global")._url("gemini-3.1-pro-preview")
+    settings = AppSettings(provider="gemini", model="gemini-3.1-pro-preview")
+    settings.gemini.location = "global"
+    profile = deps.execution_profile(settings, None, find_model(settings.model))
+    assert profile.location == "global"
+    settings.gemini.location = None
+    assert deps.pipeline_context(settings, "a.pdf", b"", recorded_profile=profile).gemini_location == "global"
+    assert deps.key_status(settings).vertex_location == "eu"

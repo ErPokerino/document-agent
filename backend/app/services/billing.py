@@ -197,7 +197,7 @@ class MeteredProvider(ExtractionProvider):
                 status="pending", tariff=tariff(model, location))
             if selected.publisher == "xai":
                 while True:
-                    delay = await asyncio.to_thread(context.usage_store.reserve_grok, record, scope, context.model_garden_settings.max_output_tokens)
+                    delay = await asyncio.to_thread(context.usage_store.reserve_grok, record, scope, context.model_garden_settings.grok_max_output_tokens)
                     if not delay:
                         break
                     await asyncio.sleep(min(delay, 5))

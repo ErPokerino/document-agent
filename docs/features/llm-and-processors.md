@@ -97,10 +97,13 @@ Gemini API (`DOCUFLOW_GEMINI_VERTEX_PROJECT` and `_LOCATION`). The request and
 the answer are the same; what changes is who is calling and where. Calls are
 made as the deployment's service account, so there is no key to enter or
 store — the API tab says *Vertex AI* with the location in place of the key
-field — and the location decides where documents are processed. Not every
-model is offered everywhere: Verify asks each one for a single token and lists
-those that answer. A run on a model the location does not offer fails with
-that reason. Document AI works the same way in such a deployment: Processors
+field — and the location decides where documents are processed. The env
+location is the default; the Gemini card in LLM can choose `eu`, `us` or
+`global` instead, and the run records the location it used. Not every model is
+offered everywhere — Gemini 3.1 Pro Preview is offered in `global` only — so
+Verify asks each one for a single token in the location on screen and marks
+each model *Answering*, *Not offered* or *No quota*. A run on a model the
+location does not offer fails with that reason. Document AI works the same way in such a deployment: Processors
 names the service account instead of asking for a key file.
 
 ## A model server
@@ -148,9 +151,28 @@ References: [LM Studio Structured Output](https://lmstudio.ai/docs/developer/ope
 
 The hosted catalog also offers Claude Sonnet 5.5, Claude Opus 5.5 and Grok 4.7
 (Preview). They use the deployment's GCP identity and project; no partner key
-is needed. Configure Claude location (EU by default), Grok location (Global
-by default), Claude effort and the output ceiling in LLM. Grok has no EU
-endpoint. Selecting a location never enables an automatic fallback elsewhere.
+is needed. Grok has no EU endpoint. Selecting a location never enables an
+automatic fallback elsewhere.
+
+The API tab of LLM is laid out by publisher. The model list is grouped into
+Gemini, Claude and Grok, each heading naming how it is reached and where. The
+selected hosted model shows where it stands, with Verify in the place a local
+model has Load & warm up. Below, one card per publisher has the same parts in
+the same order: access, location and generation controls (Gemini thinking
+level; Claude effort and output limit; Grok output limit), the models with
+what each answered to Verify, and the prices. Gemini prices are editable;
+partner prices are Google's recorded tariffs and read-only. Claude and Grok
+each have their own output limit; settings saved with the earlier shared
+`max_output_tokens` give that value to both.
+
+Verify sends each model one token in the location on screen, saved or not.
+Google checks quota before it reads a request, so a model without quota
+answers 429 to Verify exactly as it would inside a run. A project gets Claude
+quota per model and location; in `tutoral-498710` every Claude model had none
+in `eu`, `us` and `global` on 2026-10-06, so Sonnet and Opus are listed and
+marked *No quota* there. The refusal names the model, location, project and
+quota metric, without Google's advice text. Checks are kept in the backend
+process until the next Verify; they are not stored.
 
 Workspace, Lab and experiments share the same extraction contract. Recorded
 Lab profiles pin the partner project, location and controls for worker retries.

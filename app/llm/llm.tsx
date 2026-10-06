@@ -1,5 +1,4 @@
 "use client";
-import { isHostedProvider } from "../../lib/model-filter";
 
 import {
   AlertCircle,
@@ -13,14 +12,12 @@ import {
   FilterX,
   HardDrive,
   HelpCircle,
-  KeyRound,
   LoaderCircle,
   Power,
   RefreshCw,
   Save,
   Server,
   ShieldCheck,
-  Trash2,
   Type,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -28,16 +25,18 @@ import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { InfoHint } from "../components/info-hint";
 import { describeHost, describeRuntimeEngine } from "../../lib/runtime-engine";
-import { withoutRate } from "../../lib/cost";
 import { formatBytes, modelStateLabels } from "../../lib/format";
+import { checkFor, draftLocation, locationLabel, publisherOf, publishers, routeLabel, type Publisher } from "../../lib/hosted-providers";
+import { CheckChip, HostedModelStatus, HostedProviderCards } from "./hosted-providers";
 import {
   filterModels,
+  isHostedProvider,
   sizeBuckets,
   type RunsFilter,
   type SizeFilter,
   type VisionFilter,
 } from "../../lib/model-filter";
-import type { AppSettings, GeminiKeyStatus, ModelInfo, ModelLoadResponse, ModelRuntimeState, RuntimeEngineInfo } from "../../lib/types";
+import type { AppSettings, GeminiKeyStatus, HostedModelCheck, ModelInfo, ModelLoadResponse, ModelRuntimeState, PartnerTariff, RuntimeEngineInfo } from "../../lib/types";
 
 // What was actually applied, which is not always what was wanted: the part
 // of the CPU-safe profile that holds a model's layers off the GPU is set
@@ -139,6 +138,11 @@ export function LanguageModels(props: Props) {
   // Which llama.cpp build LM Studio has selected. A machine-wide setting
   // changed from LM Studio itself, so it is read once rather than polled.
   const [runtimeEngine, setRuntimeEngine] = useState<RuntimeEngineInfo | null>(null);
+  // What each hosted model answered when last verified, per location, and
+  // the partner rates runs are costed at. Both come from the backend.
+  const [checks, setChecks] = useState<HostedModelCheck[]>([]);
+  const [tariffs, setTariffs] = useState<PartnerTariff[]>([]);
+  const [verifyingPublisher, setVerifyingPublisher] = useState<Publisher | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,10 +155,34 @@ export function LanguageModels(props: Props) {
         // The engine is context, not a feature. Failing to read it leaves
         // the panel as it was rather than putting an error in front of it.
       });
+    // Context too: without them the cards say "Not verified" and show no rates.
+    api.hostedChecks().then((value) => { if (!cancelled) setChecks(value); }).catch(() => {});
+    api.modelGardenTariffs().then((value) => { if (!cancelled) setTariffs(value); }).catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+
+  /** Verify where the location on screen says, saved or not. */
+  function verifyPublisher(publisher: Publisher) {
+    setSettingsError(null);
+    if (publisher === "google" && !throughVertex) {
+      setVerifying(true);
+      void api.verifyGeminiKey()
+        .then(setKeyStatus)
+        .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)))
+        .finally(() => setVerifying(false));
+      return;
+    }
+    const location = draftLocation(draftSettings, publisher, keyStatus);
+    if (!location) return;
+    setVerifyingPublisher(publisher);
+    void api.verifyHosted({ publisher, location: location as "eu" | "us" | "global" })
+      .then(setChecks)
+      .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setVerifyingPublisher(null));
+  }
+  const verifyingHosted: Publisher | null = verifying && !throughVertex ? "google" : verifyingPublisher;
 
   const visibleModels = filterModels(models, {
     runs: runsFilter,
@@ -166,6 +194,8 @@ export function LanguageModels(props: Props) {
 
   const selectedDraftModel = models.find((model) => model.id === draftSettings.model);
   const selectedRuntimeState = selectedDraftModel?.runtime_state ?? "not_loaded";
+  const selectedPublisher = selectedDraftModel ? publisherOf(selectedDraftModel) : null;
+  const selectedLocation = selectedPublisher ? draftLocation(draftSettings, selectedPublisher, keyStatus) : null;
   const engineNote = selectedDraftModel?.provider === "lm_studio"
     ? describeRuntimeEngine(runtimeEngine, {
         vision: selectedDraftModel.vision,
@@ -180,47 +210,43 @@ export function LanguageModels(props: Props) {
     (modelLoadState === "error" || selectedRuntimeState === "error") && settingsError
       ? settingsError
       : null;
-  // Rates are kept for hosted models: the ones that can be chosen, and a
-  // retired one only as long as someone keeps its rate for old runs.
-  const hostedModels = models.filter((model) => model.provider === "gemini");
-  const hostedIds = new Set(hostedModels.map((model) => model.id));
-  const unpricedHosted = hostedModels.filter((model) => !(model.id in draftSettings.gemini.pricing));
   const selectedModelPreparing =
     selectedRuntimeState === "loading" || selectedRuntimeState === "warming_up" || modelLoadState === "loading";
 
+  const renderModel = (model: ModelInfo) => {
+    const selected = draftSettings?.model === model.id;
+    const hosted = isHostedProvider(model.provider);
+    const publisher = publisherOf(model);
+    // Where it would run is the publisher's location, shown on the group.
+    const hostedCheck = publisher ? checkFor(checks, model.id, draftLocation(draftSettings, publisher, keyStatus)) : undefined;
+    return (
+      <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id, provider: model.provider }); setModelLoadState("idle"); setModelLoadReport(null); }}>
+        <span className="radio">{selected && <span />}</span>
+        <span className={`model-option-icon ${hosted ? "hosted" : "local"}`} title={hosted ? "Runs on Google Cloud" : model.provider === "model_server" ? "Runs on the model server of this deployment" : "Runs on this machine"}>
+          {hosted ? <Cloud size={17} /> : model.provider === "model_server" ? <Server size={17} /> : <HardDrive size={17} />}
+        </span>
+        <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
+        <span className={`provider-tag ${model.provider}`}>{hosted ? routeLabel(model, keyStatus) : model.provider === "model_server" ? "Model server" : "Local"}</span>
+        <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
+          {model.capabilities_known === false ? <><HelpCircle size={11} /> Capabilities unknown</> : model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
+        </span>
+        <span className="model-specs">{model.preview && <em>Preview</em>}{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.context_length && <em>{model.context_length.toLocaleString()} context</em>}{model.parallel && <em>{model.parallel} parallel</em>}{hosted ? <CheckChip check={hostedCheck} /> : model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
+      </button>
+    );
+  };
+
   return (
     <section className="settings-layout wide">
-      <div className="settings-card" hidden={runsFilter !== "api"}>
-        <div className="settings-card-heading"><Cloud size={18} /><div><h3>Model Garden partners</h3>
-          <p>Claude Sonnet 5.5, Claude Opus 5.5 and Grok 4.7 (Preview), billed through GCP.</p></div></div>
-        <label className="input-label" htmlFor="claude-location">Claude location</label>
-        <select id="claude-location" value={draftSettings.model_garden.claude_location} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, claude_location: event.target.value as AppSettings["model_garden"]["claude_location"] } })}>
-          <option value="eu">EU</option><option value="us">US</option><option value="global">Global</option>
-        </select>
-        <label className="input-label" htmlFor="grok-location">Grok location</label>
-        <select id="grok-location" value={draftSettings.model_garden.grok_location} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, grok_location: event.target.value as AppSettings["model_garden"]["grok_location"] } })}>
-          <option value="global">Global</option><option value="us">US</option>
-        </select>
-        <label className="input-label" htmlFor="claude-effort">Claude effort</label>
-        <select id="claude-effort" value={draftSettings.model_garden.effort} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, effort: event.target.value as AppSettings["model_garden"]["effort"] } })}>
-          {["low", "medium", "high", "xhigh", "max"].map(value => <option key={value} value={value}>{value}</option>)}
-        </select>
-        <label className="input-label" htmlFor="partner-output">Maximum output tokens</label>
-        <input id="partner-output" type="number" min={256} max={10000} value={draftSettings.model_garden.max_output_tokens} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, max_output_tokens: Number(event.target.value) } })} />
-        <p className="field-help">Grok processes documents in Global or US. Its shared request and token quotas can delay a run. Claude adaptive thinking is included in the output charge.</p>
-        <p className="field-help">Prices follow <a href="https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing" target="_blank" rel="noreferrer">Google Model Garden pricing</a>, checked on 2026-10-06. Each attempt stores its usage and tariff, including cache and context tiers. Historical charges remain unchanged when settings change.</p>
-        <button className="primary-button" onClick={onSave} disabled={!settingsLoaded || settingsState === "saving"}>Save settings</button>
-      </div>
       <div className="settings-intro">
         <Cpu size={19} />
-        <div><h2>LLM</h2><p>Which language model answers, and where it runs: {lmStudioEnabled ? "LM Studio on this machine" : "the model server of this deployment"}, or Google Model Garden.</p></div>
+        <div><h2>LLM</h2><p>Which language model answers, and where it runs: {lmStudioEnabled ? "LM Studio on this machine" : "the model server of this deployment"}, or a hosted model on Google Cloud: Gemini, Claude or Grok.</p></div>
       </div>
 
       <div className="resource-tabs" aria-label="Model location">
         <button aria-pressed={runsFilter === "local"} onClick={() => setRunsFilter("local")}>{lmStudioEnabled ? "Local" : "Self-hosted"} <small>{filterModels(models, { runs: "local" }).length}</small></button>
         <button aria-pressed={runsFilter === "api"} onClick={() => setRunsFilter("api")}>API <small>{filterModels(models, { runs: "api" }).length}</small></button>
       </div>
-      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {isHostedProvider(draftSettings.provider) ? "API" : draftSettings.provider === "model_server" ? "Model server" : "Local"}. Model changes apply when saved.</p>
+      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {selectedDraftModel && selectedPublisher ? `${routeLabel(selectedDraftModel, keyStatus)}${selectedLocation ? `, ${locationLabel(selectedLocation)}` : ""}` : draftSettings.provider === "model_server" ? "Model server" : "Local"}. Model changes apply when saved.</p>
 
       {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}
 
@@ -266,7 +292,7 @@ export function LanguageModels(props: Props) {
       <div className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-card-icon"><Cpu size={18} /></span>
-          <div><h3>Extraction model<InfoHint text="Image-based model extraction needs a vision model. OCR text can be sent to a text or vision model. A Custom Extractor pipeline may not call an LLM." /></h3><p>{lmStudioEnabled ? "Local models come from LM Studio" : "Self-hosted models come from the model server"}, refreshed every 10 seconds. Hosted models run on Google&apos;s servers and need only an API key.</p></div>
+          <div><h3>Extraction model<InfoHint text="Image-based model extraction needs a vision model. OCR text can be sent to a text or vision model. A Custom Extractor pipeline may not call an LLM." /></h3><p>{runsFilter === "api" ? "Hosted models run on Google Cloud, grouped by who makes them. Nothing is loaded: Verify asks the selected one for a token where it would run." : `${lmStudioEnabled ? "Local models come from LM Studio" : "Self-hosted models come from the model server"}, refreshed every 10 seconds.`}</p></div>
           <span className="connection-badge"><RefreshCw className={modelsRefreshing ? "spin" : ""} size={12} /> Auto refresh</span>
         </div>
 
@@ -299,39 +325,27 @@ export function LanguageModels(props: Props) {
             <div className="models-empty"><AlertCircle size={18} /><span>{runsFilter === "local" ? (lmStudioEnabled ? connectionError ?? "LM Studio answered, and has no models installed." : "The model server listed no models.") : "No API models are available."}</span></div>
           ) : visibleModels.length === 0 ? (
             <div className="models-empty"><FilterX size={18} /><span>No model matches these filters.</span></div>
-          ) : visibleModels.map((model) => {
-            const selected = draftSettings?.model === model.id;
+          ) : runsFilter === "api" ? publishers.map((publisher) => {
+            const group = visibleModels.filter((model) => publisherOf(model) === publisher.id);
+            if (!group.length) return null;
+            const location = draftLocation(draftSettings, publisher.id, keyStatus);
             return (
-              <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id, provider: model.provider }); setModelLoadState("idle"); setModelLoadReport(null); }}>
-                <span className="radio">{selected && <span />}</span>
-                <span className={`model-option-icon ${isHostedProvider(model.provider) ? "hosted" : "local"}`} title={isHostedProvider(model.provider) ? "Runs on Google's servers" : model.provider === "model_server" ? "Runs on the model server of this deployment" : "Runs on this machine"}>
-                  {isHostedProvider(model.provider) ? <Cloud size={17} /> : model.provider === "model_server" ? <Server size={17} /> : <HardDrive size={17} />}
-                </span>
-                <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
-                <span className={`provider-tag ${model.provider}`}>{isHostedProvider(model.provider) ? (model.provider === "model_garden" ? "Model Garden" : "Google API") : model.provider === "model_server" ? "Model server" : "Local"}</span>
-                <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
-                  {model.capabilities_known === false ? <><HelpCircle size={11} /> Capabilities unknown</> : model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
-                </span>
-                <span className="model-specs">{model.preview && <em>Preview</em>}{model.location && <em>{model.location}</em>}{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.context_length && <em>{model.context_length.toLocaleString()} context</em>}{model.parallel && <em>{model.parallel} parallel</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
-              </button>
+              <div className="model-group" key={publisher.id}>
+                <p className="model-group-heading">{publisher.family} <span>{publisher.company} · {routeLabel(group[0], keyStatus)}{location ? ` · ${locationLabel(location)}` : ""}</span></p>
+                {group.map(renderModel)}
+              </div>
             );
-          })}
+          }) : visibleModels.map(renderModel)}
         </div>
-        {runsFilter === "api" && selectedDraftModel && selectedDraftModel.provider === "gemini" && (
-          <div className="model-loader ready hosted">
-            <span className="model-loader-icon"><KeyRound size={17} /></span>
-            <div className="model-loader-copy">
-              <strong>{throughVertex ? "Ready through Vertex AI" : keyStatus?.configured ? "Ready when the key is valid" : "An API key is required"}</strong>
-              <span>{throughVertex ? "Nothing is loaded for a hosted model: it answers as this deployment's service account." : "Nothing is loaded for a hosted model: it answers as soon as the key works. Add the key below."}</span>
-            </div>
-          </div>
-        )}
-
-        {runsFilter === "api" && selectedDraftModel?.provider === "model_garden" && (
-          <div className="model-loader ready hosted"><Cloud size={17} /><div className="model-loader-copy">
-            <strong>{selectedDraftModel.ready ? "Configured through Model Garden" : "A GCP project is required"}</strong>
-            <span>Uses this deployment&apos;s GCP identity. Model access and quota are checked when a request is sent.</span>
-          </div></div>
+        {runsFilter === "api" && selectedDraftModel && selectedPublisher && (
+          <HostedModelStatus
+            model={selectedDraftModel}
+            settings={draftSettings}
+            keyStatus={keyStatus}
+            checks={checks}
+            verifying={verifyingHosted === selectedPublisher}
+            onVerify={() => verifyPublisher(selectedPublisher)}
+          />
         )}
         {runsFilter === "local" && selectedDraftModel && !isHostedProvider(selectedDraftModel.provider) && (
           <div className={`model-loader ${selectedRuntimeState}`}>
@@ -363,158 +377,22 @@ export function LanguageModels(props: Props) {
         <div className="structured-output-note"><Braces size={15} /><div><strong>Structured output is enabled</strong><span>The backend sends a schema built from your fields with every request, in the shape each provider accepts. Nothing has to be configured in LM Studio or in Google AI Studio.</span></div></div>
       </div>
 
-      <div className="settings-card" hidden={runsFilter !== "api"}>
-        <div className="settings-card-heading">
-          <span className="settings-card-icon"><KeyRound size={18} /></span>
-          <div><h3>Google Gemini</h3><p>{throughVertex ? "Reached through Vertex AI in this deployment's Google Cloud project, as its own service account: no key is needed, and usage is billed to the project." : "Create a key in Google AI Studio. It is stored on this machine and never sent back to the browser."}</p></div>
-          <span className={`connection-badge ${keyStatus?.configured ? "online" : ""}`}>
-            <CircleDot size={12} /> {throughVertex ? `Vertex AI · ${keyStatus?.vertex_location}` : keyStatus?.configured ? `Key ${keyStatus.hint}` : "No key"}
-          </span>
-        </div>
-
-        {throughVertex && (
-          <div className="key-row">
-            <p className="field-help">
-              Documents sent to Gemini are processed in the <code>{keyStatus?.vertex_location}</code> location.
-              Verify asks each model for one token and lists those this location offers.
-            </p>
-          <button
-            className="secondary-button"
-            disabled={!keyStatus?.configured || verifying}
-            onClick={() => {
-              setVerifying(true);
-              setSettingsError(null);
-              void api.verifyGeminiKey()
-                .then(setKeyStatus)
-                .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)))
-                .finally(() => setVerifying(false));
-            }}
-          >
-            {verifying ? <LoaderCircle className="spin" size={14} /> : <ShieldCheck size={14} />} Verify
-          </button>
-          </div>
-        )}
-        <label className="input-label" htmlFor="gemini-key" hidden={throughVertex}>API key</label>
-        <div className="key-row" hidden={throughVertex}>
-          <input
-            id="gemini-key"
-            className="text-input"
-            type="password"
-            autoComplete="off"
-            placeholder={keyStatus?.configured ? "Leave empty to keep the stored key" : "Paste your Google AI Studio key"}
-            value={geminiKey}
-            onChange={(event) => setGeminiKey(event.target.value)}
-          />
-          <button
-            className="secondary-button"
-            disabled={!keyStatus?.configured || verifying}
-            onClick={() => {
-              setVerifying(true);
-              setSettingsError(null);
-              void api.verifyGeminiKey()
-                .then(setKeyStatus)
-                .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)))
-                .finally(() => setVerifying(false));
-            }}
-          >
-            {verifying ? <LoaderCircle className="spin" size={14} /> : <ShieldCheck size={14} />} Verify
-          </button>
-          {keyStatus?.configured && (
-            <button
-              className="secondary-button danger"
-              onClick={() => {
-                void api.clearGeminiKey()
-                  .then(() => api.geminiKeyStatus())
-                  .then(setKeyStatus)
-                  .catch((cause) => setSettingsError(cause instanceof Error ? cause.message : String(cause)));
-                setGeminiKey("");
-              }}
-            >
-              <Trash2 size={14} /> Remove
-            </button>
-          )}
-        </div>
-        <p className="field-help" hidden={throughVertex}>
-          Saving with the field empty keeps the key already stored. The key is written to
-          backend/data/settings.json on this machine.
-        </p>
-        {keyStatus && keyStatus.verified_models.length > 0 && (
-          <p className="field-help good-note">
-            <Check size={12} /> {throughVertex ? "Answering here" : "The key can use"}: {keyStatus.verified_models.join(", ")}.
-          </p>
-        )}
-
-        <label className="input-label prompt-label" htmlFor="thinking-level">Thinking level</label>
-        <select
-          id="thinking-level"
-          className="text-input"
-          value={draftSettings.gemini.thinking_level}
-          onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, thinking_level: event.target.value as AppSettings["gemini"]["thinking_level"] } })}
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-        <p className="field-help">
-          Higher thinking levels can increase latency and output-token usage.
-          Thinking tokens count toward output usage. Ignored by models without thinking.
-        </p>
-
-        <p className="input-label prompt-label">Price per million tokens (USD)</p>
-        <div className="pricing-grid">
-          {Object.keys(draftSettings.gemini.pricing).length === 0 && <p className="field-help">No rates: the cost of hosted runs is not estimated.</p>}
-          {Object.entries(draftSettings.gemini.pricing).map(([modelId, price]) => (
-            <div className="pricing-row" key={modelId}>
-              <code title={hostedIds.has(modelId) ? undefined : "Not selectable any more; kept to cost the runs that used it"}>{modelId}{hostedIds.has(modelId) ? "" : " · retired"}</code>
-              <label>
-                <span>Input</span>
-                <input
-                  type="number" step="0.01" min="0"
-                  value={price.input_per_million ?? ""}
-                  onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [modelId]: { ...price, input_per_million: event.target.value === "" ? null : Number(event.target.value) } } } })}
-                />
-              </label>
-              <label>
-                <span>Output</span>
-                <input
-                  type="number" step="0.01" min="0"
-                  value={price.output_per_million ?? ""}
-                  onChange={(event) => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [modelId]: { ...price, output_per_million: event.target.value === "" ? null : Number(event.target.value) } } } })}
-                />
-              </label>
-              <button
-                className="icon-button"
-                title={`Remove the rate for ${modelId}`}
-                aria-label={`Remove the rate for ${modelId}`}
-                onClick={() => setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: withoutRate(draftSettings.gemini.pricing, modelId) } })}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-          {unpricedHosted.length > 0 && (
-            <label className="pricing-add">
-              <span>Add a rate for</span>
-              <select
-                value=""
-                onChange={(event) => {
-                  if (!event.target.value) return;
-                  setDraftSettings({ ...draftSettings, gemini: { ...draftSettings.gemini, pricing: { ...draftSettings.gemini.pricing, [event.target.value]: { input_per_million: null, output_per_million: null } } } });
-                }}
-              >
-                <option value="">Choose a hosted model…</option>
-                {unpricedHosted.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-              </select>
-            </label>
-          )}
-        </div>
-        <p className="field-help">
-          Rates you can edit, checked on {draftSettings.gemini.pricing_checked_on}. They are not
-          read from Google: published prices change, and Gemini 3.8 Flash is already scheduled to
-          double on 1 January 2027. Thinking tokens are billed at the output rate.
-        </p>
-        <p className="field-help">Gemini 3.1 Pro Preview has context-dependent prices. Its flat-rate estimate is unavailable until you configure the rates appropriate to your workload.</p>
-      </div>
+      {runsFilter === "api" && (
+        <HostedProviderCards
+          models={models}
+          draftSettings={draftSettings}
+          setDraftSettings={setDraftSettings}
+          keyStatus={keyStatus}
+          setKeyStatus={setKeyStatus}
+          geminiKey={geminiKey}
+          setGeminiKey={setGeminiKey}
+          setSettingsError={setSettingsError}
+          checks={checks}
+          verifyingPublisher={verifyingHosted}
+          onVerify={verifyPublisher}
+          tariffs={tariffs}
+        />
+      )}
 
       <div className="settings-actions sticky-actions">
         <p><ShieldCheck size={14} /> Changes apply from the next processing run.</p>

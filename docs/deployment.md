@@ -255,5 +255,7 @@ for a request that exceeds available input quota; 429/503 retries are bounded.
 An explicit synthetic check can run with `python -m app.services.model_garden_smoke`
 in the backend image as the runtime identity. It prints only statuses, usage
 and calculated charges, and modifies no datasets or settings. It makes one
-small billable request per model that is accessible. The observed initial
-result: Grok Global works; Sonnet and Opus EU/Global return quota 429.
+small billable request per model that is accessible. Observed on 2026-10-06:
+Grok answers in Global and US; Sonnet and Opus return quota 429 in EU, US and
+Global, because the project's per-base-model Claude quotas are zero. LLM's
+Verify reports the same per model and location without a run.

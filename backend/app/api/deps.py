@@ -298,11 +298,14 @@ def models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
 def hosted_models(settings: AppSettings) -> list[ModelInfo]:
     """Hosted models need no loading: a valid key is the whole readiness story."""
     ready = gemini_available(settings)
+    location = gemini_location(settings)
     gemini_models = [
         ModelInfo(
             id=model.id,
             name=model.name,
             provider="gemini",
+            publisher="google",
+            location=location,
             loaded=ready,
             ready=ready,
             runtime_state="ready" if ready else "not_loaded",
@@ -440,7 +443,7 @@ def execution_profile(
         project, location = connection(settings.model, settings.model_garden)
         return ModelExecutionProfile(provider="model_garden", profile="hosted", project=project, location=location,
             publisher=selected.publisher, reasoning_effort=settings.model_garden.effort,
-            max_output_tokens=settings.model_garden.max_output_tokens, temperature=None)
+            max_output_tokens=settings.model_garden.output_limit(selected.publisher), temperature=None)
     if settings.provider == "gemini":
         supports_thinking = bool(getattr(selected, "supports_thinking", True))
         return ModelExecutionProfile(
@@ -448,6 +451,7 @@ def execution_profile(
             profile="hosted",
             temperature=0,
             thinking_level=settings.gemini.thinking_level if supports_thinking else None,
+            location=gemini_location(settings),
         )
     if settings.provider == "model_server":
         # What this request fixes, and what the server reports about how it
@@ -507,8 +511,13 @@ def pipeline_context(
     from app.services.billing import UsageStore
     garden = settings.model_garden
     if recorded_profile is not None and recorded_profile.provider == "model_garden":
+        limit = recorded_profile.max_output_tokens
         garden = garden.model_copy(update={"effort": recorded_profile.reasoning_effort or garden.effort,
-            "max_output_tokens": recorded_profile.max_output_tokens or garden.max_output_tokens})
+            "claude_max_output_tokens": limit or garden.claude_max_output_tokens,
+            "grok_max_output_tokens": limit or garden.grok_max_output_tokens})
+    gemini_at = settings.gemini.location
+    if recorded_profile is not None and recorded_profile.provider == "gemini" and recorded_profile.location:
+        gemini_at = recorded_profile.location
     return PipelineContext(
         filename=filename,
         content=content,
@@ -522,6 +531,7 @@ def pipeline_context(
         page_pricing=settings.gcp,
         gemini_api_key=settings.gemini.api_key,
         gemini_thinking_level=settings.gemini.thinking_level,
+        gemini_location=gemini_at,
         gcp_credentials_path=str(GCP_CREDENTIALS_PATH),
         gcp_project_id=settings.gcp.project_id,
         gcp_location=settings.gcp.location,
@@ -542,10 +552,19 @@ def gemini_available(settings: AppSettings) -> bool:
     return config.gemini_vertex() is not None or bool(settings.gemini.api_key.strip())
 
 
+def gemini_location(settings: AppSettings) -> str | None:
+    """Where Gemini runs through Vertex AI: the location chosen in LLM, else the deployment's."""
+    vertex = config.gemini_vertex()
+    if vertex is None:
+        return None
+    return settings.gemini.location or vertex[1]
+
+
 def key_status(settings: AppSettings, verified: list[str] | None = None) -> GeminiKeyStatus:
     vertex = config.gemini_vertex()
     if vertex is not None:
-        return GeminiKeyStatus(configured=True, verified_models=verified or [], access="vertex", vertex_location=vertex[1])
+        return GeminiKeyStatus(configured=True, verified_models=verified or [], access="vertex",
+                               vertex_location=gemini_location(settings), deployment_location=vertex[1])
     key = settings.gemini.api_key.strip()
     return GeminiKeyStatus(
         configured=bool(key),

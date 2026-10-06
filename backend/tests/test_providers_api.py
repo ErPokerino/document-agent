@@ -213,7 +213,7 @@ def test_extracting_with_a_hosted_model_needs_a_key_not_a_warm_up(api) -> None:
 class FakeGemini:
     stats: dict | None = {"prompt_tokens": 1000, "completion_tokens": 50}
 
-    def __init__(self, api_key, thinking_level="low") -> None:
+    def __init__(self, api_key, thinking_level="low", location=None) -> None:
         self.last_prediction_stats = FakeGemini.stats
 
     async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
@@ -253,7 +253,7 @@ def test_verifying_the_key_reports_the_models_it_can_see(api, monkeypatch) -> No
     set_key(store, "k")
 
     class FakeGeminiClient:
-        def __init__(self, api_key, thinking_level="low") -> None:
+        def __init__(self, api_key, thinking_level="low", location=None) -> None:
             pass
 
         async def list_models(self):
