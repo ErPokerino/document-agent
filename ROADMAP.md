@@ -8,15 +8,17 @@ conversations that produced them. What is already built is described in
 
 ## Next
 
-Model Garden partners are implemented on the candidate branch: Claude Sonnet
-5.5, Claude Opus 5.5 and Grok 4.7 with per-attempt pricing snapshots. Claude
-cannot answer in `tutoral-498710` until the project has Sonnet and Opus quota:
-every Claude per-base-model quota there is zero, and inference on 2026-10-06
-returned 429 in EU, US and Global. Quota requests filed through the Cloud
-Quotas API on 2026-10-06 (EU and Global) were denied automatically; Claude is
-not enabled in Model Garden for the project yet (no Marketplace order), which
-is the owner's step. Grok answers in Global and US. Merge to `cloud` follows
-the user's acceptance test. See [decision 0009](docs/decisions/0009-model-garden-partners-and-usage-ledger.md).
+Claude Sonnet 5.5, Claude Opus 5.5 and Grok 4.7 run beside Gemini on Vertex AI,
+merged into `cloud` on 2026-10-06. Claude cannot answer in `tutoral-498710`
+until the project has quota: every Claude per-base-model quota there is zero,
+and inference returns 429 in EU, US and Global. Claude is enabled in Model
+Garden; quota requests filed through the Cloud Quotas API on 2026-10-06 (EU
+and Global, down to 2 requests a minute) were denied within seconds by
+Google's automatic eligibility check, which looks at the project's Vertex AI
+usage history and publishes no threshold. Next: escalate the denied requests
+(`docuflow-claude-*`) to Google Cloud Sales or Billing support for a manual
+review, or deploy on the company project. No code change is needed when quota
+arrives. See [decision 0009](docs/decisions/0009-model-garden-partners-and-usage-ledger.md).
 
 In order. Each builds on the Lab and the model registry as they are now.
 
