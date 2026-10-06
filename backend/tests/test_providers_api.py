@@ -213,8 +213,10 @@ def test_extracting_with_a_hosted_model_needs_a_key_not_a_warm_up(api) -> None:
 class FakeGemini:
     stats: dict | None = {"prompt_tokens": 1000, "completion_tokens": 50}
 
-    def __init__(self, api_key, thinking_level="low", location=None) -> None:
+    def __init__(self, api_key, thinking_level="low", location=None, max_output_tokens=None) -> None:
         self.last_prediction_stats = FakeGemini.stats
+        self.last_usage = {"promptTokenCount": 1000, "candidatesTokenCount": 50}
+        self.http_status = 200
 
     async def extract_entities(self, model, images, prompts, page_range, total_pages, processed_pages, document_text=""):
         return {entity.name: FieldExtraction(value=None, confidence="low") for entity in prompts.entities}
@@ -235,6 +237,11 @@ def test_a_hosted_extraction_runs_without_any_warm_up(api, monkeypatch) -> None:
     body = response.json()
     assert body["model"] == "gemini-3.8-flash"
     assert body["processing"]["prompt_tokens"] == 1000
+    # Costed per request like every hosted model: the Gemini API at Google's global rate.
+    from app.services.billing import published
+    rates, _ = published("gemini-3.8-flash", "global")
+    assert body["cost"]["status"] == "complete"
+    assert body["cost"]["total_usd"] == pytest.approx((1000 * rates[0] + 50 * rates[1]) / 1e6)
 
 
 def test_a_run_records_which_provider_produced_it(api, monkeypatch) -> None:

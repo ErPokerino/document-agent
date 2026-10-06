@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkFor, draftLocation, publisherOf, routeLabel } from "../lib/hosted-providers.ts";
+import { checkFor, controlsOf, draftLocation, effectiveRate, publisherOf, routeLabel, withControls, withRate } from "../lib/hosted-providers.ts";
 
 const settings = (gemini = {}, garden = {}) => ({
   gemini: { location: null, ...gemini },
@@ -32,8 +32,37 @@ test("a check answers for its own location only", () => {
   assert.equal(checkFor(checks, "claude-sonnet-5-5", null), undefined);
 });
 
-test("the route names how a request reaches the model", () => {
-  assert.equal(routeLabel({ provider: "model_garden" }, vertex), "Model Garden");
+test("every hosted model is reached through Vertex AI, unless Gemini uses a key", () => {
+  assert.equal(routeLabel({ provider: "model_garden" }, vertex), "Vertex AI");
   assert.equal(routeLabel({ provider: "gemini" }, vertex), "Vertex AI");
   assert.equal(routeLabel({ provider: "gemini" }, { access: "api_key" }), "Gemini API");
+});
+
+const full = () => ({
+  gemini: { location: null, thinking_level: "low", max_output_tokens: 16000 },
+  model_garden: { claude_location: "eu", claude_effort: "low", claude_max_output_tokens: 4096, grok_location: "global", grok_effort: "low", grok_max_output_tokens: 4096 },
+  hosted_rates: {},
+});
+
+test("each publisher has the same three controls, stored where its requests read them", () => {
+  let settings = full();
+  settings = withControls(settings, "google", { effort: "high", maxOutputTokens: 8000, location: "global" });
+  settings = withControls(settings, "xai", { effort: "medium" });
+  assert.deepEqual(controlsOf(settings, "google", vertex), { location: "global", effort: "high", maxOutputTokens: 8000 });
+  assert.equal(settings.gemini.thinking_level, "high");
+  assert.deepEqual(controlsOf(settings, "xai", vertex), { location: "global", effort: "medium", maxOutputTokens: 4096 });
+  assert.deepEqual(controlsOf(settings, "anthropic", vertex), { location: "eu", effort: "low", maxOutputTokens: 4096 });
+});
+
+test("a rate is Google's until edited, and resetting returns to Google's", () => {
+  const published = [{ model: "gemini-3.8-flash", location: "eu", input_per_million: 0.825, output_per_million: 4.125, cache_read_per_million: 0.0825 }];
+  let settings = full();
+  assert.deepEqual(effectiveRate(settings, published, "gemini-3.8-flash", "eu"), {
+    rate: { input_per_million: 0.825, output_per_million: 4.125, cache_read_per_million: 0.0825 }, edited: false, google: published[0],
+  });
+  settings = withRate(settings, "gemini-3.8-flash@eu", { input_per_million: 1, output_per_million: 4.125, cache_read_per_million: null });
+  assert.equal(effectiveRate(settings, published, "gemini-3.8-flash", "eu").edited, true);
+  assert.equal(effectiveRate(settings, published, "gemini-3.8-flash", "eu").rate.cache_read_per_million, null);
+  settings = withRate(settings, "gemini-3.8-flash@eu", null);
+  assert.equal(effectiveRate(settings, published, "gemini-3.8-flash", "eu").rate.input_per_million, 0.825);
 });

@@ -22,6 +22,9 @@ class PipelineContext:
     gemini_api_key: str = ""
     gemini_thinking_level: str = "low"
     gemini_location: str | None = None
+    gemini_max_output_tokens: int | None = None
+    # Rates edited in LLM, keyed "model@location"; the ledger costs with them.
+    hosted_rates: Any = None
     gcp_credentials_path: str = ""
     gcp_project_id: str = ""
     gcp_location: str = "eu"

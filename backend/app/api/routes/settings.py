@@ -10,7 +10,7 @@ from app.domain.models import (
     GeminiKeyStatus,
     HostedModelCheck,
     HostedVerifyRequest,
-    PartnerTariff,
+    PublishedRate,
     PromptPreview,
     PromptPreviewRequest,
 )
@@ -94,17 +94,19 @@ async def hosted_model_checks() -> list[HostedModelCheck]:
     return hosted_checks.all_checks()
 
 
-@router.get("/api/settings/model-garden/tariffs", response_model=list[PartnerTariff])
-async def model_garden_tariffs() -> list[PartnerTariff]:
-    """The rates each partner request is costed at, per location, up to 200k tokens of context."""
-    from app.services.billing import tariff
-    from app.services.model_garden import LOCATIONS, PARTNER_MODELS
+@router.get("/api/settings/hosted/rates", response_model=list[PublishedRate])
+async def published_rates() -> list[PublishedRate]:
+    """Google's rate today for each hosted model where it is offered: what LLM starts from."""
+    from app.services.billing import CHECKED_ON, SOURCE, hosted_offers, published
 
-    return [
-        PartnerTariff.model_validate(tariff(model.id, location) | {"model": model.id})
-        for model in PARTNER_MODELS
-        for location in LOCATIONS[model.publisher]
-    ]
+    rates = []
+    for model, location in hosted_offers():
+        values, scheduled = published(model, location)
+        values = values or (None, None, None, None, None)
+        rates.append(PublishedRate(model=model, location=location, input_per_million=values[0],
+            output_per_million=values[1], cache_read_per_million=values[2], checked_on=CHECKED_ON,
+            source=SOURCE, scheduled=scheduled))
+    return rates
 
 
 @router.post("/api/settings/hosted/verify", response_model=list[HostedModelCheck])
@@ -179,10 +181,17 @@ async def update_settings(settings: AppSettings) -> AppSettings:
             detail=f"No hosted model is named {', '.join(unknown_rates)}, so it has no price to set.",
         )
 
+    from app.services.billing import hosted_offers
+
+    offered = {f"{model}@{location}" for model, location in hosted_offers()}
+    unknown_offers = sorted(key for key in settings.hosted_rates if key not in offered)
+    if unknown_offers:
+        raise HTTPException(status_code=400, detail=f"No hosted model is offered as {', '.join(unknown_offers)}, so it has no rate to set.")
+
     if settings.provider == "model_garden":
         from app.services.model_garden import find_partner
         if find_partner(settings.model) is None:
-            raise HTTPException(status_code=400, detail="Select a supported Model Garden model.")
+            raise HTTPException(status_code=400, detail=f"{settings.model} is not one of the supported hosted models.")
     elif settings.provider == "gemini":
         if find_model(settings.model) is None:
             raise HTTPException(

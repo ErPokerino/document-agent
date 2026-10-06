@@ -611,7 +611,7 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .model-loader.hosted { background: var(--accent-soft); border-color: var(--accent); }
 .model-loader.hosted.error { background: #fff8f6; border-color: #e7c5bf; }
 .model-loader.hosted.error .model-loader-icon { color: #9c3b2e; background: #fbe9e7; }
-.provider-tag.model_garden { background: #f0ecfa; color: #5b3f99; }
+.provider-tag.model_garden { background: #eaf1fa; color: #1d5a97; }
 .model-group { display: grid; gap: 9px; }
 .model-group + .model-group { margin-top: 8px; }
 .model-group-heading { display: flex; align-items: baseline; gap: 8px; margin: 0; color: var(--ink); font-size: 11px; font-weight: 700; }
@@ -622,7 +622,6 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .provider-section-heading { margin: 26px 0 12px; }
 .provider-section-heading h3 { margin: 0 0 4px; font-size: 13px; }
 .provider-section-heading p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
-.provider-card .key-row + .field-help { margin-bottom: 16px; }
 .provider-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
 .provider-field { display: grid; gap: 7px; }
 .provider-field > span { color: var(--muted); font-size: 11px; font-weight: 700; }
@@ -635,15 +634,29 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .provider-model small { color: var(--muted); font-size: 10px; }
 .provider-model .provider-model-detail { grid-column: 1 / -1; color: #9c3b2e; font-size: 9.5px; line-height: 1.45; }
 .provider-card .field-help .good-note { display: inline-flex; align-items: center; gap: 6px; color: #1d7a56; }
-.pricing-row.readonly { grid-template-columns: 1fr auto auto auto; }
-.pricing-row.readonly b { min-width: 52px; text-align: right; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-:root[data-theme="dark"] .provider-tag.model_garden { background: #2a2340; color: #c3b2f0; }
+.pricing-row.hosted-rate { grid-template-columns: minmax(0, 1fr) repeat(3, auto) 56px; }
+.hosted-rate-model { display: grid; gap: 3px; min-width: 0; }
+.hosted-rate-model small { color: var(--muted); font-size: 9.5px; }
+.hosted-rate-absent { grid-column: span 3; color: var(--muted); font-size: 10.5px; }
+.hosted-rate-source { justify-self: center; color: var(--muted); font: 500 8px var(--font-mono), monospace; text-transform: uppercase; letter-spacing: .06em; }
+.pricing-row.hosted-rate .icon-button { justify-self: center; }
+/* A provider card folds to its heading and a one-line summary. */
+.provider-card { padding: 0; }
+.provider-card-toggle { width: 100%; display: flex; align-items: center; gap: 12px; padding: 18px 23px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; border-radius: 14px; font: inherit; }
+.provider-card-toggle:hover { background: var(--surface); }
+.provider-card-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.provider-card-title { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.provider-card-title strong { font-size: 13px; }
+.provider-card-title small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.provider-card-chevron { flex: 0 0 auto; color: var(--muted); transition: transform .15s ease; }
+.provider-card.open .provider-card-chevron { transform: rotate(180deg); }
+.provider-card-body { padding: 4px 23px 23px; }
+.provider-access { margin-bottom: 16px; }
 :root[data-theme="dark"] .model-specs em.check-no_quota, :root[data-theme="dark"] .model-specs em.check-not_offered, :root[data-theme="dark"] .model-specs em.check-refused { background: #3a201c; color: #f0a89a; }
 :root[data-theme="dark"] .model-loader.hosted.error { background: #2a1a17; border-color: #5a2e27; }
 :root[data-theme="dark"] .model-loader.hosted.error .model-loader-icon { background: #3a201c; color: #f0a89a; }
 :root[data-theme="dark"] .provider-model .provider-model-detail { color: #f0a89a; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .provider-tag.model_garden { background: #2a2340; color: #c3b2f0; }
   :root:not([data-theme="light"]) .model-specs em.check-no_quota, :root:not([data-theme="light"]) .model-specs em.check-not_offered, :root:not([data-theme="light"]) .model-specs em.check-refused { background: #3a201c; color: #f0a89a; }
   :root:not([data-theme="light"]) .model-loader.hosted.error { background: #2a1a17; border-color: #5a2e27; }
   :root:not([data-theme="light"]) .model-loader.hosted.error .model-loader-icon { background: #3a201c; color: #f0a89a; }

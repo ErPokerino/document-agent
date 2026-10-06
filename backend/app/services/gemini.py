@@ -86,10 +86,19 @@ def vertex_host(location: str) -> str:
 
 
 class GeminiClient(ExtractionProvider):
-    def __init__(self, api_key: str, thinking_level: str = "low", location: str | None = None) -> None:
+    def __init__(self, api_key: str, thinking_level: str = "low", location: str | None = None,
+                 max_output_tokens: int | None = None) -> None:
         self.api_key = (api_key or "").strip()
         self.thinking_level = thinking_level if thinking_level in THINKING_LEVELS else "low"
+        # None leaves a thinking model uncapped, as runs recorded before the
+        # limit existed were.
+        self.max_output_tokens = max_output_tokens
         self.last_prediction_stats: dict[str, int | float] | None = None
+        # What the usage ledger reads after each request, as for Claude and Grok.
+        self.last_usage: dict[str, Any] | None = None
+        self.http_status: int | None = None
+        self.request_id: str | None = None
+        self.retry_after: float = 1
         # A deployment that names Vertex AI uses it; the key is then not needed.
         # The location chosen in LLM replaces the deployment's, never silently.
         self.vertex = config.gemini_vertex()
@@ -222,12 +231,15 @@ class GeminiClient(ExtractionProvider):
             # Gemini 3 defaults to "high"; an extraction does not need to pay for
             # that, so the configured level is always stated.
             generation_config["thinkingConfig"] = {"thinkingLevel": self.thinking_level}
+            if self.max_output_tokens is not None:
+                generation_config["maxOutputTokens"] = self.max_output_tokens
         else:
             # The answer is all a model without thinking writes, so it gets
             # the same budget as a local one. Thinking tokens count against
             # the same limit, and nothing measured says how many a hard
             # invoice takes, so a thinking model is not capped here.
-            generation_config["maxOutputTokens"] = self._output_token_budget(prompts.entities)
+            budget = self._output_token_budget(prompts.entities)
+            generation_config["maxOutputTokens"] = min(budget, self.max_output_tokens or budget)
 
         payload = {
             "systemInstruction": {"parts": [{"text": self._system_prompt(prompts)}]},
@@ -235,6 +247,8 @@ class GeminiClient(ExtractionProvider):
             "generationConfig": generation_config,
         }
 
+        self.last_prediction_stats = self.last_usage = None
+        self.http_status = self.request_id = None
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
                 response = await client.post(self._url(model), json=payload, headers=headers)
@@ -245,8 +259,16 @@ class GeminiClient(ExtractionProvider):
         except httpx.HTTPError as exc:
             raise GeminiError(f"Could not reach the Gemini API: {exc}") from exc
 
+        self.http_status = response.status_code
+        headers_in = getattr(response, "headers", None) or {}
+        self.request_id = headers_in.get("x-request-id") if hasattr(headers_in, "get") else None
+        try:
+            self.retry_after = min(60, max(1, float(headers_in.get("retry-after", "1")))) if hasattr(headers_in, "get") else 1
+        except ValueError:
+            self.retry_after = 1
         self._raise_for_status(response)
         body = response.json()
+        self.last_usage = body.get("usageMetadata") or {}
         self.last_prediction_stats = self._prediction_stats(body)
         return self._parse(body, prompts.entities)
 

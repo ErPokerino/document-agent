@@ -131,7 +131,7 @@ class ModelGardenClient(ExtractionProvider):
                 "system": GeminiClient._system_prompt(prompts),
                 "messages": [{"role": "user", "content": content}],
                 "thinking": {"type": "adaptive"},
-                "output_config": {"effort": self.settings.effort,
+                "output_config": {"effort": self.settings.effort("anthropic"),
                                   "format": {"type": "json_schema", "schema": schema}},
             }
         else:
@@ -142,6 +142,8 @@ class ModelGardenClient(ExtractionProvider):
             ]]
             payload = {
                 "model": f"xai/{model}", "max_completion_tokens": self.settings.output_limit(selected.publisher),
+                # Accepted by Grok 4.7 on Vertex AI (checked 2026-10-06); it reasons either way.
+                "reasoning_effort": self.settings.effort("xai"),
                 "messages": [{"role": "system", "content": GeminiClient._system_prompt(prompts)},
                              {"role": "user", "content": content}],
                 "response_format": {"type": "json_schema", "json_schema": {"name": "extraction", "strict": True, "schema": schema}},

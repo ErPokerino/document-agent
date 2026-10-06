@@ -32,6 +32,7 @@ export type AppSettings = {
   excluded_model_ids: string[];
   gemini: GeminiSettings;
   model_garden: ModelGardenSettings;
+  hosted_rates: Record<string, HostedRate>;
   gcp: GcpSettings;
   lm_studio_url: string;
   pipeline: string;
@@ -493,6 +494,7 @@ export type GeminiSettings = {
   api_key: string;
   thinking_level: "low" | "medium" | "high";
   location: "eu" | "us" | "global" | null;
+  max_output_tokens: number;
   pricing: Record<string, ModelPricing>;
   pricing_checked_on: string;
   pricing_defaults_offered: string[];
@@ -514,6 +516,12 @@ export type HostedModelCheck = {
   status: "answering" | "no_quota" | "not_offered" | "refused";
   detail: string;
   checked_at: string;
+};
+
+export type HostedRate = {
+  input_per_million: number | null;
+  output_per_million: number | null;
+  cache_read_per_million: number | null;
 };
 
 export type HostedVerifyRequest = {
@@ -604,9 +612,10 @@ export type ModelExecutionProfile = {
 
 export type ModelGardenSettings = {
   claude_location: "eu" | "us" | "global";
-  grok_location: "us" | "global";
-  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  claude_effort: "low" | "medium" | "high" | "xhigh" | "max";
   claude_max_output_tokens: number;
+  grok_location: "us" | "global";
+  grok_effort: "low" | "medium" | "high";
   grok_max_output_tokens: number;
 };
 
@@ -664,18 +673,6 @@ export type ParameterSpec = {
   step: number | null;
   choices: string[];
   help: string;
-};
-
-export type PartnerTariff = {
-  model: string;
-  location: string;
-  input: number | null;
-  output: number | null;
-  cache_read: number | null;
-  cache_write_5m: number | null;
-  cache_write_1h: number | null;
-  checked_on: string;
-  source: string;
 };
 
 export type PipelineActivity = {
@@ -758,6 +755,17 @@ export type PromptPreview = {
 export type PromptPreviewRequest = {
   prompts: PromptConfiguration;
   provider: "lm_studio" | "gemini" | "model_server" | "model_garden";
+};
+
+export type PublishedRate = {
+  model: string;
+  location: string;
+  input_per_million: number | null;
+  output_per_million: number | null;
+  cache_read_per_million: number | null;
+  checked_on: string;
+  source: string;
+  scheduled: string | null;
 };
 
 export type ReadingCacheStatus = {

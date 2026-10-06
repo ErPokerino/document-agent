@@ -48,7 +48,12 @@ def build_extraction_client(context: PipelineContext) -> ExtractionProvider:
         client = ModelGardenClient(context.model_garden_settings, context.model_garden_project, context.model_garden_location)
         return MeteredProvider(client, context)
     if context.provider == "gemini":
-        return GeminiClient(context.gemini_api_key, context.gemini_thinking_level, context.gemini_location)
+        client = GeminiClient(context.gemini_api_key, context.gemini_thinking_level, context.gemini_location,
+                              context.gemini_max_output_tokens)
+        if context.usage_store is None:
+            return client
+        from app.services.billing import MeteredProvider
+        return MeteredProvider(client, context)
     if context.provider == "model_server":
         from app.services.model_server import ModelServerClient
 

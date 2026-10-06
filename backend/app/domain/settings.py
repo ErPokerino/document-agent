@@ -46,6 +46,12 @@ class GeminiSettings(BaseModel):
     # Through Vertex AI only. None is the deployment's location; a preview
     # model may be offered in `global` alone.
     location: Literal["eu", "us", "global"] | None = None
+    # Answer and thinking together. A thinking model was not capped before
+    # this existed, and a run recorded then still is not.
+    max_output_tokens: Annotated[int, Field(ge=256, le=32000)] = 16000
+    # The rates runs recorded before the usage ledger are still estimated
+    # with, at display time. New runs are costed per request from
+    # `AppSettings.hosted_rates`, like every hosted model.
     pricing: dict[str, ModelPricing] = Field(default_factory=default_gemini_pricing)
     pricing_checked_on: str = "2026-08-21"
     # Models whose default rate has been offered once. A default is added to
@@ -55,28 +61,54 @@ class GeminiSettings(BaseModel):
 
 
 class ModelGardenSettings(BaseModel):
-    """Partner endpoints and generation controls; credentials come from GCP."""
+    """Claude and Grok on Vertex AI: where each runs and how it answers.
+
+    The same three controls Gemini has: location, reasoning effort and an
+    output limit. Credentials come from the deployment's identity.
+    """
 
     model_config = ConfigDict(extra="forbid")
     claude_location: Literal["eu", "us", "global"] = "eu"
+    claude_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    claude_max_output_tokens: Annotated[int, Field(ge=256, le=32000)] = 4096
     grok_location: Literal["us", "global"] = "global"
-    effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
-    claude_max_output_tokens: Annotated[int, Field(ge=256, le=10000)] = 4096
+    grok_effort: Literal["low", "medium", "high"] = "low"
+    # Grok's output quota is 10,500 tokens a minute in the project this was
+    # built on, and every request reserves its whole limit against it.
     grok_max_output_tokens: Annotated[int, Field(ge=256, le=10000)] = 4096
 
     @model_validator(mode="before")
     @classmethod
-    def _per_publisher_limit(cls, data: Any) -> Any:
-        """Settings saved before each publisher had its own limit hold one shared value."""
-        if isinstance(data, dict) and "max_output_tokens" in data:
+    def _per_publisher_controls(cls, data: Any) -> Any:
+        """Settings saved before each publisher had its own controls."""
+        if isinstance(data, dict) and ("max_output_tokens" in data or "effort" in data):
             data = dict(data)
-            shared = data.pop("max_output_tokens")
-            data.setdefault("claude_max_output_tokens", shared)
-            data.setdefault("grok_max_output_tokens", shared)
+            if "max_output_tokens" in data:
+                shared = data.pop("max_output_tokens")
+                data.setdefault("claude_max_output_tokens", shared)
+                data.setdefault("grok_max_output_tokens", shared)
+            if "effort" in data:
+                data.setdefault("claude_effort", data.pop("effort"))
         return data
 
     def output_limit(self, publisher: str | None) -> int:
         return self.claude_max_output_tokens if publisher == "anthropic" else self.grok_max_output_tokens
+
+    def effort(self, publisher: str | None) -> str:
+        return self.claude_effort if publisher == "anthropic" else self.grok_effort
+
+
+class HostedRate(BaseModel):
+    """USD per million tokens, up to 200k tokens of context.
+
+    Replaces Google's published rate for one model in one location. None is
+    no rate: requests are then costed as unknown, never as free.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    input_per_million: Annotated[float | None, Field(ge=0)] = None
+    output_per_million: Annotated[float | None, Field(ge=0)] = None
+    cache_read_per_million: Annotated[float | None, Field(ge=0)] = None
 
 
 class DocumentProcessor(BaseModel):
@@ -142,6 +174,9 @@ class AppSettings(BaseModel):
     excluded_model_ids: list[str] = Field(default_factory=list)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     model_garden: ModelGardenSettings = Field(default_factory=ModelGardenSettings)
+    # Rates edited in LLM, keyed "model@location". A hosted model without one
+    # is costed at Google's published rate for the day of the request.
+    hosted_rates: dict[str, HostedRate] = Field(default_factory=dict)
     gcp: GcpSettings = Field(default_factory=GcpSettings)
     lm_studio_url: str = "http://127.0.0.1:1234"
     pipeline: str = DEFAULT_PIPELINE_NAME
@@ -163,18 +198,18 @@ class HostedModelCheck(BaseModel):
     checked_at: str
 
 
-class PartnerTariff(BaseModel):
-    """The recorded Model Garden rate for one model in one location, USD per million tokens."""
+class PublishedRate(BaseModel):
+    """Google's rate for one hosted model in one location today, USD per million tokens, up to 200k of context."""
 
     model: str
     location: str
-    input: float | None = None
-    output: float | None = None
-    cache_read: float | None = None
-    cache_write_5m: float | None = None
-    cache_write_1h: float | None = None
+    input_per_million: float | None = None
+    output_per_million: float | None = None
+    cache_read_per_million: float | None = None
     checked_on: str
     source: str
+    # A change Google has announced, as "2027-01-01: 1.5 / 7.5".
+    scheduled: str | None = None
 
 
 class HostedVerifyRequest(BaseModel):

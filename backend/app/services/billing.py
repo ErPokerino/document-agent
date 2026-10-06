@@ -31,27 +31,92 @@ CREATE INDEX IF NOT EXISTS model_usage_scope ON model_usage(scope, started);
 """
 
 
-def tariff(model: str, location: str, context: int = 0) -> dict[str, Any]:
-    """USD per million tokens. A tier applies to the entire request."""
-    regional = location != "global"
-    if model.startswith("claude-sonnet"):
-        rates = (2.2, 11, .22, 2.75, 4.4) if regional else (2, 10, .2, 2.5, 4)
-    elif model.startswith("claude-opus"):
-        rates = (4.4, 22, .22, 5.5, 8.8) if regional else (4, 20, .2, 5, 8)
-    elif model == "grok-4.7":
-        rates = (4, 12, 1, None, None) if context > 200000 else (2, 6, .5, None, None)
-    else:
+# Google's published rates, USD per million tokens: (input, output, cache
+# read, cache write 5m, cache write 1h). "regional" is every location but
+# global (EU, US, a region), which Google prices 10% higher for these models.
+# A model with dated rates lists them oldest first; each applies from its date.
+_Rates = tuple[float | None, float | None, float | None, float | None, float | None]
+_GEMINI_FLASH: list[tuple[str, dict[str, _Rates]]] = [
+    ("", {"global": (.75, 3.75, .075, None, None), "regional": (.825, 4.125, .0825, None, None)}),
+    ("2027-01-01", {"global": (1.5, 7.5, .15, None, None), "regional": (1.65, 8.25, .165, None, None)}),
+]
+PUBLISHED: dict[str, list[tuple[str, dict[str, _Rates]]]] = {
+    "claude-sonnet-5-5": [("", {"global": (2, 10, .2, 2.5, 4), "regional": (2.2, 11, .22, 2.75, 4.4)})],
+    "claude-opus-5-5": [("", {"global": (4, 20, .2, 5, 8), "regional": (4.4, 22, .22, 5.5, 8.8)})],
+    "grok-4.7": [("", {"global": (2, 6, .5, None, None), "regional": (2, 6, .5, None, None)})],
+    "gemini-3.8-flash": _GEMINI_FLASH,
+    "gemini-3.7-flash": _GEMINI_FLASH,
+    "gemini-3.5-flash-lite": [("", {"global": (.3, 2.5, .03, None, None), "regional": (.33, 2.75, .033, None, None)})],
+    # Offered in global only.
+    "gemini-3.1-pro-preview": [("", {"global": (2, 12, .2, None, None)})],
+}
+# Above 200k tokens of context the whole request moves to these. Claude's
+# long-context cache cells are blank where it is published regionally, so
+# they are not inferred; Gemini Flash models keep one rate at any length.
+LONG_CONTEXT: dict[str, dict[str, _Rates]] = {
+    "claude-sonnet-5-5": {"global": (2, 10, None, None, None), "regional": (2.2, 11, None, None, None)},
+    "claude-opus-5-5": {"global": (4, 20, None, None, None), "regional": (4.4, 22, None, None, None)},
+    "grok-4.7": {"global": (4, 12, 1, None, None), "regional": (4, 12, 1, None, None)},
+    "gemini-3.1-pro-preview": {"global": (4, 18, .4, None, None)},
+}
+_CATEGORIES = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
+
+
+def _tier(location: str) -> str:
+    return "global" if location == "global" else "regional"
+
+
+def published(model: str, location: str, on: str | None = None) -> tuple[_Rates | None, str | None]:
+    """Google's rate for a model in a location on a day, and the next change it has announced."""
+    day = on or datetime.now(timezone.utc).date().isoformat()
+    dated = PUBLISHED.get(model, [])
+    current, upcoming = None, None
+    for since, rates in dated:
+        if since <= day:
+            current = rates.get(_tier(location))
+        elif upcoming is None and _tier(location) in rates:
+            values = rates[_tier(location)]
+            upcoming = f"{since}: {values[0]:g} / {values[1]:g}"
+    return current, upcoming
+
+
+def hosted_offers() -> list[tuple[str, str]]:
+    """Every selectable hosted model with each location it is offered in."""
+    from app.services.gemini import GEMINI_MODELS
+    from app.services.model_garden import LOCATIONS, PARTNER_MODELS
+
+    offers = [(model.id, location) for model in GEMINI_MODELS
+              for location in (("eu", "us", "global") if "regional" in PUBLISHED.get(model.id, [("", {})])[0][1] else ("global",))]
+    return offers + [(model.id, location) for model in PARTNER_MODELS for location in LOCATIONS[model.publisher]]
+
+
+def tariff(model: str, location: str, context: int = 0, rates: dict[str, Any] | None = None,
+           on: str | None = None) -> dict[str, Any]:
+    """USD per million tokens for one request. A tier applies to the entire request.
+
+    A rate edited in LLM replaces Google's up to 200k tokens of context; above
+    that, Google's long-context table applies, since no edited rate covers it.
+    """
+    values, _ = published(model, location, on)
+    source = SOURCE
+    if context > 200000 and model in LONG_CONTEXT:
+        values = LONG_CONTEXT[model].get(_tier(location))
+    elif context <= 200000 and rates and f"{model}@{location}" in rates:
+        edited = rates[f"{model}@{location}"]
+        get = edited.get if isinstance(edited, dict) else lambda key: getattr(edited, key)
+        base = values or (None, None, None, None, None)
+        values = (get("input_per_million"), get("output_per_million"), get("cache_read_per_million"), base[3], base[4])
+        source = "LLM settings"
+    if values is None:
         return {}
-    if model.startswith("claude") and context > 200000:
-        # The published long-context cache cells are blank. Do not infer them.
-        rates = (rates[0], rates[1], None, None, None)
-    return dict(zip(("input", "output", "cache_read", "cache_write_5m", "cache_write_1h"), rates)) | {
-        "source": SOURCE, "checked_on": CHECKED_ON, "version": "2026-10-06",
+    return dict(zip(_CATEGORIES, values)) | {
+        "source": source, "checked_on": CHECKED_ON, "version": CHECKED_ON,
         "currency": "USD", "location": location, "context_tier": ">200k" if context > 200000 else "<=200k",
     }
 
 
-def account(record: UsageRecord, raw: dict[str, Any], http_status: int | None) -> UsageRecord:
+def account(record: UsageRecord, raw: dict[str, Any], http_status: int | None,
+            rates: dict[str, Any] | None = None) -> UsageRecord:
     """Preserve missing usage as unknown and do not count reasoning twice."""
     record.raw_usage, record.http_status = raw, http_status
     if http_status is not None and 400 <= http_status <= 599:
@@ -68,6 +133,17 @@ def account(record: UsageRecord, raw: dict[str, Any], http_status: int | None) -
         # Without a TTL breakdown, a cache write cannot be priced truthfully.
         unidentified_writes = raw.get("cache_creation_input_tokens", 0) - record.cache_write_1h_tokens - record.cache_write_5m_tokens
         context = (record.input_tokens or 0) + record.cached_tokens + raw.get("cache_creation_input_tokens", 0)
+    elif record.publisher == "google":
+        # promptTokenCount includes the cached part; thinking is billed as output.
+        prompt = raw.get("promptTokenCount")
+        record.cached_tokens = raw.get("cachedContentTokenCount", 0) or 0
+        record.input_tokens = None if prompt is None else prompt - record.cached_tokens
+        answer = raw.get("candidatesTokenCount")
+        thinking = raw.get("thoughtsTokenCount") or 0
+        record.reasoning_tokens = thinking or None
+        record.output_tokens = None if answer is None and not thinking else (answer or 0) + thinking
+        context = prompt or 0
+        unidentified_writes = 0
     else:
         from app.services.model_garden import grok_output_tokens
         record.input_tokens = raw.get("prompt_tokens")
@@ -80,7 +156,7 @@ def account(record: UsageRecord, raw: dict[str, Any], http_status: int | None) -
         unidentified_writes = 0
     # The tier is based on all input, including cache reads and cache writes.
     reserved_output = record.tariff.get("reserved_output")
-    record.tariff = tariff(record.model, record.location or "global", context)
+    record.tariff = tariff(record.model, record.location or "global", context, rates)
     if reserved_output is not None:
         record.tariff["reserved_output"] = reserved_output
     complete = http_status == 200 and record.input_tokens is not None and record.output_tokens is not None and not unidentified_writes
@@ -173,29 +249,43 @@ class UsageStore:
             return 0
 
 
+def endpoint_of(context: Any, model: str) -> tuple[str, str | None, str]:
+    """Publisher, project and location a hosted request goes to, as the run pinned them."""
+    if context.provider == "gemini":
+        from app import config
+
+        vertex = config.gemini_vertex()
+        if vertex is None:
+            # The Gemini API has no location; it is priced as Vertex AI's global.
+            return "google", None, "global"
+        return "google", vertex[0], context.gemini_location or vertex[1]
+    from app.services.model_garden import connection, find_partner
+
+    selected = find_partner(model)
+    assert selected is not None
+    project, location = connection(model, context.model_garden_settings)
+    return selected.publisher, context.model_garden_project or project, context.model_garden_location or location
+
+
 class MeteredProvider(ExtractionProvider):
-    """Record each partner attempt even when parsing or validation fails."""
+    """Record each hosted attempt even when parsing or validation fails."""
     def __init__(self, client: ExtractionProvider, context: Any) -> None:
         self.client, self.context = client, context
         self.last_prediction_stats = None
 
     async def extract_entities(self, model: str, images: list[str], prompts: Any, page_range: str,
                                total_pages: int, processed_pages: int, document_text: str = "") -> Any:
-        from app.services.model_garden import connection, find_partner
         context = self.context
-        selected = find_partner(model)
-        assert selected is not None
-        project, location = connection(model, context.model_garden_settings)
-        project = context.model_garden_project or project
-        location = context.model_garden_location or location
+        publisher, project, location = endpoint_of(context, model)
+        rates = getattr(context, "hosted_rates", None)
         scope = f"{project}/{location}/{model}"
         for attempt in range(3):
             record = UsageRecord(id=str(uuid4()), group_id=context.usage_group,
-                created_at=datetime.now(timezone.utc).isoformat(), model=model, provider="model_garden",
-                publisher=selected.publisher, project=project, location=location,
+                created_at=datetime.now(timezone.utc).isoformat(), model=model, provider=context.provider,
+                publisher=publisher, project=project, location=location,
                 step=context.current_step, document=context.filename, evaluation_id=context.evaluation_id,
-                status="pending", tariff=tariff(model, location))
-            if selected.publisher == "xai":
+                status="pending", tariff=tariff(model, location, rates=rates))
+            if publisher == "xai":
                 while True:
                     delay = await asyncio.to_thread(context.usage_store.reserve_grok, record, scope, context.model_garden_settings.grok_max_output_tokens)
                     if not delay:
@@ -218,10 +308,10 @@ class MeteredProvider(ExtractionProvider):
                 raise
             finally:
                 record.request_id = getattr(self.client, "request_id", None)
-                account(record, getattr(self.client, "last_usage", None) or {}, getattr(self.client, "http_status", None))
+                account(record, getattr(self.client, "last_usage", None) or {}, getattr(self.client, "http_status", None), rates)
                 # A disconnect cannot discard an already billed response.
                 context.usage_store.save(record, scope)
-                self.last_prediction_stats = self.client.last_prediction_stats
+                self.last_prediction_stats = getattr(self.client, "last_prediction_stats", None)
             if retry:
                 await asyncio.sleep(max(2 ** attempt, getattr(self.client, "retry_after", 1)))
 

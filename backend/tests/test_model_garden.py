@@ -95,7 +95,7 @@ async def test_partner_requests_use_google_identity_and_the_correct_schema(monke
             return httpx.Response(200, json={"content": [{"type": "thinking", "thinking": "private"}, {"type": "text", "text": ANSWER}],
                 "usage": {"input_tokens": 100, "output_tokens": 20}, "stop_reason": "end_turn"})
         assert body["model"] == "xai/grok-4.7"
-        assert "reasoning_effort" not in body
+        assert body["reasoning_effort"] == "low"
         return httpx.Response(200, json={"choices": [{"message": {"content": ANSWER}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 150,
                       "completion_tokens_details": {"reasoning_tokens": 30}}})
@@ -191,11 +191,11 @@ def test_model_garden_profiles_pin_the_project_region_and_generation_controls(mo
     settings = AppSettings(provider="model_garden", model="claude-sonnet-5-5")
     profile = deps.execution_profile(settings, None, find_partner(settings.model))
     monkeypatch.setenv("DOCUFLOW_MODEL_GARDEN_PROJECT", "new-project")
-    settings.model_garden.effort = "high"
+    settings.model_garden.claude_effort = "high"
     settings.model_garden.claude_max_output_tokens = 8000
     context = deps.pipeline_context(settings, "a.pdf", b"", recorded_profile=profile)
     assert (context.model_garden_project, context.model_garden_location) == ("original-project", "eu")
-    assert context.model_garden_settings.effort == "low"
+    assert context.model_garden_settings.claude_effort == "low"
     assert context.model_garden_settings.claude_max_output_tokens == 4096
 
 
@@ -343,3 +343,100 @@ def test_a_gemini_429_states_what_google_refused_without_its_advice():
     with pytest.raises(GeminiError) as raised:
         GeminiClient("key")._raise_for_status(response)
     assert str(raised.value) == "Gemini: Google refused the request with 429 (rate limit or quota). Resource exhausted."
+
+
+@pytest.mark.parametrize("location,on,expected", [
+    ("global", "2026-10-06", (.75, 3.75, .075)), ("eu", "2026-10-06", (.825, 4.125, .0825)),
+    ("eu", "2027-01-01", (1.65, 8.25, .165)),
+])
+def test_gemini_is_priced_by_location_and_by_the_day_of_the_request(location, on, expected):
+    """Google prices Gemini 10% higher outside global, and Flash doubles on 1 January 2027."""
+    rates = tariff("gemini-3.8-flash", location, on=on)
+    assert (rates["input"], rates["output"], rates["cache_read"]) == expected
+
+
+def test_a_rate_edited_in_llm_replaces_googles_up_to_200k_of_context():
+    edited = {"claude-sonnet-5-5@eu": {"input_per_million": 3, "output_per_million": None, "cache_read_per_million": .3}}
+    rates = tariff("claude-sonnet-5-5", "eu", rates=edited)
+    assert (rates["input"], rates["output"], rates["cache_read"], rates["source"]) == (3, None, .3, "LLM settings")
+    # Another location keeps Google's rate; a long context uses Google's long-context table.
+    assert tariff("claude-sonnet-5-5", "global", rates=edited)["input"] == 2
+    assert tariff("claude-sonnet-5-5", "eu", 200001, rates=edited)["input"] == 2.2
+    # A removed rate is an unknown cost, never a free one.
+    cost = account(record("claude-sonnet-5-5", "anthropic", "eu"), {"input_tokens": 10, "output_tokens": 10}, 200, edited).cost
+    assert cost.status == "partial" and cost.total_usd is None
+
+
+def test_gemini_usage_separates_cached_input_and_bills_thinking_as_output():
+    raw = {"promptTokenCount": 1000, "cachedContentTokenCount": 400, "candidatesTokenCount": 50, "thoughtsTokenCount": 150}
+    item = account(record("gemini-3.8-flash", "google", "global"), raw, 200)
+    assert (item.input_tokens, item.cached_tokens, item.output_tokens, item.reasoning_tokens) == (600, 400, 200, 150)
+    rates = item.tariff
+    assert item.cost.total_usd == pytest.approx((600 * rates["input"] + 400 * rates["cache_read"] + 200 * rates["output"]) / 1e6)
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_429_is_retried_and_every_attempt_recorded(tmp_path, monkeypatch):
+    """Gemini's shared quota in global refuses now and then; the run must not fail on the first refusal."""
+    monkeypatch.setenv("DOCUFLOW_GEMINI_VERTEX_PROJECT", "test-project")
+    monkeypatch.setenv("DOCUFLOW_GEMINI_VERTEX_LOCATION", "eu")
+    monkeypatch.setattr("app.services.billing.asyncio.sleep", AsyncMock())
+    settings = AppSettings(provider="gemini", model="gemini-3.8-flash")
+    settings.gemini.location = "global"
+    context = deps.pipeline_context(settings, "synthetic.pdf", b"")
+    class Shared:
+        http_status = None
+        last_usage = None
+        last_prediction_stats = None
+        calls = 0
+        async def extract_entities(self, *args):
+            self.calls += 1
+            if self.calls == 1:
+                self.http_status = 429
+                raise ProviderError("Gemini: Google refused the request with 429 (rate limit or quota).")
+            self.http_status, self.last_usage = 200, {"promptTokenCount": 100, "candidatesTokenCount": 10}
+            return {"invoice_number": "TEST-1"}
+    client = Shared()
+    assert await MeteredProvider(client, context).extract_entities(context.model, [], PROMPTS, "1", 1, 1) == {"invoice_number": "TEST-1"}
+    detail = context.usage_store.detail(group_id=context.usage_group)
+    assert [item.status for item in detail.records] == ["failed", "succeeded"]
+    assert {(item.provider, item.publisher, item.project, item.location) for item in detail.records} == {("gemini", "google", "test-project", "global")}
+    assert detail.cost.status == "complete" and detail.cost.total_usd > 0
+
+
+def test_settings_saved_with_one_effort_give_it_to_claude():
+    loaded = ModelGardenSettings.model_validate({"effort": "high", "max_output_tokens": 2048})
+    assert (loaded.claude_effort, loaded.grok_effort) == ("high", "low")
+    assert loaded.effort("anthropic") == "high" and loaded.effort("xai") == "low"
+
+
+@pytest.mark.asyncio
+async def test_the_gemini_output_limit_caps_thinking_models_and_old_profiles_stay_uncapped(monkeypatch):
+    from app.services.gemini import GeminiClient
+    monkeypatch.setenv("DOCUFLOW_GEMINI_VERTEX_PROJECT", "test-project")
+    monkeypatch.setenv("DOCUFLOW_GEMINI_VERTEX_LOCATION", "eu")
+    monkeypatch.setattr(gcp_runtime, "access_token", AsyncMock(return_value="test-token"))
+    sent = []
+    def respond(request):
+        sent.append(json.loads(request.content)["generationConfig"])
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": ANSWER}]}, "finishReason": "STOP"}],
+                                         "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}})
+    original = httpx.AsyncClient
+    monkeypatch.setattr("app.services.gemini.httpx.AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs))
+    await GeminiClient("", max_output_tokens=16000).extract_entities("gemini-3.8-flash", [], PROMPTS, "1", 1, 1, "text")
+    await GeminiClient("").extract_entities("gemini-3.8-flash", [], PROMPTS, "1", 1, 1, "text")
+    assert sent[0]["maxOutputTokens"] == 16000 and "maxOutputTokens" not in sent[1]
+    from app.services.gemini import find_model
+    settings = AppSettings(provider="gemini", model="gemini-3.8-flash")
+    profile = deps.execution_profile(settings, None, find_model(settings.model))
+    assert profile.max_output_tokens == 16000
+    old = profile.model_copy(update={"max_output_tokens": None})
+    assert deps.pipeline_context(settings, "a.pdf", b"", recorded_profile=old).gemini_max_output_tokens is None
+
+
+def test_every_selectable_hosted_model_has_a_published_rate_where_it_is_offered():
+    from app.services.billing import hosted_offers, published
+    offers = hosted_offers()
+    assert ("gemini-3.1-pro-preview", "global") in offers and ("gemini-3.1-pro-preview", "eu") not in offers
+    assert ("grok-4.7", "eu") not in offers
+    assert all(published(model, location)[0] is not None for model, location in offers)

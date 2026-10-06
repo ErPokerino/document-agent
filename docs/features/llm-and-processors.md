@@ -147,23 +147,56 @@ zero and forgets the loaded model when it does.
 LM Studio directly supports `response_format.type = json_schema`. The backend supplies the dynamic schema in every `/v1/chat/completions` extraction request, so the Structured Output field in the LM Studio desktop UI does not need to be configured manually. Pydantic provides a second application-level validation layer. Outlines remains a useful future adapter for direct Transformers or MLX inference, but would duplicate the structured-output layer in this setup.
 
 References: [LM Studio Structured Output](https://lmstudio.ai/docs/developer/openai-compat/structured-output), [LM Studio model loading API](https://lmstudio.ai/docs/developer/rest/load), [Outlines multimodal models](https://dottxt-ai.github.io/outlines/main/features/models/transformers_multimodal/).
-## Model Garden partners
+## Hosted models: Gemini, Claude and Grok
 
-The hosted catalog also offers Claude Sonnet 5.5, Claude Opus 5.5 and Grok 4.7
-(Preview). They use the deployment's GCP identity and project; no partner key
-is needed. Grok has no EU endpoint. Selecting a location never enables an
-automatic fallback elsewhere.
+Besides Gemini, the hosted catalog offers Claude Sonnet 5.5, Claude Opus 5.5
+and Grok 4.7 (Preview). All three publishers are reached the same way: through
+Vertex AI in the deployment's project, as its service account, with no API
+key. Model Garden is only the name of Google's catalog of partner models; the
+calls go to the same Vertex AI endpoints as Gemini's. (Internally the provider
+is still `gemini` or `model_garden`, because runs are stored under those
+names.) Only Gemini can also be reached with a Gemini API key, on a machine
+that is not a Google Cloud deployment. Grok has no EU endpoint. Selecting a
+location never enables an automatic fallback elsewhere.
 
 The API tab of LLM is laid out by publisher. The model list is grouped into
-Gemini, Claude and Grok, each heading naming how it is reached and where. The
+Gemini, Claude and Grok, each heading naming the route and the location. The
 selected hosted model shows where it stands, with Verify in the place a local
-model has Load & warm up. Below, one card per publisher has the same parts in
-the same order: access, location and generation controls (Gemini thinking
-level; Claude effort and output limit; Grok output limit), the models with
-what each answered to Verify, and the prices. Gemini prices are editable;
-partner prices are Google's recorded tariffs and read-only. Claude and Grok
-each have their own output limit; settings saved with the earlier shared
-`max_output_tokens` give that value to both.
+model has Load & warm up. Below, one card per publisher folds to its name and
+a one-line summary; the card of the selected model's publisher starts open.
+Every card has the same parts in the same order:
+
+- **Location**: EU, US or Global (Grok: US or Global). Gemini starts at the
+  deployment's location.
+- **Reasoning effort**: what each publisher accepts. Gemini's thinking level
+  (Low, Medium, High; Gemini 3.5 Flash Lite does not think), Claude's effort
+  (Low to Max) and Grok's `reasoning_effort` (Low, Medium, High). Grok 4.7
+  accepted these on Vertex AI on 2026-10-06; it reasons on every request.
+- **Maximum output tokens**: answer and reasoning together. Gemini 16,000 and
+  Claude 4,096 by default, up to 32,000; Grok 4,096, up to 10,000, because
+  each Grok request reserves its whole limit against the project's output
+  quota. Gemini runs recorded before the limit existed stay uncapped on
+  retry, as they ran.
+- **Models** with what each answered to Verify.
+- **Price per million tokens**: Input, Output and Cache read for every model
+  in the card's location, starting from Google's published rates.
+
+Rates work the same for every publisher. A rate shown as *Google* follows
+Google's table, including announced changes on their date (Gemini 3.8 Flash
+goes from 0.75 / 3.75 to 1.5 / 7.5 on 1 January 2027 in Global). Editing a
+rate stores it for that model and location (`hosted_rates`, keyed
+`model@location`); the reset button returns to Google's. An empty rate leaves
+the cost unknown rather than free. Each request is costed when it is made and
+keeps that rate, so editing a rate never changes recorded costs. Above 200k
+tokens of context Google's long-context rates apply, since an edited rate
+covers the ordinary tier only. Outside Global, Vertex AI prices Gemini and
+Claude 10% higher; Grok costs the same in US and Global.
+
+Gemini runs are costed per request like Claude and Grok since 2026-10-06:
+each attempt, retries included, is recorded with its usage and rate, and a
+429 or 503 is retried up to three times on the same model and location. Runs
+recorded before that keep the earlier estimate from the Gemini rates saved in
+`gemini.pricing`, which LLM no longer edits.
 
 Verify sends each model one token in the location on screen, saved or not.
 Google checks quota before it reads a request, so a model without quota
@@ -172,20 +205,20 @@ quota per model and location; in `tutoral-498710` every Claude model had none
 in `eu`, `us` and `global` on 2026-10-06, so Sonnet and Opus are listed and
 marked *Quota refused* there. The same mark follows a passing 429, such as
 Gemini's shared quota in `global`; Verify again tells the two apart. The
-refusal names the model, location, project and
-quota metric, without Google's advice text. Checks are kept in the backend
-process until the next Verify; they are not stored.
+refusal names the model, location, project and quota metric, without
+Google's advice text. Checks are kept in the backend process until the next
+Verify; they are not stored.
 
 Workspace, Lab and experiments share the same extraction contract. Recorded
-Lab profiles pin the partner project, location and controls for worker retries.
+Lab profiles pin the project, location and controls of every hosted model for worker retries.
 The "Usage and recorded prices" panel exposes attempts, cache usage, endpoint,
 HTTP status and a downloadable record of the tariffs applied. Costs include
 paid responses that fail validation and all retries. A missing usage report
-is an incomplete estimate, not free inference. Historical partner costs do
-not change when settings change; older Gemini accounting remains available.
+is an incomplete estimate, not free inference. Recorded costs do not change
+when settings change.
 
 Tariffs come from [Google Model Garden](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing),
-checked 2026-10-06. Grok reasoning is billed as output; long-context tariffs
-use all prompt tokens including cache. Document AI pages in partner runs are
+checked 2026-10-06. Reasoning is billed as output; long-context tariffs use
+all prompt tokens including cache. Document AI pages in hosted runs are
 recorded at their configured page prices. Cloud Run, storage and SQL costs
 are outside extraction cost estimates. See [decision 0009](../decisions/0009-model-garden-partners-and-usage-ledger.md).

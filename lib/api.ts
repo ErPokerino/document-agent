@@ -160,7 +160,7 @@ export const api = {
   clearGeminiKey: () => request<void>("/api/settings/gemini", { method: "DELETE" }),
   hostedChecks: () => request<import("./types").HostedModelCheck[]>("/api/settings/hosted/checks"),
   verifyHosted: (body: import("./types").HostedVerifyRequest) => request<import("./types").HostedModelCheck[]>("/api/settings/hosted/verify", json("POST", body)),
-  modelGardenTariffs: () => request<import("./types").PartnerTariff[]>("/api/settings/model-garden/tariffs"),
+  publishedRates: () => request<import("./types").PublishedRate[]>("/api/settings/hosted/rates"),
   gcpKeyStatus: () => request<GcpKeyStatus>("/api/settings/gcp"),
   verifyGcpKey: () => request<GcpKeyStatus>("/api/settings/gcp/verify", { method: "POST" }),
 

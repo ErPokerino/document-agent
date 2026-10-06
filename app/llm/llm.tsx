@@ -36,7 +36,7 @@ import {
   type SizeFilter,
   type VisionFilter,
 } from "../../lib/model-filter";
-import type { AppSettings, GeminiKeyStatus, HostedModelCheck, ModelInfo, ModelLoadResponse, ModelRuntimeState, PartnerTariff, RuntimeEngineInfo } from "../../lib/types";
+import type { AppSettings, GeminiKeyStatus, HostedModelCheck, ModelInfo, ModelLoadResponse, ModelRuntimeState, PublishedRate, RuntimeEngineInfo } from "../../lib/types";
 
 // What was actually applied, which is not always what was wanted: the part
 // of the CPU-safe profile that holds a model's layers off the GPU is set
@@ -139,9 +139,9 @@ export function LanguageModels(props: Props) {
   // changed from LM Studio itself, so it is read once rather than polled.
   const [runtimeEngine, setRuntimeEngine] = useState<RuntimeEngineInfo | null>(null);
   // What each hosted model answered when last verified, per location, and
-  // the partner rates runs are costed at. Both come from the backend.
+  // Google's published rates for every hosted model. Both come from the backend.
   const [checks, setChecks] = useState<HostedModelCheck[]>([]);
-  const [tariffs, setTariffs] = useState<PartnerTariff[]>([]);
+  const [published, setPublished] = useState<PublishedRate[]>([]);
   const [verifyingPublisher, setVerifyingPublisher] = useState<Publisher | null>(null);
 
   useEffect(() => {
@@ -157,7 +157,7 @@ export function LanguageModels(props: Props) {
       });
     // Context too: without them the cards say "Not verified" and show no rates.
     api.hostedChecks().then((value) => { if (!cancelled) setChecks(value); }).catch(() => {});
-    api.modelGardenTariffs().then((value) => { if (!cancelled) setTariffs(value); }).catch(() => {});
+    api.publishedRates().then((value) => { if (!cancelled) setPublished(value); }).catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -390,7 +390,8 @@ export function LanguageModels(props: Props) {
           checks={checks}
           verifyingPublisher={verifyingHosted}
           onVerify={verifyPublisher}
-          tariffs={tariffs}
+          published={published}
+          selectedPublisher={selectedPublisher}
         />
       )}
 

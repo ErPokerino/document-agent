@@ -442,7 +442,7 @@ def execution_profile(
         from app.services.model_garden import connection
         project, location = connection(settings.model, settings.model_garden)
         return ModelExecutionProfile(provider="model_garden", profile="hosted", project=project, location=location,
-            publisher=selected.publisher, reasoning_effort=settings.model_garden.effort,
+            publisher=selected.publisher, reasoning_effort=settings.model_garden.effort(selected.publisher),
             max_output_tokens=settings.model_garden.output_limit(selected.publisher), temperature=None)
     if settings.provider == "gemini":
         supports_thinking = bool(getattr(selected, "supports_thinking", True))
@@ -452,6 +452,8 @@ def execution_profile(
             temperature=0,
             thinking_level=settings.gemini.thinking_level if supports_thinking else None,
             location=gemini_location(settings),
+            publisher="google",
+            max_output_tokens=settings.gemini.max_output_tokens,
         )
     if settings.provider == "model_server":
         # What this request fixes, and what the server reports about how it
@@ -511,13 +513,20 @@ def pipeline_context(
     from app.services.billing import UsageStore
     garden = settings.model_garden
     if recorded_profile is not None and recorded_profile.provider == "model_garden":
+        # A recorded profile is for one model, so one publisher's controls.
         limit = recorded_profile.max_output_tokens
-        garden = garden.model_copy(update={"effort": recorded_profile.reasoning_effort or garden.effort,
+        effort = recorded_profile.reasoning_effort
+        garden = garden.model_copy(update={
+            "claude_effort": effort or garden.claude_effort,
+            "grok_effort": effort if effort in ("low", "medium", "high") else garden.grok_effort,
             "claude_max_output_tokens": limit or garden.claude_max_output_tokens,
             "grok_max_output_tokens": limit or garden.grok_max_output_tokens})
     gemini_at = settings.gemini.location
-    if recorded_profile is not None and recorded_profile.provider == "gemini" and recorded_profile.location:
-        gemini_at = recorded_profile.location
+    gemini_limit: int | None = settings.gemini.max_output_tokens
+    if recorded_profile is not None and recorded_profile.provider == "gemini":
+        gemini_at = recorded_profile.location or gemini_at
+        # Recorded before the limit existed: the model was not capped then.
+        gemini_limit = recorded_profile.max_output_tokens
     return PipelineContext(
         filename=filename,
         content=content,
@@ -527,11 +536,13 @@ def pipeline_context(
         model_garden_settings=garden,
         model_garden_project=recorded_profile.project if recorded_profile else None,
         model_garden_location=recorded_profile.location if recorded_profile else None,
-        usage_store=UsageStore(DATABASE_PATH) if settings.provider == "model_garden" else None,
+        usage_store=UsageStore(DATABASE_PATH) if settings.provider in ("model_garden", "gemini") else None,
+        hosted_rates=settings.hosted_rates,
         page_pricing=settings.gcp,
         gemini_api_key=settings.gemini.api_key,
         gemini_thinking_level=settings.gemini.thinking_level,
         gemini_location=gemini_at,
+        gemini_max_output_tokens=gemini_limit,
         gcp_credentials_path=str(GCP_CREDENTIALS_PATH),
         gcp_project_id=settings.gcp.project_id,
         gcp_location=settings.gcp.location,

@@ -43,6 +43,16 @@ Vertex AI location can be chosen in LLM and is recorded on the run, since a
 preview model may exist in `global` only. Claude and Grok have separate output
 limits. LLM shows one card per publisher with the same structure.
 
+Amended again 2026-10-06, for uniformity: Gemini, Claude and Grok are all
+named and reached as Vertex AI. Every publisher has the same controls
+(location, reasoning effort, output limit; Grok now sends `reasoning_effort`,
+Gemini gains an output limit) and the same rates: Google's published table in
+code, per model, location and date, which LLM can override per
+`model@location`. Gemini moves onto the per-attempt ledger, so its cost
+follows its location and retries like the partners'. The alternative, keeping
+Gemini's display-time rates beside per-attempt partner rates, would have
+shown two pricing behaviours on one page; runs recorded before keep theirs.
+
 ## Alternatives
 
 Direct partner keys would bypass Google billing and the requested platform.
