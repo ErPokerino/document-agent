@@ -102,7 +102,7 @@ location is the default; the Gemini card in LLM can choose `eu`, `us` or
 `global` instead, and the run records the location it used. Not every model is
 offered everywhere — Gemini 3.1 Pro Preview is offered in `global` only — so
 Verify asks each one for a single token in the location on screen and marks
-each model *Answering*, *Not offered* or *No quota*. A run on a model the
+each model *Answering*, *Not offered* or *Quota refused*. A run on a model the
 location does not offer fails with that reason. Document AI works the same way in such a deployment: Processors
 names the service account instead of asking for a key file.
 
@@ -170,7 +170,9 @@ Google checks quota before it reads a request, so a model without quota
 answers 429 to Verify exactly as it would inside a run. A project gets Claude
 quota per model and location; in `tutoral-498710` every Claude model had none
 in `eu`, `us` and `global` on 2026-10-06, so Sonnet and Opus are listed and
-marked *No quota* there. The refusal names the model, location, project and
+marked *Quota refused* there. The same mark follows a passing 429, such as
+Gemini's shared quota in `global`; Verify again tells the two apart. The
+refusal names the model, location, project and
 quota metric, without Google's advice text. Checks are kept in the backend
 process until the next Verify; they are not stored.
 

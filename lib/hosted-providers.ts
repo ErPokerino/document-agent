@@ -51,7 +51,7 @@ export function checkFor(
 
 export const checkLabels: Record<HostedModelCheck["status"], string> = {
   answering: "Answering",
-  no_quota: "No quota",
+  no_quota: "Quota refused",
   not_offered: "Not offered",
   refused: "Refused",
 };

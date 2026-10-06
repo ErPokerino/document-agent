@@ -156,7 +156,7 @@ class HostedModelCheck(BaseModel):
     publisher: str
     location: str
     # answering: it replied. no_quota: Google refused it with 429 (the
-    # project has no quota left, or none at all). not_offered: 404, the model
+    # project has no quota left, none at all, or a shared quota was busy). not_offered: 404, the model
     # does not exist in that location. refused: any other refusal.
     status: Literal["answering", "no_quota", "not_offered", "refused"]
     detail: str = ""
