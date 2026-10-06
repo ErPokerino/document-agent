@@ -38,6 +38,7 @@ import { MethodsPanel } from "./methods-panel";
 import { InfoHint } from "../components/info-hint";
 import { RunFiltersBar } from "./run-filters-bar";
 import { formatUsd, totalCost } from "../../lib/cost";
+import { UsageDetails } from "../llm/usage-details";
 import { filterByName } from "../../lib/document-filter";
 import { accuracyClass, describeValue, percent, seconds } from "../../lib/format";
 import { labRunTarget } from "../../lib/lab-target";
@@ -78,6 +79,9 @@ type Props = {
 };
 
 function executionProfileLabel(profile: ModelExecutionProfile): string {
+  if (profile.provider === "model_garden") {
+    return `Model Garden · ${profile.publisher} · ${profile.location} · effort ${profile.reasoning_effort} · output limit ${profile.max_output_tokens}`;
+  }
   if (profile.provider === "gemini") {
     return `hosted profile · temperature ${profile.temperature}${profile.thinking_level ? ` · thinking ${profile.thinking_level}` : ""}`;
   }
@@ -146,6 +150,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
   const pageRows = visibleEvaluations.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   function runCost(evaluation: Evaluation): number | null {
+    if (evaluation.cost) return evaluation.cost.total_usd;
     return totalCost(
       {
         promptTokens: evaluation.prompt_tokens,
@@ -685,6 +690,7 @@ export function Lab({ settings, isModelReady, activeModel, pipelineKinds, route,
         )}
       </div>
 
+      {openEvaluation.cost && <UsageDetails key={openEvaluation.id} evaluationId={openEvaluation.id} />}
       {openEvaluation.error && <div className="alert error-alert"><AlertCircle size={17} /><span>{openEvaluation.error}</span></div>}
 
       {openEvaluation.failed_documents + openEvaluation.pending_documents > 0 && (

@@ -1,4 +1,5 @@
 "use client";
+import { isHostedProvider } from "../../lib/model-filter";
 
 import { Grid3x3, Play } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -120,7 +121,7 @@ export function ExperimentBuilder({ datasets, dataset, onDataset, busy, running,
               <label key={modelKey(model)}>
                 <input type="checkbox" checked={pickedModels.includes(modelKey(model))} onChange={() => setPickedModels(toggle(pickedModels, modelKey(model)))} />
                 <span>{model.name}</span>
-                <small>{model.provider === "gemini" ? "hosted" : model.provider === "model_server" ? "model server" : "local"}{model.vision === false && model.capabilities_known !== false ? " · text only" : ""}</small>
+                <small>{isHostedProvider(model.provider) ? "hosted" : model.provider === "model_server" ? "model server" : "local"}{model.vision === false && model.capabilities_known !== false ? " · text only" : ""}</small>
               </label>
             ))}
           </div>

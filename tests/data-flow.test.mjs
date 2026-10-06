@@ -3,6 +3,13 @@ import test from "node:test";
 
 import { describeDataFlow } from "../lib/data-flow.ts";
 
+test("partner models describe the Model Garden destination", () => {
+  // Hosted partner documents must never be labelled as private local processing.
+  const flow = describeDataFlow("model_garden", ["render_pages", "llm_extract"]);
+  assert.equal(flow.leavesTheMachine, true);
+  assert.match(flow.detail, /Model Garden/);
+});
+
 test("a local model and no cloud step keeps everything on the machine", () => {
   const flow = describeDataFlow("lm_studio", ["render_pages", "llm_extract"]);
 

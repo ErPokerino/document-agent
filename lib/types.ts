@@ -27,10 +27,11 @@ export type AlgorithmInfo = {
 };
 
 export type AppSettings = {
-  provider: "lm_studio" | "gemini" | "model_server";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden";
   model: string;
   excluded_model_ids: string[];
   gemini: GeminiSettings;
+  model_garden: ModelGardenSettings;
   gcp: GcpSettings;
   lm_studio_url: string;
   pipeline: string;
@@ -100,6 +101,16 @@ export type ClassificationResult = {
 
 export type CorrectionsRequest = {
   corrections: Record<string, unknown>;
+};
+
+export type CostSummary = {
+  status: "complete" | "partial" | "unknown";
+  currency: "USD";
+  total_usd: number | null;
+  known_usd: number;
+  calls: number;
+  source: string | null;
+  checked_on: string | null;
 };
 
 export type CoveragePointResult = {
@@ -173,7 +184,7 @@ export type Evaluation = {
   error: string | null;
   max_pages: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini" | "model_server" | "none";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden" | "none";
   steps: string[];
   execution_profile: ModelExecutionProfile | null;
   succeeded_documents: number;
@@ -187,6 +198,7 @@ export type Evaluation = {
   layout_pages: number;
   custom_extractor_pages: number | null;
   usage_complete: boolean;
+  cost: CostSummary | null;
   fingerprint: string | null;
   current_step: string | null;
   reuse_readings: boolean;
@@ -210,7 +222,7 @@ export type EvaluationDetail = {
   error: string | null;
   max_pages: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini" | "model_server" | "none";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden" | "none";
   steps: string[];
   execution_profile: ModelExecutionProfile | null;
   succeeded_documents: number;
@@ -224,6 +236,7 @@ export type EvaluationDetail = {
   layout_pages: number;
   custom_extractor_pages: number | null;
   usage_complete: boolean;
+  cost: CostSummary | null;
   fingerprint: string | null;
   current_step: string | null;
   reuse_readings: boolean;
@@ -285,7 +298,7 @@ export type Experiment = {
 export type ExperimentCell = {
   index: number;
   pipeline: string;
-  provider: "lm_studio" | "gemini" | "model_server" | "none";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden" | "none";
   model: string;
   status: string;
   skipped: string | null;
@@ -314,7 +327,7 @@ export type ExperimentComparison = {
 };
 
 export type ExperimentModelChoice = {
-  provider: "lm_studio" | "gemini" | "model_server";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden";
   model: string;
 };
 
@@ -339,6 +352,7 @@ export type ExtractionEngine = {
 export type ExtractionResponse = {
   document_type: string;
   run_id: number | null;
+  cost: CostSummary | null;
   filename: string;
   model: string;
   elapsed_ms: number;
@@ -362,6 +376,7 @@ export type ExtractionRun = {
   steps: string[];
   execution_profile: ModelExecutionProfile | null;
   has_corrections: boolean;
+  cost: CostSummary | null;
 };
 
 export type ExtractionRunDetail = {
@@ -379,6 +394,7 @@ export type ExtractionRunDetail = {
   steps: string[];
   execution_profile: ModelExecutionProfile | null;
   has_corrections: boolean;
+  cost: CostSummary | null;
   prompts: PromptConfiguration;
   extraction: Record<string, FieldExtraction>;
   corrections: Record<string, unknown>;
@@ -550,12 +566,12 @@ export type Metrics = {
 };
 
 export type ModelExecutionProfile = {
-  provider: "lm_studio" | "gemini" | "model_server";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden";
   profile: "standard" | "compatibility" | "compatibility_partial" | "hosted" | "server";
   parameters: string | null;
   quantization: string | null;
   model_size_bytes: number | null;
-  temperature: number;
+  temperature: number | null;
   seed: number | null;
   reasoning_effort: string | null;
   thinking_level: string | null;
@@ -564,12 +580,26 @@ export type ModelExecutionProfile = {
   eval_batch_size: number | null;
   flash_attention: boolean | null;
   offload_kv_cache_to_gpu: boolean | null;
+  project: string | null;
+  location: string | null;
+  publisher: string | null;
+  max_output_tokens: number | null;
+};
+
+export type ModelGardenSettings = {
+  claude_location: "eu" | "us" | "global";
+  grok_location: "us" | "global";
+  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  max_output_tokens: number;
 };
 
 export type ModelInfo = {
   id: string;
   name: string;
-  provider: "lm_studio" | "gemini" | "model_server";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden";
+  publisher: string | null;
+  location: string | null;
+  preview: boolean;
   parameters: string | null;
   quantization: string | null;
   size_bytes: number | null;
@@ -698,7 +728,7 @@ export type PromptPreview = {
 
 export type PromptPreviewRequest = {
   prompts: PromptConfiguration;
-  provider: "lm_studio" | "gemini" | "model_server";
+  provider: "lm_studio" | "gemini" | "model_server" | "model_garden";
 };
 
 export type ReadingCacheStatus = {
@@ -833,4 +863,36 @@ export type TrainingRequest = {
   parameters: Record<string, boolean | number | string>;
   cutoff_entity: string | null;
   cutoff_before: string | null;
+};
+
+export type UsageDetail = {
+  cost: CostSummary;
+  records: UsageRecord[];
+};
+
+export type UsageRecord = {
+  id: string;
+  group_id: string;
+  created_at: string;
+  model: string;
+  provider: string;
+  publisher: string | null;
+  project: string | null;
+  location: string | null;
+  step: string;
+  document: string;
+  evaluation_id: number | null;
+  run_id: number | null;
+  status: string;
+  http_status: number | null;
+  request_id: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number;
+  cache_write_5m_tokens: number;
+  cache_write_1h_tokens: number;
+  reasoning_tokens: number | null;
+  raw_usage: Record<string, unknown>;
+  tariff: Record<string, unknown>;
+  cost: CostSummary;
 };

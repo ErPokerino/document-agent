@@ -88,22 +88,25 @@ def hosted(listed: list[dict]) -> list[dict]:
 
 
 def test_hosted_models_are_listed_next_to_the_local_ones(api) -> None:
+    """Both hosted catalogs remain selectable alongside installed local models."""
     client, _ = api
 
     listed = client.get("/api/models").json()
 
-    assert {model["provider"] for model in listed} == {"lm_studio", "gemini"}
+    assert {model["provider"] for model in listed} == {"lm_studio", "gemini", "model_garden"}
     assert "gemini-3.8-flash" in [model["id"] for model in listed]
+    assert "grok-4.7" in [model["id"] for model in listed]
 
 
 def test_hosted_models_are_still_listed_when_lm_studio_is_down(api) -> None:
+    """An unavailable local runtime must not conceal either hosted provider."""
     client, _ = api
     FakeLMStudio.error = LMStudioError("LM Studio is not reachable")
 
     listed = client.get("/api/models").json()
 
     # One provider being unreachable must not hide the other.
-    assert listed and all(model["provider"] == "gemini" for model in listed)
+    assert listed and all(model["provider"] in ("gemini", "model_garden") for model in listed)
 
 
 def test_a_hosted_model_is_ready_once_a_key_is_configured(api) -> None:

@@ -73,7 +73,12 @@ async def extract_document(file: UploadFile = File(...)) -> ExtractionResponse:
                 execution_profile=execution_profile,
             )
 
+            cost = None
+            if context.usage_store is not None:
+                context.usage_store.bind_run(context.usage_group, run_id)
+                cost = context.usage_store.detail(group_id=context.usage_group).cost
             return ExtractionResponse(
+                cost=cost,
                 run_id=run_id,
                 filename=context.filename,
                 model=recorded_model,

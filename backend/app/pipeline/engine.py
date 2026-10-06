@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from uuid import uuid4
 
 
 @dataclass
@@ -10,6 +11,14 @@ class PipelineContext:
     model: str
     lm_studio_url: str
     provider: str = "lm_studio"
+    model_garden_settings: Any = None
+    model_garden_project: str | None = None
+    model_garden_location: str | None = None
+    usage_store: Any = None
+    usage_group: str = field(default_factory=lambda: uuid4().hex)
+    page_pricing: Any = None
+    evaluation_id: int | None = None
+    current_step: str = "llm_extract"
     gemini_api_key: str = ""
     gemini_thinking_level: str = "low"
     gcp_credentials_path: str = ""
@@ -113,7 +122,18 @@ class DocumentPipeline:
             if on_step is not None:
                 on_step(step)
             before = dict(context.artifacts.get("extraction") or {})
-            await step.run(context)
+            context.current_step = method
+            previous_pages = dict(context.artifacts.get("document_ai_pages") or {})
+            failed = False
+            try:
+                await step.run(context)
+            except BaseException:
+                failed = True
+                raise
+            finally:
+                if context.usage_store is not None and step_name(step).startswith("document_ai_"):
+                    from app.services.billing import record_pages
+                    record_pages(context, previous_pages, failed)
             after = context.artifacts.get("extraction")
             # A step that only chooses among candidates, or only states that a
             # field is empty, proposes nothing of its own.

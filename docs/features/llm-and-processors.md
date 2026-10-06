@@ -144,3 +144,24 @@ zero and forgets the loaded model when it does.
 LM Studio directly supports `response_format.type = json_schema`. The backend supplies the dynamic schema in every `/v1/chat/completions` extraction request, so the Structured Output field in the LM Studio desktop UI does not need to be configured manually. Pydantic provides a second application-level validation layer. Outlines remains a useful future adapter for direct Transformers or MLX inference, but would duplicate the structured-output layer in this setup.
 
 References: [LM Studio Structured Output](https://lmstudio.ai/docs/developer/openai-compat/structured-output), [LM Studio model loading API](https://lmstudio.ai/docs/developer/rest/load), [Outlines multimodal models](https://dottxt-ai.github.io/outlines/main/features/models/transformers_multimodal/).
+## Model Garden partners
+
+The hosted catalog also offers Claude Sonnet 5.5, Claude Opus 5.5 and Grok 4.7
+(Preview). They use the deployment's GCP identity and project; no partner key
+is needed. Configure Claude location (EU by default), Grok location (Global
+by default), Claude effort and the output ceiling in LLM. Grok has no EU
+endpoint. Selecting a location never enables an automatic fallback elsewhere.
+
+Workspace, Lab and experiments share the same extraction contract. Recorded
+Lab profiles pin the partner project, location and controls for worker retries.
+The "Usage and recorded prices" panel exposes attempts, cache usage, endpoint,
+HTTP status and a downloadable record of the tariffs applied. Costs include
+paid responses that fail validation and all retries. A missing usage report
+is an incomplete estimate, not free inference. Historical partner costs do
+not change when settings change; older Gemini accounting remains available.
+
+Tariffs come from [Google Model Garden](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing),
+checked 2026-10-06. Grok reasoning is billed as output; long-context tariffs
+use all prompt tokens including cache. Document AI pages in partner runs are
+recorded at their configured page prices. Cloud Run, storage and SQL costs
+are outside extraction cost estimates. See [decision 0009](../decisions/0009-model-garden-partners-and-usage-ledger.md).

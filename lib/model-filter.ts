@@ -30,10 +30,14 @@ function matchesSize(model: ModelInfo, size: SizeFilter): boolean {
   return model.size_bytes > 12 * GB;
 }
 
+export function isHostedProvider(provider: string | undefined): boolean {
+  return provider === "gemini" || provider === "model_garden";
+}
+
 export function filterModels(models: ModelInfo[], filters: ModelFilters): ModelInfo[] {
   const { runs = "any", vision = "any", size = "any" } = filters;
   return models.filter((model) => {
-    const isLocal = model.provider !== "gemini";
+    const isLocal = !isHostedProvider(model.provider);
     if (runs === "local" && !isLocal) return false;
     if (runs === "api" && isLocal) return false;
     // An unknown capability answers neither filter. Reporting it as text-only

@@ -1,4 +1,5 @@
 "use client";
+import { isHostedProvider } from "../lib/model-filter";
 
 import {
   AlertCircle,
@@ -204,7 +205,7 @@ function App() {
   const settingsLoaded = settings !== null && draftSettings !== null;
   // Where documents actually go. Saying "local" while pages are being uploaded
   // to Google would be the worst kind of wrong copy.
-  const usingHostedModel = settings?.provider === "gemini";
+  const usingHostedModel = isHostedProvider(settings?.provider);
   // A model server holds its model; nothing on this machine has to be running.
   const usingModelServer = settings?.provider === "model_server";
   // Not only the model: a Document AI step uploads the page whatever answers
@@ -365,15 +366,15 @@ function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className={`local-status ${usingHostedModel ? (keyStatus?.configured ? "online" : "offline") : usingModelServer ? (isModelReady ? "online" : "offline") : isConnected ? "online" : "offline"}`}>
+          <div className={`local-status ${usingHostedModel || usingModelServer ? (isModelReady ? "online" : "offline") : isConnected ? "online" : "offline"}`}>
             <span className="status-dot" />
             <div>
-              <strong>{usingHostedModel ? "Google Gemini" : usingModelServer ? "Model server" : "LM Studio"}</strong>
+              <strong>{usingHostedModel ? (settings?.provider === "model_garden" ? "Model Garden" : "Google Gemini") : usingModelServer ? "Model server" : "LM Studio"}</strong>
               <small>{usingHostedModel ? "Hosted API" : usingModelServer ? "Self-hosted model" : "Local inference"}</small>
             </div>
             <span className="status-pill">
               {usingHostedModel
-                ? keyStatus?.configured ? "Key set" : "No key"
+                ? settings?.provider === "model_garden" ? (isModelReady ? "Configured" : "No project") : keyStatus?.configured ? "Key set" : "No key"
                 : usingModelServer ? isModelReady ? "Serving" : "Not serving"
                 : isConnected ? "Online" : "Offline"}
             </span>

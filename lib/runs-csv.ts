@@ -49,6 +49,9 @@ const COLUMNS = [
   "cached_pages",
   "usage_complete",
   "cost_usd",
+  "cost_status",
+  "known_cost_usd",
+  "pricing_checked_on",
   "extractor_name",
   "extractor_processor",
   "extractor_version",
@@ -85,7 +88,7 @@ export function runsToCsv(
   const lines = [COLUMNS.join(",")];
 
   for (const run of evaluations) {
-    const cost = totalCost(
+    const cost = run.cost ? run.cost.total_usd : totalCost(
       {
         promptTokens: run.prompt_tokens,
         completionTokens: run.completion_tokens,
@@ -137,7 +140,10 @@ export function runsToCsv(
         run.custom_extractor_pages,
         run.cached_pages,
         run.usage_complete === undefined ? null : Number(run.usage_complete),
-        cost === null ? null : cost.toFixed(4),
+        cost === null ? null : cost.toFixed(run.cost ? 8 : 4),
+        run.cost?.status,
+        run.cost?.known_usd,
+        run.cost?.checked_on,
         run.extraction_engine?.display_name,
         run.extraction_engine?.processor_id,
         run.extraction_engine?.version,

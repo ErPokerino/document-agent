@@ -8,9 +8,24 @@ from fastapi import HTTPException, Query, Response, APIRouter
 
 from app.api import deps
 from app.domain.models import CorrectionsRequest, ExtractionRun, ExtractionRunDetail
+from app.domain.billing import UsageDetail
 from app.pipeline.steps import render_page_png
 
 router = APIRouter()
+
+
+def run_usage(run_id: int):
+    from app.services.billing import UsageStore
+    detail = UsageStore(deps.DATABASE_PATH).detail(run_id=run_id)
+    return detail.cost if detail.records else None
+
+
+@router.get("/api/runs/{run_id}/usage", response_model=UsageDetail)
+async def get_run_usage(run_id: int):
+    from app.services.billing import UsageStore
+    if deps.run_store.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return UsageStore(deps.DATABASE_PATH).detail(run_id=run_id)
 
 
 @router.get("/api/runs", response_model=list[ExtractionRun])
@@ -20,7 +35,7 @@ async def list_runs(
     before_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[ExtractionRun]:
     return [
-        ExtractionRun(**asdict(run))
+        ExtractionRun(**asdict(run), cost=run_usage(run.id))
         for run in deps.run_store.list_runs(limit=limit, validated_only=validated_only, before_id=before_id)
     ]
 
@@ -57,7 +72,7 @@ async def get_run(run_id: int) -> ExtractionRunDetail:
     run = deps.run_store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"No run with id {run_id}")
-    return ExtractionRunDetail(**asdict(run))
+    return ExtractionRunDetail(**asdict(run), cost=run_usage(run.id))
 
 
 @router.post("/api/runs/{run_id}/corrections", status_code=204, response_class=Response)

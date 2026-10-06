@@ -8,6 +8,13 @@ conversations that produced them. What is already built is described in
 
 ## Next
 
+Model Garden partners are implemented on the candidate branch: Claude Sonnet
+5.5, Claude Opus 5.5 and Grok 4.7 with per-attempt pricing snapshots. Before
+Claude can be used in `tutoral-498710`, request Sonnet and Opus model quota:
+synthetic inference on 2026-10-06 returned 429 in both EU and Global. Grok
+Global answered successfully. Merge to `cloud` follows the user's acceptance
+test. See [decision 0009](docs/decisions/0009-model-garden-partners-and-usage-ledger.md).
+
 In order. Each builds on the Lab and the model registry as they are now.
 
 ### 1. Trained models as an axis of an experiment

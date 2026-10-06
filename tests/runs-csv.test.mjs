@@ -42,6 +42,17 @@ const run = (overrides = {}) => ({
 
 const rows = (csv) => csv.trim().split("\n").map((line) => line.split(","));
 
+test("exports use frozen charges even if the current rates are absent", () => {
+  // Repricing history or substituting zero for an incomplete estimate loses auditability.
+  const cost = { status: "complete", total_usd: 0.001752, known_usd: 0.001752, checked_on: "2026-10-06" };
+  const [header, first] = rows(runsToCsv([run({ provider: "model_garden", cost })], null));
+  assert.equal(first[header.indexOf("cost_usd")], "0.00175200");
+  assert.equal(first[header.indexOf("pricing_checked_on")], "2026-10-06");
+  const [, incomplete] = rows(runsToCsv([run({ cost: { ...cost, status: "partial", total_usd: null } })], null));
+  assert.equal(incomplete[header.indexOf("cost_usd")], "");
+  assert.equal(incomplete[header.indexOf("known_cost_usd")], "0.001752");
+});
+
 test("one row per run, with the columns an analysis needs", () => {
   const [header, first] = rows(runsToCsv([run()], null));
 

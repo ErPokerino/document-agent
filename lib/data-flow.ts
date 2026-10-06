@@ -26,7 +26,7 @@ export function describeDataFlow(
   const uploaded = readsInTheCloud(steps);
   const callsModel = usesModel(steps);
   // A hosted model that is never called sends nothing.
-  const modelInTheCloud = provider === "gemini" && callsModel;
+  const modelInTheCloud = (provider === "gemini" || provider === "model_garden") && callsModel;
   // A self-hosted model answers on the server this deployment runs it on.
   const modelOnServer = provider === "model_server" && callsModel;
 
@@ -44,7 +44,7 @@ export function describeDataFlow(
       ? "Google Document AI reads the pages of any PDF that carries no text of its own"
       : "Google Document AI reads the pages");
   }
-  if (modelInTheCloud) destinations.push("the Gemini API extracts the fields");
+  if (modelInTheCloud) destinations.push(provider === "model_garden" ? "Google Model Garden sends the document to the selected partner model to extract the fields" : "the Gemini API extracts the fields");
   if (modelOnServer) destinations.push("the model server configured for this deployment extracts the fields");
 
   const closing = !callsModel

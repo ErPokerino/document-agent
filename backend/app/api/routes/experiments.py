@@ -125,6 +125,13 @@ async def start_experiment(request: ExperimentRequest) -> Experiment:
     choices = []
     local = None
     for choice in {(c.provider, c.model): c for c in request.models}.values():
+        if choice.provider == "model_garden":
+            from app.services.model_garden import find_partner
+            from app import config
+            if find_partner(choice.model) is None or not config.model_garden_project():
+                raise HTTPException(status_code=409, detail="Model Garden model or GCP project is not configured.")
+            choices.append(ModelChoice("model_garden", choice.model, vision=True))
+            continue
         if choice.provider == "gemini":
             if find_model(choice.model) is None:
                 raise HTTPException(status_code=400, detail=f"{choice.model} is not one of the supported hosted models.")

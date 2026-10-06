@@ -42,6 +42,10 @@ async def preview_prompt(request: PromptPreviewRequest) -> PromptPreview:
     from app.services.gemini import GeminiClient as Gemini
     from app.services.lm_studio import LMStudioClient as LMStudio
 
+    if request.provider == "model_garden":
+        from app.services.model_garden import generation_schema
+        return PromptPreview(provider="model_garden", system_prompt=Gemini._system_prompt(request.prompts),
+            generation_schema=_json.dumps(generation_schema(request.prompts.entities), indent=2))
     if request.provider == "gemini":
         return PromptPreview(
             provider="gemini",
@@ -124,7 +128,11 @@ async def update_settings(settings: AppSettings) -> AppSettings:
             detail=f"No hosted model is named {', '.join(unknown_rates)}, so it has no price to set.",
         )
 
-    if settings.provider == "gemini":
+    if settings.provider == "model_garden":
+        from app.services.model_garden import find_partner
+        if find_partner(settings.model) is None:
+            raise HTTPException(status_code=400, detail="Select a supported Model Garden model.")
+    elif settings.provider == "gemini":
         if find_model(settings.model) is None:
             raise HTTPException(
                 status_code=400,

@@ -35,7 +35,10 @@ class RuntimeEngineInfo(BaseModel):
 class ModelInfo(BaseModel):
     id: str
     name: str
-    provider: Literal["lm_studio", "gemini", "model_server"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden"] = "lm_studio"
+    publisher: str | None = None
+    location: str | None = None
+    preview: bool = False
     parameters: str | None = None
     quantization: str | None = None
     size_bytes: int | None = None
@@ -88,12 +91,12 @@ class ModelExecutionProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["lm_studio", "gemini", "model_server"]
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden"]
     profile: Literal["standard", "compatibility", "compatibility_partial", "hosted", "server"]
     parameters: str | None = None
     quantization: str | None = None
     model_size_bytes: int | None = None
-    temperature: float = 0
+    temperature: float | None = 0
     seed: int | None = None
     reasoning_effort: str | None = None
     thinking_level: str | None = None
@@ -102,6 +105,10 @@ class ModelExecutionProfile(BaseModel):
     eval_batch_size: int | None = None
     flash_attention: bool | None = None
     offload_kv_cache_to_gpu: bool | None = None
+    project: str | None = None
+    location: str | None = None
+    publisher: str | None = None
+    max_output_tokens: int | None = None
 
 
 class HealthStatus(BaseModel):

@@ -25,6 +25,7 @@ import {
 import { ChangeEvent, DragEvent, Fragment, KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { api } from "../../lib/api";
+import { UsageDetails } from "../llm/usage-details";
 import type { DataFlow } from "../../lib/data-flow";
 import { formatBytes, formatLabels } from "../../lib/format";
 import { CategoryOptions, categoryListId } from "../components/category-options";
@@ -486,6 +487,7 @@ export function Workspace({
         <div className="alert error-alert" role="alert"><AlertCircle size={17} /><span>{error}</span><button onClick={() => setError(null)} aria-label="Close"><X size={15} /></button></div>
       )}
 
+      {result?.cost && result.run_id && <UsageDetails key={result.run_id} runId={result.run_id} />}
       {result?.processing.cut_applied && (
         <div className="alert chunk-alert" role="status">
           <Scissors size={17} />

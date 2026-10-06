@@ -51,6 +51,16 @@ class GeminiSettings(BaseModel):
     pricing_defaults_offered: list[str] = Field(default_factory=lambda: list(default_gemini_pricing()))
 
 
+class ModelGardenSettings(BaseModel):
+    """Partner endpoints and generation controls; credentials come from GCP."""
+
+    model_config = ConfigDict(extra="forbid")
+    claude_location: Literal["eu", "us", "global"] = "eu"
+    grok_location: Literal["us", "global"] = "global"
+    effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    max_output_tokens: Annotated[int, Field(ge=256, le=10000)] = 4096
+
+
 class DocumentProcessor(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
@@ -106,13 +116,14 @@ class GcpSettings(BaseModel):
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["lm_studio", "gemini", "model_server"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden"] = "lm_studio"
     # No default: which models exist is a property of the machine DocuFlow
     # was installed on, and naming one here opens a fresh install already
     # configured for a model the user does not have.
     model: str = ""
     excluded_model_ids: list[str] = Field(default_factory=list)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    model_garden: ModelGardenSettings = Field(default_factory=ModelGardenSettings)
     gcp: GcpSettings = Field(default_factory=GcpSettings)
     lm_studio_url: str = "http://127.0.0.1:1234"
     pipeline: str = DEFAULT_PIPELINE_NAME

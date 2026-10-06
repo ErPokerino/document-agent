@@ -1,4 +1,5 @@
 "use client";
+import { isHostedProvider } from "../../lib/model-filter";
 
 import { LoaderCircle, Square, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -136,7 +137,7 @@ function ExperimentGrid({ experiment, onOpenRun, costOf }: { experiment: Experim
         <thead>
           <tr>
             <th aria-label="Pipeline" />
-            {columns.map((column) => <th key={column.key}>{column.label}<small>{column.provider === "gemini" ? "hosted" : column.provider === "lm_studio" ? "local" : column.provider === "model_server" ? "model server" : ""}</small></th>)}
+            {columns.map((column) => <th key={column.key}>{column.label}<small>{isHostedProvider(column.provider) ? "hosted" : column.provider === "lm_studio" ? "local" : column.provider === "model_server" ? "model server" : ""}</small></th>)}
           </tr>
         </thead>
         <tbody>

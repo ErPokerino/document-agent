@@ -298,7 +298,7 @@ def models_with_runtime_state(models: list[ModelInfo]) -> list[ModelInfo]:
 def hosted_models(settings: AppSettings) -> list[ModelInfo]:
     """Hosted models need no loading: a valid key is the whole readiness story."""
     ready = gemini_available(settings)
-    return [
+    gemini_models = [
         ModelInfo(
             id=model.id,
             name=model.name,
@@ -309,6 +309,15 @@ def hosted_models(settings: AppSettings) -> list[ModelInfo]:
         )
         for model in GEMINI_MODELS
     ]
+    from app.services.model_garden import PARTNER_MODELS, connection
+    configured = bool(config.model_garden_project())
+    return [*gemini_models, *[
+        ModelInfo(id=model.id, name=model.name, provider="model_garden", publisher=model.publisher,
+                  location=connection(model.id, settings.model_garden)[1] if configured else None,
+                  preview=model.preview, loaded=configured, ready=configured,
+                  runtime_state="ready" if configured else "not_loaded")
+        for model in PARTNER_MODELS if model.id not in settings.excluded_model_ids
+    ]]
 
 
 def unique_model_alias(model_id: str, available: list[ModelInfo]) -> ModelInfo | None:
@@ -350,6 +359,12 @@ async def ensure_model_ready(
     if not settings.model.strip():
         raise HTTPException(status_code=409, detail="No model is selected. Choose one in LLM.")
 
+    if settings.provider == "model_garden":
+        from app.services.model_garden import find_partner
+        selected = find_partner(settings.model)
+        if selected is None or not config.model_garden_project():
+            raise HTTPException(status_code=409, detail="Choose a supported Model Garden model and configure its GCP project.")
+        return selected
     if settings.provider == "gemini":
         selected = find_model(settings.model)
         if selected is None:
@@ -420,6 +435,12 @@ def execution_profile(
     """Snapshot provider controls that are otherwise lost after a run."""
     if pipeline is not None and not uses_model(pipeline):
         return None
+    if settings.provider == "model_garden":
+        from app.services.model_garden import connection
+        project, location = connection(settings.model, settings.model_garden)
+        return ModelExecutionProfile(provider="model_garden", profile="hosted", project=project, location=location,
+            publisher=selected.publisher, reasoning_effort=settings.model_garden.effort,
+            max_output_tokens=settings.model_garden.max_output_tokens, temperature=None)
     if settings.provider == "gemini":
         supports_thinking = bool(getattr(selected, "supports_thinking", True))
         return ModelExecutionProfile(
@@ -481,14 +502,24 @@ def recorded_model(settings: AppSettings, pipeline: PipelineDefinition) -> tuple
 
 
 def pipeline_context(
-    settings: AppSettings, filename: str, content: bytes, *, reuse_readings: bool = False
+    settings: AppSettings, filename: str, content: bytes, *, reuse_readings: bool = False, recorded_profile: ModelExecutionProfile | None = None
 ) -> PipelineContext:
+    from app.services.billing import UsageStore
+    garden = settings.model_garden
+    if recorded_profile is not None and recorded_profile.provider == "model_garden":
+        garden = garden.model_copy(update={"effort": recorded_profile.reasoning_effort or garden.effort,
+            "max_output_tokens": recorded_profile.max_output_tokens or garden.max_output_tokens})
     return PipelineContext(
         filename=filename,
         content=content,
         model=settings.model,
         lm_studio_url=settings.lm_studio_url,
         provider=settings.provider,
+        model_garden_settings=garden,
+        model_garden_project=recorded_profile.project if recorded_profile else None,
+        model_garden_location=recorded_profile.location if recorded_profile else None,
+        usage_store=UsageStore(DATABASE_PATH) if settings.provider == "model_garden" else None,
+        page_pricing=settings.gcp,
         gemini_api_key=settings.gemini.api_key,
         gemini_thinking_level=settings.gemini.thinking_level,
         gcp_credentials_path=str(GCP_CREDENTIALS_PATH),
@@ -648,6 +679,7 @@ def evaluation_model(detail: Any) -> Evaluation:
                 "layout_pages",
                 "custom_extractor_pages",
                 "usage_complete",
+                "cost",
                 "extraction_engine",
                 "fingerprint",
                 "current_step",

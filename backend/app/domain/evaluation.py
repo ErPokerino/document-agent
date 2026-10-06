@@ -2,6 +2,8 @@
 
 from typing import Annotated, Literal
 
+from app.domain.billing import CostSummary
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.extraction import PromptConfiguration, FieldCandidate
@@ -61,7 +63,7 @@ class Evaluation(BaseModel):
     pipeline: str
     # Where the model ran, or `none` when this pipeline called no model. It
     # cannot be recovered from the selected model id afterwards.
-    provider: Literal["lm_studio", "gemini", "model_server", "none"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden", "none"] = "lm_studio"
     steps: list[str] = Field(default_factory=list)
     execution_profile: ModelExecutionProfile | None = None
     succeeded_documents: int
@@ -75,6 +77,7 @@ class Evaluation(BaseModel):
     layout_pages: int = 0
     custom_extractor_pages: int | None = None
     usage_complete: bool = False
+    cost: CostSummary | None = None
     # Null when the run was recorded before a fingerprint was computed.
     fingerprint: str | None = None
     # The pipeline step in flight while status is running. Empty once the
@@ -198,7 +201,7 @@ class EvaluationDetail(Evaluation):
 class ExperimentModelChoice(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["lm_studio", "gemini", "model_server"]
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden"]
     model: Annotated[str, Field(min_length=1)]
 
 
@@ -216,7 +219,7 @@ class ExperimentRequest(BaseModel):
 class ExperimentCell(BaseModel):
     index: int
     pipeline: str
-    provider: Literal["lm_studio", "gemini", "model_server", "none"]
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden", "none"]
     model: str
     # pending, loading, running, completed, partial, failed, cancelled, skipped, error
     status: str

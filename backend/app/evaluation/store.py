@@ -22,6 +22,8 @@ from app.domain.models import MODEL_NOT_USED, ModelExecutionProfile, PromptConfi
 from app.pipeline.definition import PipelineDefinition
 from app.evaluation.scoring import EvaluationMetrics, FieldOutcome, aggregate
 from app.services import db
+from app.services.billing import UsageStore, SCHEMA as USAGE_SCHEMA
+from app.domain.billing import CostSummary
 
 
 SCHEMA = """
@@ -135,6 +137,7 @@ class EvaluationSummary:
     custom_extractor_pages: int | None
     usage_complete: bool
     metrics: EvaluationMetrics
+    cost: CostSummary | None = None
     extraction_engine: dict[str, Any] | None = None
     # Null on a run recorded before the fingerprint existed. An empty string
     # is not used: absence and a computed hash must stay distinguishable.
@@ -198,6 +201,7 @@ class EvaluationStore:
         db.prepare(self.path)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            db.execute_script(connection, USAGE_SCHEMA)
             self._add_missing_columns(connection)
 
     @staticmethod
@@ -699,7 +703,9 @@ class EvaluationStore:
             )
             for item in items
         ]
+        usage = UsageStore.read(connection, evaluation_id=row["id"])
         return EvaluationSummary(
+            cost=usage.cost if usage.records else None,
             id=row["id"],
             created_at=row["created_at"],
             finished_at=row["finished_at"],

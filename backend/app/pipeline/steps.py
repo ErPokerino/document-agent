@@ -42,6 +42,11 @@ MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024
 
 def build_extraction_client(context: PipelineContext) -> ExtractionProvider:
     """The pipeline is provider-agnostic; only this decides who does the work."""
+    if context.provider == "model_garden":
+        from app.services.model_garden import ModelGardenClient
+        from app.services.billing import MeteredProvider
+        client = ModelGardenClient(context.model_garden_settings, context.model_garden_project, context.model_garden_location)
+        return MeteredProvider(client, context)
     if context.provider == "gemini":
         return GeminiClient(context.gemini_api_key, context.gemini_thinking_level)
     if context.provider == "model_server":
@@ -258,8 +263,13 @@ class ExtractEntities:
             processed_pages=processed_pages,
             document_text=document_text,
         )
-        context.artifacts["inference_stats"] = getattr(client, "last_prediction_stats", None) or {}
-        if context.provider == "gemini" and any(
+        stats = getattr(client, "last_prediction_stats", None) or {}
+        previous = context.artifacts.get("inference_stats") or {}
+        context.artifacts["inference_stats"] = {**stats, **{
+            key: previous.get(key, 0) + stats[key]
+            for key in ("prompt_tokens", "completion_tokens") if key in stats
+        }}
+        if context.provider in ("gemini", "model_garden") and any(
             context.artifacts["inference_stats"].get(key) is None
             for key in ("prompt_tokens", "completion_tokens")
         ):
@@ -718,7 +728,7 @@ class ApplySupplierRules:
         # for the extraction whose counters are already in the context.
         previous = dict(context.artifacts.get("inference_stats") or {})
         extra = getattr(client, "last_prediction_stats", None) or {}
-        if context.provider == "gemini" and any(extra.get(key) is None for key in ("prompt_tokens", "completion_tokens")):
+        if context.provider in ("gemini", "model_garden") and any(extra.get(key) is None for key in ("prompt_tokens", "completion_tokens")):
             context.artifacts["usage_complete"] = False
         for key in ("prompt_tokens", "completion_tokens"):
             if key in extra:

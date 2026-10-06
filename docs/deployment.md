@@ -233,3 +233,27 @@ to cut, not a rewrite.
    frontend calling an API elsewhere still needs its own build.
 
 The order to tackle them is in the [roadmap](../ROADMAP.md#cloud-deployment).
+
+## Model Garden partner configuration
+
+`DOCUFLOW_MODEL_GARDEN_PROJECT` selects the billing project; when omitted it
+uses `DOCUFLOW_GEMINI_VERTEX_PROJECT`. API and worker must use the same project
+and database. The runtime service account needs `aiplatform.endpoints.predict`
+(included in `roles/aiplatform.user`), enabled `aiplatform.googleapis.com`, active
+billing, publisher access/terms and a nonzero model quota. Enabling APIs alone
+does not allocate Claude quota. The procurement API may be needed to activate
+publisher models, but is not an additional credential for inference.
+
+Grok quota reservations use `DOCUFLOW_GROK_RPM`, `DOCUFLOW_GROK_INPUT_TPM`,
+`DOCUFLOW_GROK_OUTPUT_TPM`; defaults 10 / 1,135,000 / 10,500 match the inspected
+Global quota of this deployment on 2026-10-06. Inspect and configure the actual
+quotas when deploying elsewhere or changing Grok location. Requests wait when
+recent input usage, output reservations or request counts exhaust those limits.
+Input usage is observed after a response, so the provider remains authoritative
+for a request that exceeds available input quota; 429/503 retries are bounded.
+
+An explicit synthetic check can run with `python -m app.services.model_garden_smoke`
+in the backend image as the runtime identity. It prints only statuses, usage
+and calculated charges, and modifies no datasets or settings. It makes one
+small billable request per model that is accessible. The observed initial
+result: Grok Global works; Sonnet and Opus EU/Global return quota 429.

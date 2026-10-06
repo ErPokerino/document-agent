@@ -6,6 +6,7 @@ file. Code may import from those modules or from here; both stay valid, and
 `lib/types.ts` is generated from the API schema, not from where a class sits.
 """
 
+from app.domain.billing import *  # noqa: F401,F403
 from app.domain.datasets import *  # noqa: F401,F403
 from app.domain.evaluation import *  # noqa: F401,F403
 from app.domain.extraction import *  # noqa: F401,F403

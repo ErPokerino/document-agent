@@ -3,6 +3,8 @@
 from enum import Enum
 from typing import Annotated, Any, Literal
 
+from app.domain.billing import CostSummary
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -211,6 +213,7 @@ class FieldLocation(BaseModel):
 class ExtractionResponse(BaseModel):
     document_type: str = "invoice"
     run_id: int | None = None
+    cost: CostSummary | None = None
     filename: str
     model: str
     elapsed_ms: int
@@ -223,7 +226,7 @@ class PromptPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompts: PromptConfiguration
-    provider: Literal["lm_studio", "gemini", "model_server"] = "lm_studio"
+    provider: Literal["lm_studio", "gemini", "model_server", "model_garden"] = "lm_studio"
 
 
 class PromptPreview(BaseModel):

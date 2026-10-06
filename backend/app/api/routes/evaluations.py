@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from fastapi import HTTPException, Query, Response, APIRouter
 
 from app.api import deps
+from app.domain.billing import UsageDetail
 from app.domain.models import (
     ClassificationResult,
     ClassScoreResult,
@@ -32,6 +33,14 @@ from app.services.document_ai import DocumentAiClient
 from app.services.spreadsheet import content_disposition
 
 router = APIRouter()
+
+
+@router.get("/api/evaluations/{evaluation_id}/usage", response_model=UsageDetail)
+async def get_evaluation_usage(evaluation_id: int):
+    from app.services.billing import UsageStore
+    if deps.evaluation_store.get_evaluation(evaluation_id) is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found.")
+    return UsageStore(deps.DATABASE_PATH).detail(evaluation_id=evaluation_id)
 
 
 @router.get("/api/evaluations", response_model=list[Evaluation])
@@ -325,7 +334,7 @@ async def run_recorded_evaluation(evaluation_id: int, cancelled: asyncio.Event, 
             execution_profile=detail.execution_profile,
             # The run finishes on the terms it started with, cached readings included.
             make_context=lambda name, content: deps.pipeline_context(
-                run_settings, name, content, reuse_readings=detail.reuse_readings
+                run_settings, name, content, reuse_readings=detail.reuse_readings, recorded_profile=detail.execution_profile
             ),
             cancelled=cancelled,
             read_document=lambda name: deps.evaluation_store.read_snapshot_document(snapshot[name]["sha256"]),

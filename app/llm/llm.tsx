@@ -1,4 +1,5 @@
 "use client";
+import { isHostedProvider } from "../../lib/model-filter";
 
 import {
   AlertCircle,
@@ -132,7 +133,7 @@ export function LanguageModels(props: Props) {
   // A deployment reaching Gemini through Vertex AI has no key to manage.
   const throughVertex = keyStatus?.access === "vertex";
 
-  const [runsFilter, setRunsFilter] = useState<RunsFilter>(draftSettings.provider === "gemini" ? "api" : "local");
+  const [runsFilter, setRunsFilter] = useState<RunsFilter>(isHostedProvider(draftSettings.provider) ? "api" : "local");
   const [visionFilter, setVisionFilter] = useState<VisionFilter>("any");
   const [sizeFilter, setSizeFilter] = useState<SizeFilter>("any");
   // Which llama.cpp build LM Studio has selected. A machine-wide setting
@@ -189,16 +190,37 @@ export function LanguageModels(props: Props) {
 
   return (
     <section className="settings-layout wide">
+      <div className="settings-card" hidden={runsFilter !== "api"}>
+        <div className="settings-card-heading"><Cloud size={18} /><div><h3>Model Garden partners</h3>
+          <p>Claude Sonnet 5.5, Claude Opus 5.5 and Grok 4.7 (Preview), billed through GCP.</p></div></div>
+        <label className="input-label" htmlFor="claude-location">Claude location</label>
+        <select id="claude-location" value={draftSettings.model_garden.claude_location} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, claude_location: event.target.value as AppSettings["model_garden"]["claude_location"] } })}>
+          <option value="eu">EU</option><option value="us">US</option><option value="global">Global</option>
+        </select>
+        <label className="input-label" htmlFor="grok-location">Grok location</label>
+        <select id="grok-location" value={draftSettings.model_garden.grok_location} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, grok_location: event.target.value as AppSettings["model_garden"]["grok_location"] } })}>
+          <option value="global">Global</option><option value="us">US</option>
+        </select>
+        <label className="input-label" htmlFor="claude-effort">Claude effort</label>
+        <select id="claude-effort" value={draftSettings.model_garden.effort} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, effort: event.target.value as AppSettings["model_garden"]["effort"] } })}>
+          {["low", "medium", "high", "xhigh", "max"].map(value => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <label className="input-label" htmlFor="partner-output">Maximum output tokens</label>
+        <input id="partner-output" type="number" min={256} max={10000} value={draftSettings.model_garden.max_output_tokens} onChange={event => setDraftSettings({ ...draftSettings, model_garden: { ...draftSettings.model_garden, max_output_tokens: Number(event.target.value) } })} />
+        <p className="field-help">Grok processes documents in Global or US. Its shared request and token quotas can delay a run. Claude adaptive thinking is included in the output charge.</p>
+        <p className="field-help">Prices follow <a href="https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing" target="_blank" rel="noreferrer">Google Model Garden pricing</a>, checked on 2026-10-06. Each attempt stores its usage and tariff, including cache and context tiers. Historical charges remain unchanged when settings change.</p>
+        <button className="primary-button" onClick={onSave} disabled={!settingsLoaded || settingsState === "saving"}>Save settings</button>
+      </div>
       <div className="settings-intro">
         <Cpu size={19} />
-        <div><h2>LLM</h2><p>Which language model answers, and where it runs: {lmStudioEnabled ? "LM Studio on this machine" : "the model server of this deployment"}, or the Gemini API.</p></div>
+        <div><h2>LLM</h2><p>Which language model answers, and where it runs: {lmStudioEnabled ? "LM Studio on this machine" : "the model server of this deployment"}, or Google Model Garden.</p></div>
       </div>
 
       <div className="resource-tabs" aria-label="Model location">
         <button aria-pressed={runsFilter === "local"} onClick={() => setRunsFilter("local")}>{lmStudioEnabled ? "Local" : "Self-hosted"} <small>{filterModels(models, { runs: "local" }).length}</small></button>
         <button aria-pressed={runsFilter === "api"} onClick={() => setRunsFilter("api")}>API <small>{filterModels(models, { runs: "api" }).length}</small></button>
       </div>
-      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {draftSettings.provider === "gemini" ? "API" : draftSettings.provider === "model_server" ? "Model server" : "Local"}. Model changes apply when saved.</p>
+      <p className="resource-selection">Selected model: <strong>{selectedDraftModel?.name || draftSettings.model || "None"}</strong> · {isHostedProvider(draftSettings.provider) ? "API" : draftSettings.provider === "model_server" ? "Model server" : "Local"}. Model changes apply when saved.</p>
 
       {settingsError && <div className="alert error-alert"><AlertCircle size={17} />{settingsError}</div>}
 
@@ -282,15 +304,15 @@ export function LanguageModels(props: Props) {
             return (
               <button key={model.id} className={`model-option ${selected ? "selected" : ""}`} onClick={() => { setDraftSettings({ ...draftSettings, model: model.id, provider: model.provider }); setModelLoadState("idle"); setModelLoadReport(null); }}>
                 <span className="radio">{selected && <span />}</span>
-                <span className={`model-option-icon ${model.provider === "gemini" ? "hosted" : "local"}`} title={model.provider === "gemini" ? "Runs on Google's servers" : model.provider === "model_server" ? "Runs on the model server of this deployment" : "Runs on this machine"}>
-                  {model.provider === "gemini" ? <Cloud size={17} /> : model.provider === "model_server" ? <Server size={17} /> : <HardDrive size={17} />}
+                <span className={`model-option-icon ${isHostedProvider(model.provider) ? "hosted" : "local"}`} title={isHostedProvider(model.provider) ? "Runs on Google's servers" : model.provider === "model_server" ? "Runs on the model server of this deployment" : "Runs on this machine"}>
+                  {isHostedProvider(model.provider) ? <Cloud size={17} /> : model.provider === "model_server" ? <Server size={17} /> : <HardDrive size={17} />}
                 </span>
                 <span className="model-option-copy"><strong>{model.name}</strong><small>{model.id}</small></span>
-                <span className={`provider-tag ${model.provider}`}>{model.provider === "gemini" ? "Google API" : model.provider === "model_server" ? "Model server" : "Local"}</span>
+                <span className={`provider-tag ${model.provider}`}>{isHostedProvider(model.provider) ? (model.provider === "model_garden" ? "Model Garden" : "Google API") : model.provider === "model_server" ? "Model server" : "Local"}</span>
                 <span className={`capability-tag ${model.vision ? "vision" : "text"}`}>
                   {model.capabilities_known === false ? <><HelpCircle size={11} /> Capabilities unknown</> : model.vision ? <><Eye size={11} /> Vision</> : <><Type size={11} /> Text only</>}
                 </span>
-                <span className="model-specs">{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.context_length && <em>{model.context_length.toLocaleString()} context</em>}{model.parallel && <em>{model.parallel} parallel</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
+                <span className="model-specs">{model.preview && <em>Preview</em>}{model.location && <em>{model.location}</em>}{model.parameters && <em>{model.parameters}</em>}{model.quantization && <em>{model.quantization}</em>}{model.size_bytes && <em>{formatBytes(model.size_bytes)} disk</em>}{model.context_length && <em>{model.context_length.toLocaleString()} context</em>}{model.parallel && <em>{model.parallel} parallel</em>}{model.runtime_state !== "not_loaded" && <em className={model.ready ? "loaded" : ""}>{modelBadgeLabels[model.runtime_state]}</em>}</span>
               </button>
             );
           })}
@@ -305,7 +327,13 @@ export function LanguageModels(props: Props) {
           </div>
         )}
 
-        {runsFilter === "local" && selectedDraftModel && selectedDraftModel.provider !== "gemini" && (
+        {runsFilter === "api" && selectedDraftModel?.provider === "model_garden" && (
+          <div className="model-loader ready hosted"><Cloud size={17} /><div className="model-loader-copy">
+            <strong>{selectedDraftModel.ready ? "Configured through Model Garden" : "A GCP project is required"}</strong>
+            <span>Uses this deployment&apos;s GCP identity. Model access and quota are checked when a request is sent.</span>
+          </div></div>
+        )}
+        {runsFilter === "local" && selectedDraftModel && !isHostedProvider(selectedDraftModel.provider) && (
           <div className={`model-loader ${selectedRuntimeState}`}>
             <span className="model-loader-icon"><Power size={17} /></span>
             <div className="model-loader-copy">

@@ -2,6 +2,8 @@
 
 from typing import Annotated, Any
 
+from app.domain.billing import CostSummary
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.extraction import PromptConfiguration, FieldExtraction
@@ -68,6 +70,7 @@ class ExtractionRun(BaseModel):
     steps: list[str] = Field(default_factory=list)
     execution_profile: ModelExecutionProfile | None = None
     has_corrections: bool
+    cost: CostSummary | None = None
 
 
 class ExtractionRunDetail(ExtractionRun):

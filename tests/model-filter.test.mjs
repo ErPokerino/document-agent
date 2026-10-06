@@ -20,6 +20,13 @@ const all = [
 
 const ids = (list) => list.map((item) => item.id);
 
+test("Model Garden partners appear with hosted models and never in local filters", () => {
+  // The new provider must not acquire load controls or local privacy claims.
+  const partner = model("grok-4.7", { provider: "model_garden", size_bytes: null });
+  assert.deepEqual(ids(filterModels([partner], { runs: "api" })), ["grok-4.7"]);
+  assert.deepEqual(filterModels([partner], { runs: "local" }), []);
+});
+
 test("no filters leaves the list as it is", () => {
   assert.deepEqual(ids(filterModels(all, {})), ["small-vision", "big-text", "hosted"]);
 });

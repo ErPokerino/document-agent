@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  UsageDetail,
   ArtifactSummary,
   Experiment,
   ExperimentRequest,
@@ -108,6 +109,8 @@ export const apiUrls = {
 };
 
 export const api = {
+  evaluationUsage: (id: number) => request<UsageDetail>(`/api/evaluations/${id}/usage`),
+  runUsage: (id: number) => request<UsageDetail>(`/api/runs/${id}/usage`),
   processors: () => request<import("./types").ProcessorRecord[]>("/api/processors"),
   saveProcessor: (entry: import("./types").DocumentProcessor) => request<import("./types").DocumentProcessor>(`/api/processors/${segment(entry.id)}`, json("PUT", entry)),
   deleteProcessor: (id: string) => request<void>(`/api/processors/${segment(id)}`, { method: "DELETE" }),

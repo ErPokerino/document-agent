@@ -94,6 +94,11 @@ def gemini_vertex() -> tuple[str, str] | None:
     return (project, location) if project and location else None
 
 
+def model_garden_project() -> str:
+    """Partners share the deployment's project and runtime identity."""
+    return _env("DOCUFLOW_MODEL_GARDEN_PROJECT") or _env("DOCUFLOW_GEMINI_VERTEX_PROJECT")
+
+
 def lm_studio_enabled() -> bool:
     return _env("DOCUFLOW_LM_STUDIO").lower() not in ("off", "false", "0", "no")
 

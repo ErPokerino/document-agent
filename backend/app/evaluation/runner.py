@@ -17,7 +17,7 @@ from app.evaluation.store import EvaluationStore
 from app.pipeline.definition import DEFAULT_PIPELINE_NAME
 from app.pipeline.engine import DocumentPipeline, PipelineContext, step_name
 from app.services.document_ai import DocumentAiError
-from app.services.gemini import GeminiError
+from app.services.errors import ProviderError
 from app.services.lm_studio import LMStudioError
 from app.services.run_store import RunStore
 
@@ -78,8 +78,10 @@ async def run_evaluation(
                 content = await asyncio.to_thread(reader, name)
                 # The steps hold no per-document state, so one compiled
                 # pipeline serves the whole run.
+                context = make_context(name, content)
+                context.evaluation_id = evaluation_id
                 result = await DocumentPipeline(steps).run(
-                    make_context(name, content),
+                    context,
                     on_step=lambda step: evaluations.set_current_step(evaluation_id, step_name(step)),
                 )
                 evaluations.set_current_step(evaluation_id, None)
@@ -89,7 +91,7 @@ async def run_evaluation(
             except asyncio.CancelledError:
                 evaluations.finish(evaluation_id, "cancelled")
                 raise
-            except (OSError, ValueError, LMStudioError, GeminiError, DocumentAiError) as exc:
+            except (OSError, ValueError, ProviderError) as exc:
                 evaluations.set_current_step(evaluation_id, None)
                 evaluations.record_document_failure(evaluation_id, name, str(exc))
                 if model_is_gone(str(exc)):
@@ -137,7 +139,7 @@ async def run_evaluation(
                 cached_pages=sum(cached.values()),
             )
             if run_store is not None:
-                await asyncio.to_thread(
+                run_id = await asyncio.to_thread(
                     run_store.record_run,
                     filename=name,
                     content=content,
@@ -153,6 +155,9 @@ async def run_evaluation(
                     steps=pipeline_steps or [],
                     execution_profile=execution_profile,
                 )
+
+                if result.usage_store is not None:
+                    result.usage_store.bind_run(result.usage_group, run_id)
 
         if cancelled is not None and cancelled.is_set():
             evaluations.finish(evaluation_id, "cancelled")

@@ -13,6 +13,7 @@ from app.domain.models import (
 )
 from app.pipeline.definition import requires_vision
 from app.services.gemini import find_model
+from app.services.model_garden import find_partner
 from app.services.lm_studio import LMStudioError, runtime_uses_gpu
 
 router = APIRouter()
@@ -124,7 +125,7 @@ async def load_model(request: ModelLoadRequest) -> ModelLoadResponse:
             return ModelLoadResponse.model_validate(result)
     if not config.lm_studio_enabled():
         raise HTTPException(status_code=400, detail="LM Studio is not part of this deployment, so there is nothing to load.")
-    if find_model(request.model) is not None:
+    if find_model(request.model) is not None or find_partner(request.model) is not None:
         raise HTTPException(
             status_code=400,
             detail="This model runs on Google's servers and does not need loading. "
